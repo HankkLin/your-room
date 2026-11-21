@@ -50,6 +50,10 @@ import { mountDesignSearch } from "./src/components/catalog/design-search.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
 import { dimensionLabel } from "./src/shopify/product-assets.js";
 import { formatShopifyMoney } from "./src/components/catalog/shopify-ui.js";
+import {
+  renderProductPreviewMarkup,
+  resolveProductDetails,
+} from "./src/components/catalog/product-preview.js";
 import { createShopifyQuotes, shopifyRequest } from "./src/shopify/shopify-client.js";
 import { getCandidateProducts } from "./src/shopify/candidate-products.js";
 import { showParsedGeometryModal } from "./floorplan-import-ui.js";
@@ -881,6 +885,98 @@ function inventoryPrice(item) {
   const quote = shopifyQuotes.get(item.shopify);
   return formatShopifyMoney(quote?.priceMinor, quote?.currency) ?? "Price unconfirmed";
 }
+
+let previewPinnedId = null;
+let previewHoverSource = null;
+
+function resolveItemProductDetails(source) {
+  return resolveProductDetails(source, {
+    catalog,
+    quotes: shopifyQuotes,
+    formatUsd: currency,
+    isLocked: Boolean(source && isObjectLocked(source)),
+  });
+}
+
+function syncProductPreviewCard() {
+  const cardEl = $("#product-preview-card");
+  if (!cardEl) return;
+  const activeItems = previewLayoutItems || state.items;
+  const pinnedItem = previewPinnedId
+    ? activeItems.find((entry) => entry.id === previewPinnedId) || null
+    : null;
+  if (previewPinnedId && !pinnedItem) {
+    previewPinnedId = null;
+  }
+  const source = previewHoverSource || pinnedItem;
+  const isPinned = Boolean(!previewHoverSource && pinnedItem);
+  if (!source || !["design", "tour"].includes(stage)) {
+    cardEl.hidden = true;
+    cardEl.replaceChildren();
+    return;
+  }
+  const details = resolveItemProductDetails(source);
+  if (!details) {
+    cardEl.hidden = true;
+    cardEl.replaceChildren();
+    return;
+  }
+  cardEl.innerHTML = renderProductPreviewMarkup(details, {
+    fallbackGlyphHtml: itemGlyph(source),
+    pinned: isPinned,
+  });
+  const img = cardEl.querySelector(".bp-preview-media img");
+  if (img) {
+    img.addEventListener(
+      "error",
+      () => {
+        const media = img.closest(".bp-preview-media");
+        if (media) {
+          media.classList.add("bp-preview-fallback");
+          media.innerHTML = itemGlyph(source);
+        }
+      },
+      { once: true },
+    );
+  }
+  cardEl.hidden = false;
+}
+
+function renderFurnitureRail(items) {
+  const railEl = $("#furniture-rail");
+  if (!railEl) return;
+  const railItems = (items || []).filter(
+    (entry) => entry.type !== "fixed" && !entry.fromHouseFixture,
+  );
+  if (!railItems.length || !["design", "tour"].includes(stage)) {
+    railEl.hidden = true;
+    railEl.replaceChildren();
+    return;
+  }
+  railEl.innerHTML = railItems
+    .slice(0, 12)
+    .map((entry) => {
+      const details = resolveItemProductDetails(entry);
+      const thumb = details?.imageUrl
+        ? `<img src="${escape(details.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+        : itemGlyph(entry);
+      return `<button type="button" class="bp-rail-thumb" data-rail-item="${escape(entry.id)}" aria-label="${escape(details?.name || itemName(entry))}" aria-pressed="${selection === entry.id}">${thumb}</button>`;
+    })
+    .join("");
+  railEl.querySelectorAll(".bp-rail-thumb img").forEach((img) => {
+    const btn = img.closest("[data-rail-item]");
+    const entry = railItems.find((it) => it.id === btn?.dataset.railItem);
+    img.addEventListener(
+      "error",
+      () => {
+        if (btn && entry) btn.innerHTML = itemGlyph(entry);
+      },
+      { once: true },
+    );
+  });
+  railEl.hidden = false;
+}
+
 function render() {
   if (activePlaybackDataset?.sourceItems && !isCurrentRun(activePlaybackDataset)) {
     cancelTwinReview("The layout or household changed. Run it again.");
@@ -920,6 +1016,7 @@ function render() {
   $("#inventory").innerHTML =
     state.items
       .map((i) => {
+        const details = resolveItemProductDetails(i);
         const roomLabel = house
           ? house.rooms.find((r) => r.id === i.roomId)?.name ||
             getRoomAtPoint(house, i.x, i.z)?.name
@@ -930,26 +1027,60 @@ function render() {
             : i.locked
               ? "Locked piece"
               : i.owned
-                ? "Already owned"
-                : i.shopify
-                  ? (i.modelUrl ? "Shopify piece" : "Approximate 3D preview")
-                  : "Suggested piece";
-        const sub = [roomLabel && escape(roomLabel), kindTag,
+                ? "Owned furniture"
+                : details?.merchant
+                  ? escape(details.merchant)
+                  : i.shopify
+                    ? (i.modelUrl ? "Shopify piece" : "Approximate 3D preview")
+                    : "Suggested piece";
+        const stockTag =
+          !i.owned && !isObjectLocked(i) && details?.hasKnownAvailability
+            ? escape(details.stockLabel)
+            : null;
+        const sub = [
+          kindTag,
+          stockTag,
+          roomLabel && escape(roomLabel),
           i.photoPreview && "Photo-derived 3D preview",
           (i.shopify || i.photoPreview) && dimensionLabel(i),
-        ].filter(Boolean).join(" · ");
-        return `<button class="item-row" data-item="${escape(i.id)}" data-locked="${Boolean(isObjectLocked(i))}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(itemName(i))}<small>${sub}</small></span><span class="price">${inventoryPrice(i)}</span></button>`;
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const mediaMarkup = details?.imageUrl
+          ? `<span class="item-card-media"><img src="${escape(details.imageUrl)}" alt="${escape(details.name)}" loading="lazy" referrerpolicy="no-referrer" /></span>`
+          : `<span class="item-card-media item-card-glyph">${itemGlyph(i)}</span>`;
+        return `<button class="item-row item-product-card" data-item="${escape(i.id)}" data-locked="${Boolean(isObjectLocked(i))}" aria-pressed="${selection === i.id}">${mediaMarkup}<span class="item-card-info"><span class="item-name">${escape(details?.name || itemName(i))}<small>${sub}</small></span><span class="price">${inventoryPrice(i)}</span></span></button>`;
       })
       .join("") ||
     '<p class="muted">Add a piece or auto-style this room to start.</p>';
+  $("#inventory")
+    .querySelectorAll(".item-card-media img")
+    .forEach((img) => {
+      const btn = img.closest("[data-item]");
+      const sourceItem = state.items.find((entry) => entry.id === btn?.dataset.item);
+      img.addEventListener(
+        "error",
+        () => {
+          const wrap = img.closest(".item-card-media");
+          if (wrap && sourceItem) {
+            wrap.classList.add("item-card-glyph");
+            wrap.innerHTML = itemGlyph(sourceItem);
+          }
+        },
+        { once: true },
+      );
+    });
   const estimate = roomEstimate(state.items);
   $("#notes").textContent =
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(estimate.total)} ${estimate.partial ? "partial estimate" : "estimated"}`;
   const household = house && resolveValidHouseholdForHouse(state, house);
   demoControls.setPersonas(household?.displayPersonas ?? state.personas ?? [], household?.usedFallbackPersonas);
   demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
+  const activeSceneItems = previewLayoutItems || state.items;
+  renderFurnitureRail(activeSceneItems);
+  syncProductPreviewCard();
   scene?.update(
-    previewLayoutItems || state.items,
+    activeSceneItems,
     selection,
     state.style,
     room,
@@ -959,6 +1090,8 @@ function render() {
 }
 function select(id) {
   selection = id;
+  previewPinnedId = id || null;
+  if (!id) previewHoverSource = null;
   render();
 }
 function move(id, x, z) {
@@ -1130,10 +1263,74 @@ function catalogDialog(swapId = null) {
 $("#inventory").onclick = (e) => {
   const btn = e.target.closest("[data-item]");
   if (btn) {
+    previewHoverSource = null;
     select(btn.dataset.item);
     $("#scene").focus({ preventScroll: true });
   }
 };
+$("#inventory").addEventListener("mouseover", (e) => {
+  const btn = e.target.closest("[data-item]");
+  if (!btn) return;
+  const item = (previewLayoutItems || state.items).find(
+    (entry) => entry.id === btn.dataset.item,
+  );
+  if (item && previewHoverSource !== item) {
+    previewHoverSource = item;
+    syncProductPreviewCard();
+  }
+});
+$("#inventory").addEventListener("mouseleave", () => {
+  if (previewHoverSource) {
+    previewHoverSource = null;
+    syncProductPreviewCard();
+  }
+});
+$("#furniture-rail")?.addEventListener("mouseover", (e) => {
+  const btn = e.target.closest("[data-rail-item]");
+  if (!btn) return;
+  const item = (previewLayoutItems || state.items).find(
+    (entry) => entry.id === btn.dataset.railItem,
+  );
+  if (item && previewHoverSource !== item) {
+    previewHoverSource = item;
+    syncProductPreviewCard();
+  }
+});
+$("#furniture-rail")?.addEventListener("mouseleave", () => {
+  if (previewHoverSource) {
+    previewHoverSource = null;
+    syncProductPreviewCard();
+  }
+});
+$("#furniture-rail")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-rail-item]");
+  if (btn) {
+    previewHoverSource = null;
+    select(btn.dataset.railItem);
+    $("#scene").focus({ preventScroll: true });
+  }
+});
+$("#design-discovery")?.addEventListener("mouseover", (e) => {
+  const card = e.target.closest(".shopify-picker-card");
+  const candidate = card?.__candidateProduct;
+  if (candidate && previewHoverSource !== candidate) {
+    previewHoverSource = candidate;
+    syncProductPreviewCard();
+  }
+});
+$("#design-discovery")?.addEventListener("mouseleave", () => {
+  if (previewHoverSource) {
+    previewHoverSource = null;
+    syncProductPreviewCard();
+  }
+});
+$("#product-preview-card")?.addEventListener("click", (e) => {
+  if (e.target.closest("[data-close-preview]")) {
+    previewPinnedId = null;
+    previewHoverSource = null;
+    syncProductPreviewCard();
+  }
+});
 $("#compare-photo").onclick = () =>
   modal(
     "Room reference",
@@ -1351,16 +1548,14 @@ function enterEditor() {
 }
 function updateWalkControls() {
   const walking = stage === "tour" && view === "interior";
-  const house = activeHouse();
   $("#tour-map").hidden = !walking;
-  $(".walk-pad").hidden = !walking;
-  $("#walk-help").textContent = walking
-    ? house
-      ? "Drag the background to look around. Click a room pin or walk between rooms with W, A, S, D."
-      : "Drag the background to look around. Jump between viewpoints or walk with W, A, S, D when the room is focused."
-    : house
-      ? "Orbit around the whole home, or switch to Interior above to walk between rooms with W, A, S, D."
-      : "Select furniture in the room to move, rotate, replace, or save it.";
+  const walkPad = $(".walk-pad");
+  if (walkPad) walkPad.hidden = true;
+  const walkHelp = $("#walk-help");
+  if (walkHelp) {
+    walkHelp.hidden = true;
+    walkHelp.textContent = "";
+  }
 }
 function defaultBpStepForStage(nextStage) {
   switch (nextStage) {
@@ -1425,6 +1620,11 @@ function markStage(next, bpStep = null) {
   const overlayLegend = $("#studio-overlay-legend");
   if (overlayLegend) overlayLegend.hidden = !Boolean(activeHouse());
   demoControls.setVisible(Boolean(activeHouse()) && ["design", "tour"].includes(next));
+  if (!["design", "tour"].includes(next)) {
+    previewHoverSource = null;
+  }
+  renderFurnitureRail(previewLayoutItems || state.items);
+  syncProductPreviewCard();
   updateWalkControls();
 }
 function toggleExpanded(expanded) {

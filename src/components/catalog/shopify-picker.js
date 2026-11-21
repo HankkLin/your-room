@@ -13,6 +13,7 @@ function readCandidates(value) {
 export function createResult(product, label, onSelect) {
   const card = document.createElement("li");
   card.className = "shopify-picker-card";
+  card.__candidateProduct = product;
   const heading = document.createElement("div");
   heading.className = "shopify-picker-card-heading";
   const imageUrl = shopifyHttpsUrl(product.imageUrl);
