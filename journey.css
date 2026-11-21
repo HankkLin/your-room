@@ -199,6 +199,26 @@ body[data-stage="tour"] .viewport {
   flex-wrap: wrap;
   margin-top: 12px;
 }
+.shop-checkout {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.shop-checkout-totals {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  width: 100%;
+  gap: 4px 8px;
+  margin: 0;
+  font-size: 13px;
+}
+.shop-checkout-totals dd {
+  margin: 0;
+  text-align: right;
+}
 .shop-foot {
   border-top: 1px solid var(--line);
   padding: 15px 0;

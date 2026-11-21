@@ -373,6 +373,17 @@ export function createItem(
   };
 }
 
+export const furniturePreviewKinds = Object.keys(ownedDefaults);
+
+export function createShopifyPreview(kind, ref, placement) {
+  if (!Object.hasOwn(ownedDefaults, kind)) return null;
+  const item = createItem(
+    { ...ownedDefaults[kind], kind, name: `Shopify ${kind}` },
+    placement,
+  );
+  return { ...item, price: null, shopify: ref, dimensionsSource: "estimated" };
+}
+
 function halfExtents(item) {
   const radians = ((item.rotation ?? 0) * Math.PI) / 180;
   const cosine = Math.abs(Math.cos(radians));

@@ -1,0 +1,82 @@
+.shopify-picker-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin: 14px 0 9px;
+}
+
+.shopify-picker-form .field { margin: 0; }
+
+.shopify-picker-kind { grid-column: 1 / -1; }
+
+.shopify-picker-status:not(:empty) { margin-top: 10px; }
+
+.shopify-picker-status[data-error="true"] { color: var(--clay-dark); }
+
+.shopify-picker-results {
+  display: grid;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shopify-picker-card {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.shopify-picker-card > img {
+  flex-shrink: 0;
+  width: 65px;
+  height: 65px;
+  border-radius: 7px;
+  object-fit: contain;
+  background: var(--paper);
+}
+
+.shopify-picker-card-body {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.shopify-picker-card h3 { font-size: 13px; }
+
+.shopify-picker-offer { font-size: 12px; font-weight: 600; }
+
+.shopify-picker-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.shopify-picker-actions button { min-height: 32px; }
+
+.shopify-warnings {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 8px 12px 8px 28px;
+  border-radius: 7px;
+  background: var(--clay-wash);
+  color: var(--clay-dark);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.shopify-warnings img {
+  display: block;
+  max-width: 100%;
+  max-height: 120px;
+  margin-top: 4px;
+  object-fit: contain;
+}

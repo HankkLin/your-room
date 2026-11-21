@@ -1,0 +1,381 @@
+import { randomUUID } from "node:crypto";
+
+const endpoint = "https://mcp.shop.com/";
+const protocolVersion = "2026-07-28";
+const apiPrefix = "/api/shopify/";
+const context = { address_country: "US", currency: "USD" };
+const maxQueryLength = 200;
+const maxRequestBytes = 32 * 1024;
+const maxLookupRefs = 50;
+const searchLimit = 8;
+const variantPattern = /^gid:\/\/shopify\/ProductVariant\/[A-Za-z0-9_-]{1,128}$/;
+const domainPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+const totalLabels = {
+  subtotal: "Subtotal",
+  items_discount: "Item discounts",
+  discount: "Discount",
+  fulfillment: "Shipping",
+  tax: "Tax",
+  fee: "Fee",
+  total: "Total",
+};
+
+class ShopifyApiError extends Error {
+  constructor(status, message, details = {}) {
+    super(message);
+    this.status = status;
+    this.details = details;
+  }
+}
+
+function textValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function httpsUrl(value) {
+  if (typeof value !== "string" || !/^https:\/\//i.test(value) || /[\s\\]/.test(value)) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname && !parsed.username && !parsed.password ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function validCurrency(value) {
+  return typeof value === "string" && /^[A-Z]{3}$/.test(value) ? value : null;
+}
+
+function isVariantId(value) {
+  return typeof value === "string" && variantPattern.test(value);
+}
+
+function isSellerDomain(value) {
+  return typeof value === "string" && value.length <= 253 && domainPattern.test(value);
+}
+
+function readRef(value) {
+  if (!isVariantId(value?.variantId) || !isSellerDomain(value?.sellerDomain)) {
+    throw new ShopifyApiError(400, "Choose a Shopify variant and merchant from the catalog.");
+  }
+  return { variantId: value.variantId, sellerDomain: value.sellerDomain };
+}
+
+function refKey({ variantId, sellerDomain }) {
+  return `${variantId}|${sellerDomain.toLowerCase()}`;
+}
+
+function list(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function linksFrom(value) {
+  return list(value).flatMap((link) => {
+    const url = httpsUrl(link?.url);
+    const label = textValue(link?.title) ?? textValue(link?.label) ?? textValue(link?.type) ?? "More information";
+    return url ? [{ label, url }] : [];
+  });
+}
+
+function warningsFrom(document, types = ["warning"]) {
+  return list(document?.messages).flatMap((message) => {
+    const text = textValue(message?.content);
+    if (!types.includes(message?.type) || !text) return [];
+    const links = linksFrom(message.links);
+    const referenceUrl = httpsUrl(message.url);
+    if (referenceUrl && !links.some(({ url }) => url === referenceUrl)) {
+      links.push({ label: textValue(message.title) ?? "More information", url: referenceUrl });
+    }
+    const imageUrl = httpsUrl(message.image_url);
+    const path = textValue(message.path);
+    return [{
+      text,
+      ...(links.length ? { links } : {}),
+      ...(imageUrl ? { imageUrl } : {}),
+      ...(path ? { path } : {}),
+    }];
+  });
+}
+
+function productImage(media) {
+  return list(media)
+    .map((item) => httpsUrl(item?.type === "image" ? item.url : item?.preview?.url))
+    .find(Boolean) ?? null;
+}
+
+function normalizeProduct(product, variant) {
+  const variantId = variant?.id;
+  const sellerDomain = variant?.seller?.domain;
+  const title = textValue(product?.title) ?? textValue(variant?.title);
+  if (!isVariantId(variantId) || !isSellerDomain(sellerDomain) || !title) return null;
+
+  const options = list(variant.options).map((option) => textValue(option?.label)).filter(Boolean).join(" / ");
+  const variantTitle = textValue(variant.title);
+  const currency = validCurrency(variant.price?.currency);
+  const amount = variant.price?.amount;
+  return {
+    variantId,
+    sellerDomain,
+    title,
+    variantTitle: options || (variantTitle && variantTitle !== title ? variantTitle : null),
+    merchant: textValue(variant.seller.name),
+    priceMinor: currency && Number.isSafeInteger(amount) && amount >= 0 ? amount : null,
+    currency,
+    available: typeof variant.availability?.available === "boolean" ? variant.availability.available : null,
+    imageUrl: productImage(variant.media) ?? productImage(product.media),
+    productUrl: httpsUrl(variant.url),
+  };
+}
+
+function retrySeconds(value) {
+  const seconds = Number(value);
+  return Number.isInteger(seconds) && seconds > 0 && seconds <= 3600 ? seconds : null;
+}
+
+function rateLimited(value) {
+  const retryAfter = retrySeconds(value);
+  return new ShopifyApiError(429, "Shopify is receiving too many requests. Try again shortly.",
+    retryAfter ? { retryAfter } : {});
+}
+
+function catalogFailure() {
+  return new ShopifyApiError(502, "Shopify could not load current product details. Try again.");
+}
+
+function checkoutFailure() {
+  return new ShopifyApiError(502, "Shopify could not confirm a checkout link. Visit the merchant to continue.", {
+    uncertain: true,
+  });
+}
+
+async function callShopTool(fetchImpl, name, args, signal) {
+  const creatingCheckout = name === "create_checkout";
+  const failure = creatingCheckout ? checkoutFailure : catalogFailure;
+  try {
+    signal.throwIfAborted();
+    const response = await fetchImpl(endpoint, {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "MCP-Protocol-Version": protocolVersion,
+        "Mcp-Method": "tools/call",
+        "Mcp-Name": name,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name,
+          arguments: args,
+          _meta: {
+            "io.modelcontextprotocol/protocolVersion": protocolVersion,
+            "io.modelcontextprotocol/clientInfo": { name: "stillroom-studio", version: "0.1.0" },
+            "io.modelcontextprotocol/clientCapabilities": {},
+          },
+        },
+      }),
+      signal,
+    });
+    if (response.status === 429) throw rateLimited(response.headers.get("Retry-After"));
+    if (!response.ok) throw failure();
+    const { jsonrpc, id, result, error } = await response.json();
+    signal.throwIfAborted();
+    if (jsonrpc !== "2.0" || id !== 1 || error || !result) throw failure();
+
+    const document = result.structuredContent;
+    if (result.isError || document?.ucp?.status === "error") {
+      const info = result._meta?.["com.shopify/error"];
+      const codes = list(document?.messages).filter((message) => message?.type === "error")
+        .map((message) => message.code);
+      if (info?.code === "rate_limited" || codes.includes("rate_limited")) throw rateLimited(info?.retry_after);
+      if (name === "get_product" && codes.includes("not_found")) {
+        throw new ShopifyApiError(404, "Shopify could not find the selected variant.", { warnings: warningsFrom(document) });
+      }
+      if (creatingCheckout && codes.includes("out_of_stock")) {
+        throw new ShopifyApiError(409, "This variant is no longer available from the merchant.", { warnings: warningsFrom(document) });
+      }
+      if (creatingCheckout && ["discovery_failed", "upstream_rejected", "upstream_input_required"].includes(info?.code)) {
+        throw new ShopifyApiError(502, "This merchant could not create a checkout through Shopify. Visit the merchant to continue.", {
+          warnings: warningsFrom(document),
+        });
+      }
+      throw failure();
+    }
+    if (!document || Array.isArray(document) || typeof document !== "object") throw failure();
+    return document;
+  } catch (error) {
+    if (signal.aborted) {
+      const message = creatingCheckout
+        ? "Shopify did not confirm the checkout link in time. Visit the merchant to continue."
+        : "Shopify took too long to respond. Try again.";
+      throw new ShopifyApiError(504, message, creatingCheckout ? { uncertain: true } : {});
+    }
+    if (error instanceof ShopifyApiError) throw error;
+    throw failure();
+  }
+}
+
+function productsFrom(document) {
+  if (!Array.isArray(document.products)) throw catalogFailure();
+  return document.products;
+}
+
+async function searchProducts(call, { query: rawQuery }) {
+  const query = textValue(rawQuery);
+  if (!query || query.length > maxQueryLength) {
+    throw new ShopifyApiError(400, `Enter a product search of 1 to ${maxQueryLength} characters.`);
+  }
+  const document = await call("search_catalog", {
+    catalog: { query, context, pagination: { limit: searchLimit } },
+  });
+  const uniqueProducts = new Map();
+  for (const item of productsFrom(document)) {
+    const product = normalizeProduct(item, item?.variants?.[0]);
+    if (product && !uniqueProducts.has(refKey(product))) uniqueProducts.set(refKey(product), product);
+  }
+  return { products: [...uniqueProducts.values()], warnings: warningsFrom(document) };
+}
+
+async function findVariant(call, ref) {
+  const document = await call("get_product", {
+    catalog: { id: ref.variantId, context, filters: { available: false } },
+  });
+  const { product } = document;
+  if (!Array.isArray(product?.variants)) throw catalogFailure();
+
+  const key = refKey(ref);
+  const warnings = warningsFrom(document);
+  for (const variant of product.variants) {
+    const candidate = normalizeProduct(product, variant);
+    if (candidate && refKey(candidate) === key) return { product: candidate, warnings };
+  }
+  throw new ShopifyApiError(404, "Shopify could not find this exact variant from the selected merchant.", { warnings });
+}
+
+async function lookupProducts(call, { refs: rawRefs }) {
+  if (!Array.isArray(rawRefs) || !rawRefs.length || rawRefs.length > maxLookupRefs) {
+    throw new ShopifyApiError(400, `Choose between 1 and ${maxLookupRefs} Shopify variants to refresh.`);
+  }
+  const refs = rawRefs.map(readRef);
+  const requested = new Set(refs.map(refKey));
+  const ids = [...new Set(refs.map(({ variantId }) => variantId))];
+  const document = await call("lookup_catalog", {
+    catalog: { ids, context, filters: { available: false } },
+  });
+  const matches = new Map();
+  for (const product of productsFrom(document)) {
+    for (const variant of list(product?.variants)) {
+      const candidate = normalizeProduct(product, variant);
+      const exact = list(variant?.inputs).some((input) => input?.id === candidate?.variantId && input?.match === "exact");
+      if (!candidate || !exact) continue;
+      const key = refKey(candidate);
+      if (requested.has(key)) matches.set(key, candidate);
+    }
+  }
+  const products = [...requested].map((key) => matches.get(key)).filter(Boolean);
+  return { products, warnings: warningsFrom(document) };
+}
+
+async function startCheckout(call, ref) {
+  const { product, warnings } = await findVariant(call, ref);
+  if (product.available !== true) {
+    throw new ShopifyApiError(409, "Shopify could not confirm that this variant is in stock.", { warnings });
+  }
+  const document = await call("create_checkout", {
+    shop: product.sellerDomain,
+    checkout: {
+      line_items: [{ item: { id: product.variantId }, quantity: 1 }],
+      context: { address_country: context.address_country },
+    },
+    meta: { "idempotency-key": randomUUID() },
+  });
+  const continueUrl = httpsUrl(document.continue_url);
+  const currency = validCurrency(document.currency);
+  const line = Array.isArray(document.line_items) && document.line_items.length === 1 ? document.line_items[0] : null;
+  if (!continueUrl || !currency || line?.item?.id !== product.variantId || line.quantity !== 1 ||
+      !["incomplete", "requires_escalation", "ready_for_complete"].includes(document.status) ||
+      !Array.isArray(document.totals)) {
+    throw checkoutFailure();
+  }
+  const totals = document.totals.map((total) => {
+    const label = textValue(total?.display_text) ?? (Object.hasOwn(totalLabels, total?.type) ? totalLabels[total.type] : null);
+    if (!label || !Number.isSafeInteger(total.amount)) throw checkoutFailure();
+    return { label, amountMinor: total.amount };
+  });
+  return {
+    continueUrl,
+    currency,
+    totals,
+    links: linksFrom(document.links),
+    warnings: [...warnings, ...warningsFrom(document, ["warning", "error", "info"])],
+  };
+}
+
+async function readBody(request) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of request.iterator({ destroyOnReturn: false })) {
+    bytes += chunk.length;
+    if (bytes > maxRequestBytes) {
+      request.resume();
+      throw new ShopifyApiError(413, "The Shopify request is too large.");
+    }
+    chunks.push(chunk);
+  }
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (body && typeof body === "object" && !Array.isArray(body)) return body;
+  } catch {
+    // The response below covers invalid JSON and invalid request shapes.
+  }
+  throw new ShopifyApiError(400, "Send a valid Shopify request.");
+}
+
+function respond(response, status, body) {
+  response.statusCode = status;
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
+  response.setHeader("Cache-Control", "no-store");
+  response.end(JSON.stringify(body));
+}
+
+export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_000 } = {}) {
+  const routes = new Map([
+    [`${apiPrefix}search`, searchProducts],
+    [`${apiPrefix}variant`, (call, { ref }) => findVariant(call, readRef(ref))],
+    [`${apiPrefix}lookup`, lookupProducts],
+    [`${apiPrefix}checkout`, (call, { ref }) => startCheckout(call, readRef(ref))],
+  ]);
+
+  return async (request, response, next) => {
+    const route = routes.get(request.url?.split("?", 1)[0]);
+    if (!route) return next();
+    if (request.method !== "POST") {
+      response.setHeader("Allow", "POST");
+      return respond(response, 405, { error: "Send a POST request to the Shopify catalog." });
+    }
+    const origin = `${request.socket.encrypted ? "https" : "http"}://${request.headers.host}`;
+    if (request.headers.origin && request.headers.origin !== origin) {
+      return respond(response, 403, { error: "Open Stillroom directly to use the Shopify catalog." });
+    }
+    if (!/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] || "")) {
+      return respond(response, 415, { error: "Send the Shopify request as JSON." });
+    }
+
+    try {
+      const body = await readBody(request);
+      const signal = AbortSignal.timeout(timeoutMs);
+      const call = (name, args) => callShopTool(fetchImpl, name, args, signal);
+      const result = await route(call, body);
+      respond(response, 200, result);
+    } catch (error) {
+      if (error instanceof ShopifyApiError) {
+        if (error.details.retryAfter) response.setHeader("Retry-After", String(error.details.retryAfter));
+        return respond(response, error.status, { error: error.message, ...error.details });
+      }
+      respond(response, 500, { error: "The Shopify service could not complete the request." });
+    }
+  };
+}
