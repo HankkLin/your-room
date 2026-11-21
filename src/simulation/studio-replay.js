@@ -36,13 +36,17 @@ export function captureStudioLayout(house, items) {
 }
 
 export async function runStudioReplay({ beforeScene, afterScene, personas, rooms }) {
-  const { simulateHouse } = await import('./simulation-engine.js');
   return compareHouseholdLayouts({
     beforeScene,
     afterScene,
     personas,
     rooms,
-    // The Studio reports findings and metrics without displaying every timeline frame.
-    simulate: (house, household) => simulateHouse(house, household, { timelineSampleSeconds: 60 }),
+    simulate: simulateStudioLayout,
   });
+}
+
+export async function simulateStudioLayout(scene, resolvedHousehold) {
+  const { simulateHouse } = await import('./simulation-engine.js');
+  // Keep the approved schedule available for replays after the layout changes.
+  return simulateHouse(scene, structuredClone(resolvedHousehold), { timelineSampleSeconds: 60 });
 }

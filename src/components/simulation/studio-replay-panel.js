@@ -1,5 +1,9 @@
+import {
+  buildReplaySuggestionInput, previewReplaySuggestion, requestReplaySuggestion,
+} from "../../agents/replay-suggestion.js";
+import { prepareHouseholdReplay } from "../../contracts/persona.js";
 import { FINDING_TYPES } from "../../contracts/simulation.js";
-import { captureStudioLayout, runStudioReplay } from "../../simulation/studio-replay.js";
+import { captureStudioLayout, simulateStudioLayout } from "../../simulation/studio-replay.js";
 
 const replayMeasures = [
   ["pathFailures", "Path failures"],
@@ -7,9 +11,10 @@ const replayMeasures = [
   ["congestionEvents", "Congestion events"],
 ];
 
-function householdSignature({ house, personas, rooms }) {
-  const roomIds = rooms.map(({ id }) => id).sort();
-  return JSON.stringify([house.houseId ?? house.id, roomIds, personas]);
+function replaySignature({ house, personas, rooms }) {
+  if (!house) return null;
+  const { houseId, id, walls, doors, windows, fixtures, ceilingHeight } = house;
+  return JSON.stringify([houseId ?? id, house.rooms, walls, doors, windows, fixtures, ceilingHeight, rooms, personas]);
 }
 
 function comparisonMessage(before, after) {
@@ -22,152 +27,273 @@ function comparisonMessage(before, after) {
   return "No change in path failures, collisions, or congestion events.";
 }
 
-function blockedRoute(run, layout, roomNames) {
-  const finding = run.findings.find(({ type }) => type === FINDING_TYPES.NO_PATH);
+const firstBlocked = (run) => run.findings.find(({ type }) => type === FINDING_TYPES.NO_PATH);
+const clockTime = (seconds) => {
+  const minute = Math.floor(seconds / 60);
+  return String(Math.floor(minute / 60)).padStart(2, "0") + ":" + String(minute % 60).padStart(2, "0");
+};
+
+function blockedRoute(finding, layout, roomNames) {
   if (!finding) return null;
   const start = roomNames.get(finding.fromRoomId) ?? finding.fromRoomId;
   const end = roomNames.get(finding.toRoomId) ?? finding.toRoomId;
-  if (!start || !end) return `${layout} replay recorded a blocked route.`;
-  return `${layout} route blocked from ${start} to ${end}.`;
+  const route = start && end
+    ? layout + " route blocked from " + start + " to " + end + "."
+    : layout + " replay recorded a blocked route.";
+  return route + " Trip time " + clockTime(finding.evidence.timestampSeconds) + ".";
 }
 
-export function createStudioReplayPanel(container, { getContext }) {
+function completedTrip(run, finding) {
+  return run.routes.some((route) =>
+    route.agentId === finding.agentId && route.activity === finding.activity &&
+    route.fromRoomId === finding.fromRoomId && route.toRoomId === finding.toRoomId &&
+    route.startTimestamp === finding.evidence.timestampSeconds && Number.isFinite(route.endTimestamp));
+}
+
+function describePosition(item, roomNames) {
+  const room = roomNames.get(item.roomId) ?? item.roomId ?? "Room";
+  return room + " (" + item.position.map((value) => Number(value.toFixed(2))).join(", ") + " m)";
+}
+
+export function createStudioReplayPanel(container, { getContext, commitItems }) {
   const capture = container.querySelector("#studio-replay-capture");
   const compare = container.querySelector("#studio-replay-compare");
   const resetButton = container.querySelector("#studio-replay-reset");
   const emptyHousehold = container.querySelector("#studio-replay-empty-household");
   const status = container.querySelector("#studio-replay-status");
   const summary = container.querySelector("#studio-replay-summary");
+  const afterHeading = container.querySelector("#studio-replay-results thead th:last-child");
   const metricsTable = container.querySelector("#studio-replay-results tbody");
   const findings = container.querySelector("#studio-replay-findings");
+  const suggest = container.querySelector("#studio-replay-suggest");
+  const review = container.querySelector("#studio-replay-proposal");
+  const explanation = container.querySelector("#studio-replay-explanation");
+  const proposedMove = container.querySelector("#studio-replay-move");
+  const approve = container.querySelector("#studio-replay-approve");
+  const dismiss = container.querySelector("#studio-replay-dismiss");
+
   let baseline = null;
   let activeRun = null;
-  let comparedItems = null;
+  let comparison = null;
+  let pending = null;
+  let proposal = null;
 
   function announce(message = "", isError = false) {
     status.textContent = message;
     status.toggleAttribute("data-error", isError);
   }
 
-  function clearComparison() {
-    comparedItems = null;
-    summary.hidden = true;
+  function clearSuggestion() {
+    pending?.abort();
+    pending = null;
+    proposal = null;
+    review.hidden = true;
+  }
+
+  function renderResults(rooms) {
+    const before = baseline?.result;
+    const after = comparison?.result;
+    summary.hidden = !before;
+    afterHeading.hidden = !after;
     metricsTable.replaceChildren();
     findings.replaceChildren();
-  }
+    if (!before) return;
 
-  function clearBaseline(message) {
-    baseline = null;
-    activeRun = null;
-    clearComparison();
-    announce(message);
-  }
-
-  function update(context = getContext()) {
-    const { house, items, personas } = context;
-    container.hidden = !house;
-    if (!house && baseline) clearBaseline();
-    if (house && baseline && baseline.signature !== householdSignature(context)) {
-      clearBaseline("The saved household or destinations changed. Capture a new baseline.");
-    }
-    const replayItems = activeRun?.items ?? comparedItems;
-    if (replayItems && replayItems !== items) {
-      activeRun = null;
-      clearComparison();
-      announce("The layout changed. Compare again to update the results.");
-    }
-    const hasSchedule = personas.some(({ schedule }) => schedule.length > 0);
-    emptyHousehold.hidden = hasSchedule;
-    capture.disabled = !house || !hasSchedule || Boolean(activeRun);
-    compare.disabled = capture.disabled || !baseline;
-    resetButton.disabled = !baseline;
-  }
-
-  function reset() {
-    clearBaseline();
-    update();
-  }
-
-  function showComparison({ before, after }, rooms) {
-    const rows = replayMeasures.map(([key, label]) => {
+    for (const [key, label] of replayMeasures) {
       const row = document.createElement("tr");
       const name = document.createElement("th");
       name.scope = "row";
       name.textContent = label;
       row.append(name);
-      for (const run of [before, after]) {
+      for (const run of after ? [before, after] : [before]) {
         const value = document.createElement("td");
         value.textContent = String(run.summary[key]);
         row.append(value);
       }
-      return row;
-    });
-    const roomNames = new Map(rooms.map(({ id, name }) => [id, name]));
-    const beforeBlocked = blockedRoute(before, "Baseline", roomNames);
-    const afterBlocked = blockedRoute(after, "Current layout", roomNames);
-    const messages = [beforeBlocked, afterBlocked];
-    if (beforeBlocked && after.summary.pathFailures === 0) {
-      messages.push("No blocked routes were recorded in the current layout.");
+      metricsTable.append(row);
     }
-    const items = messages.filter(Boolean).map((message) => {
+
+    const roomNames = new Map(rooms.map(({ id, name }) => [id, name]));
+    const messages = [blockedRoute(baseline.finding, "Baseline", roomNames)];
+    if (after) {
+      messages.push(blockedRoute(firstBlocked(after), "Current layout", roomNames));
+      if (baseline.finding && after.summary.pathFailures === 0) {
+        messages.push("No blocked routes were recorded in the current layout.");
+      }
+      if (comparison.selectedFinding) {
+        messages.push(completedTrip(after, comparison.selectedFinding)
+          ? "The replay recorded the selected trip arriving at its destination."
+          : "The replay did not record the selected trip arriving at its destination.");
+      }
+    }
+    for (const message of messages.filter(Boolean)) {
       const item = document.createElement("li");
       item.textContent = message;
-      return item;
-    });
-    metricsTable.replaceChildren(...rows);
-    findings.replaceChildren(...items);
-    findings.hidden = !items.length;
-    summary.hidden = false;
-    announce(comparisonMessage(before, after));
+      findings.append(item);
+    }
+    findings.hidden = !findings.childElementCount;
   }
 
-  capture.addEventListener("click", () => {
+  function clearBaseline(context, message) {
+    baseline = null;
+    activeRun = null;
+    comparison = null;
+    clearSuggestion();
+    renderResults(context.rooms);
+    announce(message);
+  }
+
+  function update(context = getContext()) {
+    const { house, items, personas } = context;
+    const signature = replaySignature(context);
+    container.hidden = !house;
+    if (baseline && baseline.signature !== signature) {
+      clearBaseline(context, house ? "The saved household or floorplan changed. Capture a new baseline." : "");
+    }
+    if (activeRun && activeRun.items !== items) {
+      activeRun = null;
+      if (!baseline?.result) clearBaseline(context, "The layout changed. Capture a new baseline.");
+      else announce("The layout changed. Compare again to update the results.");
+    }
+    if (comparison && comparison.items !== items) {
+      comparison = null;
+      renderResults(context.rooms);
+      announce("The layout changed. Compare again to update the results.");
+    }
+    if ((pending || proposal) && baseline?.items !== items) {
+      clearSuggestion();
+      announce("The layout changed. Capture a new baseline to get a new suggestion.");
+    }
+
+    const hasSchedule = personas.some(({ schedule }) => schedule.length > 0);
+    emptyHousehold.hidden = hasSchedule;
+    capture.disabled = !house || !hasSchedule || Boolean(activeRun);
+    compare.disabled = capture.disabled || !baseline?.result;
+    resetButton.disabled = !baseline;
+    suggest.hidden = !baseline?.finding || baseline.items !== items;
+    suggest.disabled = Boolean(pending || proposal || activeRun);
+  }
+
+  function reset() {
+    clearBaseline(getContext());
+    update();
+  }
+
+  capture.addEventListener("click", async () => {
     const context = getContext();
     update(context);
     if (capture.disabled) return;
+    clearBaseline(context);
+    const run = { items: context.items };
+    activeRun = run;
     try {
-      baseline = {
-        scene: captureStudioLayout(context.house, context.items),
-        signature: householdSignature(context),
-      };
-      clearComparison();
-      announce("Baseline captured. Change the layout, then compare.");
+      const household = prepareHouseholdReplay(context.personas, context.rooms);
+      const scene = captureStudioLayout(context.house, context.items);
+      baseline = { items: context.items, signature: replaySignature(context), household };
+      announce("Running baseline…");
       update(context);
+      const result = await simulateStudioLayout(scene, household);
+      const latest = getContext();
+      update(latest);
+      if (activeRun !== run) return;
+      baseline.result = result;
+      baseline.finding = firstBlocked(result);
+      renderResults(latest.rooms);
+      announce("Baseline captured.");
     } catch (error) {
-      announce(error.message || "The baseline could not be captured.", true);
+      if (activeRun === run) {
+        clearBaseline(getContext());
+        announce(error.message || "The baseline could not be captured.", true);
+      }
+    } finally {
+      if (activeRun === run) activeRun = null;
+      update();
     }
   });
 
-  compare.addEventListener("click", async () => {
-    const context = getContext();
-    update(context);
-    if (compare.disabled) return;
+  async function compareCurrent(context, selectedFinding) {
     const run = { items: context.items };
     activeRun = run;
-    clearComparison();
+    comparison = null;
+    clearSuggestion();
+    renderResults(context.rooms);
     announce("Comparing layouts…");
     update(context);
     try {
-      const result = await runStudioReplay({
-        beforeScene: baseline.scene,
-        afterScene: captureStudioLayout(context.house, context.items),
-        personas: structuredClone(context.personas),
-        rooms: structuredClone(context.rooms),
-      });
-      const latestContext = getContext();
-      update(latestContext);
+      const scene = captureStudioLayout(context.house, context.items);
+      const result = await simulateStudioLayout(scene, baseline.household);
+      const latest = getContext();
+      update(latest);
       if (activeRun === run) {
-        showComparison(result, latestContext.rooms);
-        comparedItems = run.items;
+        comparison = { ...run, result, selectedFinding };
+        renderResults(latest.rooms);
+        announce(comparisonMessage(baseline.result, result));
       }
     } catch (error) {
       if (activeRun === run) announce(error.message || "The replay could not be completed.", true);
     } finally {
-      if (activeRun === run) {
-        activeRun = null;
-        update();
-      }
+      if (activeRun === run) activeRun = null;
+      update();
     }
+  }
+
+  compare.addEventListener("click", () => {
+    const context = getContext();
+    update(context);
+    if (!compare.disabled) void compareCurrent(context);
+  });
+
+  suggest.addEventListener("click", async () => {
+    const context = getContext();
+    update(context);
+    if (suggest.hidden || suggest.disabled) return;
+    const request = new AbortController();
+    pending = request;
+    announce("Asking Gemini for a move…");
+    update(context);
+    try {
+      const input = buildReplaySuggestionInput(baseline.finding, context.house, context.items);
+      const suggested = await requestReplaySuggestion(input, request.signal);
+      const latest = getContext();
+      update(latest);
+      if (pending !== request) return;
+
+      const { before, after } = previewReplaySuggestion(suggested, latest.house, latest.items);
+      const roomNames = new Map(latest.rooms.map(({ id, name }) => [id, name]));
+      explanation.textContent = suggested.explanation;
+      proposedMove.textContent = (before.name || before.kind) + " · " +
+        describePosition(before, roomNames) + " → " + describePosition(after, roomNames);
+      proposal = suggested;
+      review.hidden = false;
+      announce("Review the proposed move before approving.");
+    } catch (error) {
+      if (pending === request) announce(error.message || "Gemini could not suggest a move. Try again.", true);
+    } finally {
+      if (pending === request) pending = null;
+      update();
+    }
+  });
+
+  approve.addEventListener("click", () => {
+    const context = getContext();
+    update(context);
+    if (!proposal || activeRun) return;
+    try {
+      const { items } = previewReplaySuggestion(proposal, context.house, context.items);
+      const finding = baseline.finding;
+      clearSuggestion();
+      commitItems(items);
+      void compareCurrent(getContext(), finding);
+    } catch (error) {
+      clearSuggestion();
+      announce(error.message || "The proposed move could not be applied.", true);
+      update();
+    }
+  });
+  dismiss.addEventListener("click", () => {
+    clearSuggestion();
+    announce();
+    update();
   });
   resetButton.addEventListener("click", reset);
 
