@@ -5,6 +5,9 @@ import { prepareHouseholdReplay } from "../../contracts/persona.js";
 import { FINDING_TYPES } from "../../contracts/simulation.js";
 import { captureStudioLayout, simulateStudioLayout } from "../../simulation/studio-replay.js";
 
+import { mountEnvironmentPanel } from "../../environment/environment-panel.js";
+import { formatLocalTime } from "../../environment/environment-context.js";
+
 const replayMeasures = [
   ["pathFailures", "Path failures"],
   ["collisions", "Collisions"],
@@ -55,7 +58,8 @@ function describePosition(item, roomNames) {
   return room + " (" + item.position.map((value) => Number(value.toFixed(2))).join(", ") + " m)";
 }
 
-export function createStudioReplayPanel(container, { getContext, commitItems }) {
+export function createStudioReplayPanel(container, { getContext, commitItems, commitEnvironment }) {
+  const environment = mountEnvironmentPanel(container.querySelector("#studio-environment"), commitEnvironment);
   const capture = container.querySelector("#studio-replay-capture");
   const compare = container.querySelector("#studio-replay-compare");
   const resetButton = container.querySelector("#studio-replay-reset");
@@ -115,6 +119,10 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
 
     const roomNames = new Map(rooms.map(({ id, name }) => [id, name]));
     const messages = [blockedRoute(baseline.finding, "Baseline", roomNames)];
+    if (before.environment) {
+      const sharedTime = formatLocalTime(before.environment);
+      messages.push((after ? "Both layouts used " : "Baseline conditions used ") + before.environment.location.label + " · " + sharedTime + ".");
+    }
     if (after) {
       messages.push(blockedRoute(firstBlocked(after), "Current layout", roomNames));
       if (baseline.finding && after.summary.pathFailures === 0) {
@@ -145,6 +153,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
 
   function update(context = getContext()) {
     const { house, items, personas } = context;
+    environment.show(house?.environment?.snapshot ?? null);
     const signature = replaySignature(context);
     container.hidden = !house;
     if (baseline && baseline.signature !== signature) {
@@ -175,6 +184,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
   }
 
   function reset() {
+    environment.reset();
     clearBaseline(getContext());
     update();
   }
@@ -189,10 +199,10 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     try {
       const household = prepareHouseholdReplay(context.personas, context.rooms);
       const scene = captureStudioLayout(context.house, context.items);
-      baseline = { items: context.items, signature: replaySignature(context), household };
+      baseline = { items: context.items, signature: replaySignature(context), household, environment: scene.environment?.snapshot ?? null };
       announce("Running baseline…");
       update(context);
-      const result = await simulateStudioLayout(scene, household);
+      const result = await simulateStudioLayout(scene, household, baseline.environment);
       const latest = getContext();
       update(latest);
       if (activeRun !== run) return;
@@ -221,7 +231,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     update(context);
     try {
       const scene = captureStudioLayout(context.house, context.items);
-      const result = await simulateStudioLayout(scene, baseline.household);
+      const result = await simulateStudioLayout(scene, baseline.household, baseline.environment);
       const latest = getContext();
       update(latest);
       if (activeRun === run) {

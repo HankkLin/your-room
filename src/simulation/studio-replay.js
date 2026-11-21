@@ -1,4 +1,5 @@
 import { getObjectBoundingBox, syncHouseObjects } from '../../house-model.js';
+import { environmentInputs } from '../environment/environment-context.js';
 import { compareHouseholdLayouts } from '../persona/compare-household-layouts.js';
 
 function studioObstacle(object) {
@@ -41,12 +42,15 @@ export async function runStudioReplay({ beforeScene, afterScene, personas, rooms
     afterScene,
     personas,
     rooms,
-    simulate: simulateStudioLayout,
+    simulate: (scene, household) => simulateStudioLayout(scene, household, beforeScene?.environment?.snapshot ?? null),
   });
 }
 
-export async function simulateStudioLayout(scene, resolvedHousehold) {
+export async function simulateStudioLayout(scene, resolvedHousehold, snapshot = scene.environment?.snapshot ?? null) {
   const { simulateHouse } = await import('./simulation-engine.js');
   // Keep the approved schedule available for replays after the layout changes.
-  return simulateHouse(scene, structuredClone(resolvedHousehold), { timelineSampleSeconds: 60 });
+  const inputs = environmentInputs(snapshot);
+  const house = { ...scene, environment: { ...scene.environment, snapshot: inputs.environment } };
+  const result = simulateHouse(house, structuredClone(resolvedHousehold), { timelineSampleSeconds: 60, ...inputs });
+  return { ...result, environment: inputs.environment };
 }

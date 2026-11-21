@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv } from "vite";
+import { createEnvironmentMiddleware } from "./src/environment/environment-api.js";
 import { createPersonaApiMiddleware, createPersonaGenerator } from "./src/agents/persona-api.js";
 import { createReplaySuggestionApiMiddleware, createReplaySuggestionGenerator } from "./src/agents/replay-suggestion-api.js";
 import { createShopifyApiMiddleware } from "./src/shopify/shopify-api.js";
@@ -17,6 +18,7 @@ export default defineConfig(({ command, mode }) => {
   const floorplanMiddleware = createFloorplanApiMiddleware(env);
 
   function configure(server) {
+    server.middlewares.use(createEnvironmentMiddleware());
     server.middlewares.use(personaMiddleware);
     server.middlewares.use(replayMiddleware);
     server.middlewares.use("/api/floorplan/analyze", floorplanMiddleware);
