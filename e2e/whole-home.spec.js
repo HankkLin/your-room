@@ -137,6 +137,8 @@ test("sample floorplan imports into House JSON and renders as a connected 3D who
   );
   await page.locator("#fp-confirm-import").click();
 
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "household");
+  await page.locator("#skip-household").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   await expect(page.locator("#scene canvas")).toHaveAttribute(
     "data-engine",

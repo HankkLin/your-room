@@ -528,6 +528,49 @@
   border-top: 1px solid var(--line);
 }
 
+.twin-redesign-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.twin-redesign-status {
+  font: 650 10.5px/1 var(--sans);
+  letter-spacing: 0.04em;
+  color: #36623a;
+  background: #e7f2e5;
+  border: 1px solid #c5d7c2;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.twin-redesign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.twin-redesign-head .twin-redesign-actions {
+  margin-top: 0;
+}
+
+.twin-redesign-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 620;
+}
+
+.twin-layout-compare-box {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .twin-redesign-list {
   list-style: none;
   margin: 8px 0 0;

@@ -10,7 +10,7 @@ const needNames = ['privacy', 'quiet', 'accessibility', 'daylight', 'social'];
 const minutesPerDay = 1440;
 const limits = { people: 12, rooms: 50, schedule: 32, name: 80, list: 12, preference: 120 };
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-const validText = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
+const validText = (value, max = Infinity) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 
 export function validatePersonaRooms(rooms) {
   if (!Array.isArray(rooms) || !rooms.length || rooms.length > limits.rooms) {
@@ -18,7 +18,7 @@ export function validatePersonaRooms(rooms) {
   }
   const ids = new Set();
   for (const room of rooms) {
-    if (!isRecord(room) || !validText(room.id, limits.name) || !validText(room.name, limits.name)) {
+    if (!isRecord(room) || !validText(room.id) || !validText(room.name, limits.name)) {
       return 'Each available room needs a valid ID and name.';
     }
     if (ids.has(room.id)) return 'Available rooms must have unique IDs.';

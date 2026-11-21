@@ -36,25 +36,23 @@ import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { validatePersonas } from "./src/contracts/persona.js";
+import { FINDING_TYPES } from "./src/contracts/simulation.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
 import { showParsedGeometryModal } from "./floorplan-import-ui.js";
 import {
   clearConfirmedImportedHouse,
-  getConfirmedImportedHouse,
-  onConfirmedHouseChange,
   setConfirmedImportedHouse,
 } from "./src/spatial/floorplan-importer.js";
 import { mountDemoControls } from "./src/components/simulation/demo-controls.js";
 import { createSimulationPlaybackController } from "./src/components/simulation/playback-controller.js";
+import { getMockSimulationSnapshotAt } from "./demo-playback-mock.js";
+import { getSimulationSnapshotAt } from "./src/simulation/simulation-engine.js";
 import {
-  createMockPlaybackDataset,
-  getMockSimulationSnapshotAt,
-} from "./demo-playback-mock.js";
-
-export { getConfirmedImportedHouse };
-if (typeof window !== "undefined") {
-  window.getConfirmedImportedHouse = getConfirmedImportedHouse;
-}
+  captureStudioLayout,
+  deriveMovementOnlyScores,
+  runScenarioPlaybackDataset,
+  runStudioReplay,
+} from "./simulation-integration.js";
 
 const $ = (selector) => document.querySelector(selector);
 const escape = (value) =>
@@ -81,16 +79,6 @@ const storageKey = "stillroom.project.v1";
 const demo = initialState();
 let state = demo;
 let hasProject = false;
-let syncingConfirmedHouse = false;
-function withSyncGuard(fn) {
-  syncingConfirmedHouse = true;
-  try {
-    return fn();
-  } finally {
-    syncingConfirmedHouse = false;
-  }
-}
-
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey));
   if (
@@ -100,20 +88,28 @@ try {
     typeof saved.roomName === "string"
   ) {
     state = { ...demo, ...saved };
-    if (validatePersonas(state.personas, listPersonaRooms(state))) state.personas = [];
     hasProject = true;
     if (state.importedHouse) {
       try {
-        withSyncGuard(() => setConfirmedImportedHouse(state.importedHouse));
+        state.importedHouse = setConfirmedImportedHouse(state.importedHouse);
         state.items = mergeHouseFixturesIntoItems(state.importedHouse, state.items);
       } catch {
         state.importedHouse = null;
+        state.items = mergeHouseFixturesIntoItems(null, state.items);
       }
     }
+    if (validatePersonas(state.personas, listPersonaRooms(state))) state.personas = [];
   }
 } catch {
   /* A new local project also works with storage disabled. */
 }
+if (!state.importedHouse) clearConfirmedImportedHouse();
+
+export function getConfirmedImportedHouse() {
+  return state.importedHouse ? structuredClone(state.importedHouse) : null;
+}
+window.getConfirmedImportedHouse = getConfirmedImportedHouse;
+
 let selection = null;
 let draftStyle = state.style;
 let pickedStyle = false;
@@ -127,6 +123,100 @@ const dialog = $("#dialog");
 let simulationAdapter = null;
 let activePlaybackDataset = null;
 let previewLayoutItems = null;
+let externalTwinHooks = {};
+let layoutCompareBaseline = null;
+let layoutCompareRun = null;
+let layoutComparedItems = null;
+let layoutCompareMessage = "";
+let layoutCompareError = false;
+let layoutCompareRows = [];
+let layoutCompareBlocked = [];
+
+const REPLAY_MEASURES = [
+  ["pathFailures", "Path failures"],
+  ["collisions", "Collisions"],
+  ["congestionEvents", "Congestion events"],
+];
+
+function computeHouseholdSignature(house, personas, rooms) {
+  if (!house) return "";
+  const roomIds = rooms.map(({ id }) => id).sort();
+  return JSON.stringify([house.houseId ?? house.id, roomIds, personas]);
+}
+
+function formatBlockedRouteMessage(run, layoutLabel, roomNames) {
+  const finding = run.findings.find(({ type }) => type === FINDING_TYPES.NO_PATH);
+  if (!finding) return null;
+  const start = roomNames.get(finding.fromRoomId) ?? finding.fromRoomId;
+  const end = roomNames.get(finding.toRoomId) ?? finding.toRoomId;
+  if (!start || !end) return `${layoutLabel} replay recorded a blocked route.`;
+  return `${layoutLabel} route blocked from ${start} to ${end}.`;
+}
+
+function syncLayoutCompareState() {
+  const house = activeHouse();
+  const personas = state.personas || [];
+  const rooms = listPersonaRooms(state);
+  if ($("#studio-replay-panel")) $("#studio-replay-panel").hidden = true;
+  if (!house) {
+    layoutCompareBaseline = null;
+    layoutCompareRun = null;
+    layoutComparedItems = null;
+    layoutCompareRows = [];
+    layoutCompareBlocked = [];
+    layoutCompareMessage = "";
+    layoutCompareError = false;
+    demoControls.setLayoutCompare(null);
+    return;
+  }
+
+  const sig = computeHouseholdSignature(house, personas, rooms);
+  if (layoutCompareBaseline && layoutCompareBaseline.signature !== sig) {
+    layoutCompareBaseline = null;
+    layoutCompareRun = null;
+    layoutComparedItems = null;
+    layoutCompareRows = [];
+    layoutCompareBlocked = [];
+    layoutCompareError = false;
+    layoutCompareMessage = "The saved household or destinations changed. Capture a new baseline.";
+  }
+
+  const replayItems = layoutCompareRun?.items ?? layoutComparedItems;
+  if (replayItems && replayItems !== state.items) {
+    layoutCompareRun = null;
+    layoutComparedItems = null;
+    layoutCompareRows = [];
+    layoutCompareBlocked = [];
+    layoutCompareError = false;
+    layoutCompareMessage = "The layout changed. Compare again to update the results.";
+  }
+
+  const hasSchedule = personas.some((p) => Array.isArray(p?.schedule) && p.schedule.length > 0);
+  const canCapture = Boolean(house && hasSchedule && !layoutCompareRun);
+  demoControls.setLayoutCompare({
+    enabled: true,
+    canCapture,
+    canCompare: Boolean(canCapture && layoutCompareBaseline),
+    hasBaseline: Boolean(layoutCompareBaseline),
+    statusMessage: !hasSchedule && !layoutCompareMessage
+      ? "Save a household with at least one scheduled activity to compare layouts."
+      : layoutCompareMessage,
+    isError: layoutCompareError,
+    rows: layoutCompareRows,
+    blockedMessages: layoutCompareBlocked,
+  });
+}
+
+function resetLayoutCompare(message = "") {
+  layoutCompareBaseline = null;
+  layoutCompareRun = null;
+  layoutComparedItems = null;
+  layoutCompareRows = [];
+  layoutCompareBlocked = [];
+  layoutCompareMessage = message;
+  layoutCompareError = false;
+  syncLayoutCompareState();
+}
 
 const playbackController = createSimulationPlaybackController({
   onFrame(frame) {
@@ -147,6 +237,9 @@ const playbackController = createSimulationPlaybackController({
         selectedFindingId: null,
         hasLayoutToggle: false,
         activeLayoutView: "before",
+        canProposeRedesign: false,
+        canApplyRedesign: false,
+        redesignStatus: null,
         findings: [],
         scores: null,
         beforeScores: null,
@@ -174,6 +267,9 @@ const playbackController = createSimulationPlaybackController({
         showAllRoutes: pb.showAllRoutes,
         hasLayoutToggle: Boolean(ds.beforeItems && ds.afterItems),
         activeLayoutView: "before",
+        canProposeRedesign: Boolean(ds.canProposeRedesign),
+        canApplyRedesign: Boolean(ds.canApplyRedesign),
+        redesignStatus: ds.redesignStatus ?? null,
         findings: ds.findings || [],
         scores: ds.scores ?? ds.beforeScores ?? null,
         beforeScores: ds.beforeScores ?? null,
@@ -237,12 +333,22 @@ const demoControls = mountDemoControls({
       playbackController.play();
       return;
     }
-    const dataset = createMockPlaybackDataset(scenarioId, {
-      house: activeHouse(),
-      items: state.items,
-      personas: state.personas || [],
-    });
-    startPlaybackFromDataset(dataset);
+    try {
+      const dataset = runScenarioPlaybackDataset(scenarioId, {
+        house: activeHouse(),
+        items: state.items,
+        personas: state.personas || [],
+        rooms: listPersonaRooms(state),
+        externalHooks: externalTwinHooks,
+      });
+      startPlaybackFromDataset(dataset);
+    } catch (err) {
+      demoControls.setState({
+        status: "ERROR",
+        errorMessage: err?.message || "Simulation failed to start.",
+        isMockData: false,
+      });
+    }
   },
   onPauseSimulation() {
     if (simulationAdapter) {
@@ -304,6 +410,125 @@ const demoControls = mountDemoControls({
       activeHouse(),
     );
   },
+  onProposeRedesign() {
+    externalTwinHooks.onProposeRedesign?.({
+      house: captureStudioLayout(activeHouse(), state.items),
+      items: state.items,
+      personas: state.personas || [],
+      findings: activePlaybackDataset?.findings || [],
+      scores: activePlaybackDataset?.beforeScores || null,
+    });
+  },
+  onApplyRedesignAndReplay() {
+    externalTwinHooks.onApplyRedesignAndReplay?.({
+      house: captureStudioLayout(activeHouse(), state.items),
+      items: state.items,
+      personas: state.personas || [],
+    });
+  },
+  onCaptureBaseline() {
+    const house = activeHouse();
+    if (!house) return;
+    try {
+      const rooms = listPersonaRooms(state);
+      layoutCompareBaseline = {
+        scene: captureStudioLayout(house, state.items),
+        itemsSnapshot: state.items.map((i) => ({ ...i })),
+        signature: computeHouseholdSignature(house, state.personas || [], rooms),
+      };
+      layoutComparedItems = null;
+      layoutCompareRows = [];
+      layoutCompareBlocked = [];
+      layoutCompareError = false;
+      layoutCompareMessage = "Baseline captured. Change the layout, then compare.";
+      syncLayoutCompareState();
+    } catch (err) {
+      layoutCompareError = true;
+      layoutCompareMessage = err?.message || "The baseline could not be captured.";
+      syncLayoutCompareState();
+    }
+  },
+  async onCompareCurrentLayout() {
+    const house = activeHouse();
+    if (!house || !layoutCompareBaseline || layoutCompareRun) return;
+    const rooms = listPersonaRooms(state);
+    const run = { items: state.items };
+    layoutCompareRun = run;
+    layoutComparedItems = null;
+    layoutCompareRows = [];
+    layoutCompareBlocked = [];
+    layoutCompareError = false;
+    layoutCompareMessage = "Comparing layouts…";
+    syncLayoutCompareState();
+    try {
+      const afterScene = captureStudioLayout(house, state.items);
+      const result = await runStudioReplay({
+        beforeScene: layoutCompareBaseline.scene,
+        afterScene,
+        personas: structuredClone(state.personas || []),
+        rooms: structuredClone(rooms),
+      });
+      if (layoutCompareRun === run) {
+        layoutCompareRows = REPLAY_MEASURES.map(([key, label]) => ({
+          key,
+          label,
+          before: String(result.before.summary[key]),
+          after: String(result.after.summary[key]),
+        }));
+        const roomNames = new Map(rooms.map(({ id, name }) => [id, name]));
+        const beforeBlocked = formatBlockedRouteMessage(result.before, "Baseline", roomNames);
+        const afterBlocked = formatBlockedRouteMessage(result.after, "Current layout", roomNames);
+        const msgs = [beforeBlocked, afterBlocked];
+        if (beforeBlocked && result.after.summary.pathFailures === 0) {
+          msgs.push("No blocked routes were recorded in the current layout.");
+        }
+        layoutCompareBlocked = msgs.filter(Boolean);
+        const changes = REPLAY_MEASURES.map(
+          ([key]) => result.after.summary[key] - result.before.summary[key],
+        );
+        const improved = changes.some((c) => c < 0);
+        const worsened = changes.some((c) => c > 0);
+        layoutCompareMessage =
+          improved && worsened
+            ? "The replay measured both improvements and regressions."
+            : improved
+              ? "The current layout improved one or more replay measures."
+              : worsened
+                ? "The current layout had more issues on one or more replay measures."
+                : "No change in path failures, collisions, or congestion events.";
+        layoutComparedItems = run.items;
+
+        // Also update the unified Before/After scorecard & 3D findings with the real replay
+        const beforeScores = deriveMovementOnlyScores(result.before);
+        const afterScores = deriveMovementOnlyScores(result.after);
+        scene?.setPlaybackFindings?.(result.after.findings || [], {
+          house,
+          items: state.items,
+        });
+        demoControls.setState({
+          status: "COMPLETE",
+          findings: result.after.findings || [],
+          scores: afterScores,
+          beforeScores,
+          afterScores,
+          isMockData: false,
+        });
+      }
+    } catch (err) {
+      if (layoutCompareRun === run) {
+        layoutCompareError = true;
+        layoutCompareMessage = err?.message || "The replay could not be completed.";
+      }
+    } finally {
+      if (layoutCompareRun === run) {
+        layoutCompareRun = null;
+        syncLayoutCompareState();
+      }
+    }
+  },
+  onResetBaseline() {
+    resetLayoutCompare();
+  },
 });
 const householdPage = createHouseholdPage($("#household-page"), {
   onSave(personas) {
@@ -333,29 +558,9 @@ function persist() {
   }
 }
 const activeHouse = (s = state) => {
-  const raw =
-    s.importedHouse ||
-    (s === state ? getConfirmedImportedHouse() : null) ||
-    s.house ||
-    null;
+  const raw = s.importedHouse || s.house;
   return raw ? normalizeHouse(raw) : null;
 };
-
-onConfirmedHouseChange((confirmedHouse) => {
-  if (syncingConfirmedHouse) return;
-  const nextItems = mergeHouseFixturesIntoItems(confirmedHouse, state.items);
-  state = {
-    ...state,
-    roomName: confirmedHouse?.name || state.roomName,
-    house: null,
-    importedHouse: confirmedHouse,
-    items: nextItems,
-    spent: getSpend(nextItems),
-    hasLayout: Boolean(confirmedHouse) || state.hasLayout,
-  };
-  persist();
-  if (stage !== "setup" && stage !== "household") render();
-});
 
 function commit(next) {
   history.push(state);
@@ -416,7 +621,7 @@ function render() {
   $("#shop-count").textContent = state.savedProducts?.length || "";
   $("#undo").disabled = !history.length;
   $("#compare-photo").hidden = !state.roomPhoto;
-  $("#view-house-json").hidden = !state.importedHouse && !getConfirmedImportedHouse();
+  $("#view-house-json").hidden = !state.importedHouse;
   const item = state.items.find((i) => i.id === selection);
   const locked = item && isObjectLocked(item);
   $("#objectbar").innerHTML = item
@@ -454,6 +659,7 @@ function render() {
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(getSpend(state.items))} estimated`;
   demoControls.setPersonas(state.personas || []);
   demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
+  syncLayoutCompareState();
   scene?.update(previewLayoutItems || state.items, selection, state.style, room, house);
   drawPlanPins();
 }
@@ -584,8 +790,7 @@ $("#compare-photo").onclick = () =>
     `<img class="room-reference-full" alt="Uploaded view of your room" src="${escape(state.roomPhoto)}">`,
   );
 $("#view-house-json").onclick = () => {
-  const house = state.importedHouse || getConfirmedImportedHouse();
-  if (house) showParsedGeometryModal(house);
+  if (state.importedHouse) showParsedGeometryModal(state.importedHouse);
 };
 $("#objectbar").onclick = (e) => {
   const action = e.target.closest("[data-action]")?.dataset.action;
@@ -805,6 +1010,7 @@ $("#reset-camera").onclick = () => {
 };
 function enterEditor() {
   if (scene) return;
+  if (activeHouse()) view = "3d";
   const handlers = { onSelect: select, onMove: move, onPose: drawPose };
   try {
     scene = createScene($("#scene"), handlers);
@@ -899,8 +1105,10 @@ function loadWholeHomeDemo() {
   activePlaybackDataset = null;
   previewLayoutItems = null;
   playbackController.reset();
-  withSyncGuard(() => clearConfirmedImportedHouse());
+  resetLayoutCompare();
+  clearConfirmedImportedHouse();
   commit(createWholeHomeDemoState());
+  history = [];
   syncForm();
   navigate("tour");
   jumpTo("living-room");
@@ -928,33 +1136,27 @@ function beginSetup(fresh = false) {
       playbackController.reset();
       hasProject = true;
       const importedHouse = sample ? null : (next.importedHouse ?? null);
-      withSyncGuard(() => {
-        if (importedHouse) setConfirmedImportedHouse(importedHouse);
-        else clearConfirmedImportedHouse();
-      });
+      const changedHouse = importedHouse !== (state.importedHouse ?? null);
+      const newProject = fresh || changedHouse;
+      if (!importedHouse && newProject) clearConfirmedImportedHouse();
+      if (newProject) resetLayoutCompare();
       const items = importedHouse
         ? mergeHouseFixturesIntoItems(importedHouse, next.items || [])
         : next.items;
       commit({
         ...next,
-        house: null,
+        house: importedHouse ? null : (next.house ?? null),
         importedHouse,
         items,
-        personas: fresh ? [] : state.personas,
+        personas: newProject ? [] : state.personas,
         flowVersion: 2,
         hasLayout:
-          sample || Boolean(importedHouse) || (!fresh && Boolean(next.hasLayout)),
+          sample || Boolean(importedHouse) || (!newProject && Boolean(next.hasLayout)),
       });
-      if (fresh) history = [];
+      if (newProject) history = [];
       selection = null;
       syncForm();
-      const nextStage = sample
-        ? "tour"
-        : importedHouse
-          ? "design"
-          : fresh
-            ? "household"
-            : "design";
+      const nextStage = sample ? "tour" : newProject ? "household" : "design";
       navigate(nextStage);
       if (scene) {
         if (importedHouse) {
@@ -1394,11 +1596,17 @@ window.__stillroom = {
   getScene: () => scene,
   simulationUI: demoControls,
   playbackController,
+  captureCurrentHouse: () => captureStudioLayout(activeHouse(), state.items),
+  registerTwinHooks(hooks = {}) {
+    externalTwinHooks = { ...externalTwinHooks, ...hooks };
+    return externalTwinHooks;
+  },
   connectSimulationPlayback(payload = {}) {
     simulationAdapter?.dispose?.();
     simulationAdapter = null;
     startPlaybackFromDataset({
       ...payload,
+      getSnapshotAt: payload.getSnapshotAt || getSimulationSnapshotAt,
       isMockData: Boolean(payload.isMockData),
     });
     return playbackController;

@@ -659,8 +659,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
   }
   function finish() {
     const oldRoom = state.room || ROOM;
+    const wholeHome = !isNew && (state.importedHouse || state.house);
     const changed =
-      !isNew &&
+      !isNew && !wholeHome &&
       (draft.room.width !== oldRoom.width ||
         draft.room.depth !== oldRoom.depth ||
         draft.room.shape !== (oldRoom.shape || "rectangle") ||
@@ -707,11 +708,11 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     leave(
       {
         ...state,
-        house: null,
+        house: isNew ? null : state.house,
         roomName: draft.roomName.trim() || "My living room",
         room: draft.room,
         roomPhoto: draft.photo,
-        importedHouse: null,
+        importedHouse: isNew ? null : state.importedHouse,
         items,
         spent: getSpend(items),
       },
@@ -719,6 +720,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     );
   }
   function launchFloorplanFlow(initialMode, initialFile = null) {
+    ++photoToken;
     openFloorplanImporter({
       host,
       initialMode,

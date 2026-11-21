@@ -1,5 +1,15 @@
 import { expect, test } from "@playwright/test";
 
+const household = (page) => page.locator("#household-page");
+const project = (page) =>
+  page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+
+async function skipHousehold(page) {
+  await expect(household(page)).toBeVisible();
+  await household(page).getByRole("button", { name: "Skip", exact: true }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+}
+
 test("whole-home sample floorplan imports, supports manual review/calibration, and exposes validated House JSON", async ({
   page,
 }) => {
@@ -35,7 +45,7 @@ test("whole-home sample floorplan imports, supports manual review/calibration, a
 
   // Confirm import and verify downstream House JSON contract
   await page.locator("#fp-confirm-import").click();
-  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+  await skipHousehold(page);
   await expect(page.locator("#view-house-json")).toBeVisible();
 
   const confirmedHouse = await page.evaluate(() =>
@@ -165,7 +175,7 @@ test("uploaded floorplan without printed scale requires two-point calibration be
   await expect(page.locator("#fp-confirm-import")).toBeEnabled();
 
   await page.locator("#fp-confirm-import").click();
-  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+  await skipHousehold(page);
 
   const house = await page.evaluate(() => window.getConfirmedImportedHouse());
   expect(house.calibration.source).toBe("manual_calibration");
@@ -203,4 +213,69 @@ test("gracefully handles Gemini API failure with sample and manual calibration r
   await page.locator("#fp-cal-distance").fill("6.4");
   await page.locator("#fp-apply-calibration").click();
   await expect(page.locator("#fp-confirm-import")).toBeEnabled();
+});
+
+test("a household uses imported room IDs and keeps destinations after room settings and reload", async ({ page }) => {
+  const description = "Alex cooks in the Kitchen between 18:00 and 19:00.";
+  const rooms = [
+    { id: "living-room", name: "Living Room" },
+    { id: "kitchen", name: "Kitchen" },
+    { id: "hallway", name: "Hallway" },
+    { id: "bedroom", name: "Bedroom" },
+    { id: "bathroom", name: "Bathroom" },
+  ];
+  const draft = {
+    id: "alex",
+    name: "Alex",
+    ageGroup: "adult",
+    preferences: [],
+    dislikes: [],
+    needs: { privacy: 0.7, quiet: 0.9, accessibility: 0.1, daylight: 0.7, social: 0.3 },
+    schedule: [
+      { activity: "cook", roomId: "living-room", startMinute: 1080, endMinute: 1140 },
+    ],
+  };
+  await page.route("**/api/personas/generate", (route) =>
+    route.fulfill({ json: { personas: [draft] } }),
+  );
+
+  await page.goto("/");
+  await page.locator("#try-sample-floorplan").click();
+  await page.locator("#fp-confirm-import").click();
+  await expect(household(page)).toBeVisible();
+  const availableRooms = household(page).getByRole("listitem");
+  await expect(availableRooms).toHaveText(rooms.map(({ name }) => name));
+  await household(page).getByLabel("Household description").fill(description);
+  const request = page.waitForRequest((item) => item.url().endsWith("/api/personas/generate"));
+  await household(page).getByRole("button", { name: "Generate", exact: true }).click();
+  expect((await request).postDataJSON()).toEqual({ description, rooms });
+
+  const destination = household(page).getByRole("combobox", { name: "Room", exact: true });
+  await expect(destination).toHaveValue("living-room");
+  await destination.selectOption("kitchen");
+  await household(page).getByRole("button", { name: "Save and continue" }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+  const approved = await project(page);
+  expect(approved.personas).toEqual([
+    { ...draft, schedule: [{ ...draft.schedule[0], roomId: "kitchen" }] },
+  ]);
+  expect(approved.importedHouse.rooms.map(({ id, name }) => ({ id, name }))).toEqual(rooms);
+
+  await page.reload();
+  await expect(page.locator("#view-house-json")).toBeVisible();
+  await page.locator("#room-settings").click();
+  await page.locator("#setup-name").fill("Updated Mercer Apartment");
+  await page.locator("#room-width").fill("6.6");
+  await page.locator("#setup-next").click();
+  await page.locator("#setup-next").click();
+  await expect(page.locator("#room-name")).toHaveText("Updated Mercer Apartment");
+  const edited = await project(page);
+  expect(edited.room.width).toBe(6.6);
+  expect(edited.importedHouse.rooms).toEqual(approved.importedHouse.rooms);
+  expect(edited.personas).toEqual(approved.personas);
+
+  await page.reload();
+  await page.locator("#household-step").click();
+  await expect(availableRooms).toHaveText(rooms.map(({ name }) => name));
+  await expect(destination).toHaveValue("kitchen");
 });

@@ -235,15 +235,38 @@ export function renderBeforeAfterMarkup(beforeScores, afterScores) {
   </div>`;
 }
 
-export function renderRedesignMarkup(redesignActions = []) {
+export function renderRedesignMarkup(redesignActions = [], options = {}) {
+  const {
+    redesignStatus = null,
+    canProposeRedesign = false,
+    canApplyRedesign = false,
+  } = options;
+  const actionsBar =
+    canProposeRedesign || canApplyRedesign
+      ? `<div class="twin-redesign-actions">
+          ${canProposeRedesign ? '<button type="button" class="secondary" id="sim-propose-redesign-btn">Propose Gemini redesign</button>' : ""}
+          ${canApplyRedesign ? '<button type="button" class="primary" id="sim-apply-redesign-btn">Apply redesign &amp; replay</button>' : ""}
+        </div>`
+      : "";
+  const statusPill = redesignStatus
+    ? `<span class="twin-redesign-status" id="sim-redesign-status">${escapeHtml(redesignStatus)}</span>`
+    : "";
+
   if (!Array.isArray(redesignActions) || redesignActions.length === 0) {
     return `<div class="twin-redesign-box" id="sim-redesign-panel">
-      <span class="section-label">Gemini redesign</span>
-      <p class="muted" style="margin-top:6px">Proposed ScenePatch improvements will appear here after simulation analysis.</p>
+      <div class="twin-redesign-head">
+        <span class="section-label">Gemini redesign</span>
+        ${statusPill}
+      </div>
+      <p class="muted" style="margin-top:6px">${redesignStatus === "Ready for redesign" ? "Measured findings are ready for Gemini ScenePatch redesign." : "Proposed ScenePatch improvements will appear here after simulation analysis."}</p>
+      ${actionsBar}
     </div>`;
   }
   return `<div class="twin-redesign-box" id="sim-redesign-panel">
-    <span class="section-label">Gemini redesign</span>
+    <div class="twin-redesign-head">
+      <span class="section-label">Gemini redesign</span>
+      ${statusPill}
+    </div>
     <ul class="twin-redesign-list" id="sim-redesign-list">
       ${redesignActions
         .map(
@@ -252,10 +275,63 @@ export function renderRedesignMarkup(redesignActions = []) {
         )
         .join("")}
     </ul>
+    ${actionsBar}
   </div>`;
 }
 
-export function renderResultsDeckMarkup(viewState) {
+export function renderLayoutCompareMarkup(layoutCompare = null) {
+  if (!layoutCompare?.enabled) return "";
+  const {
+    canCapture = false,
+    canCompare = false,
+    hasBaseline = false,
+    statusMessage = "",
+    isError = false,
+    rows = [],
+    blockedMessages = [],
+  } = layoutCompare;
+
+  const summaryMarkup =
+    rows.length > 0
+      ? `<div class="studio-replay-summary" id="sim-layout-compare-summary">
+          <table id="sim-layout-compare-table" aria-label="Layout replay comparison">
+            <thead>
+              <tr><th scope="col">Metric</th><th scope="col">Before</th><th scope="col">After</th></tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (r) =>
+                    `<tr><th scope="row">${escapeHtml(r.label)}</th><td>${escapeHtml(r.before)}</td><td>${escapeHtml(r.after)}</td></tr>`,
+                )
+                .join("")}
+            </tbody>
+          </table>
+          ${
+            blockedMessages.length > 0
+              ? `<ul id="sim-layout-compare-findings" class="studio-replay-findings" aria-label="Blocked routes">${blockedMessages
+                  .map((m) => `<li>${escapeHtml(m)}</li>`)
+                  .join("")}</ul>`
+              : ""
+          }
+        </div>`
+      : "";
+
+  return `<div class="twin-layout-compare-box" id="sim-layout-compare-box">
+    <div class="twin-redesign-head">
+      <span class="section-label">Manual layout comparison</span>
+      <div class="twin-redesign-actions">
+        <button type="button" class="secondary" id="sim-capture-baseline-btn" ${canCapture ? "" : "disabled"}>Capture baseline</button>
+        <button type="button" class="primary" id="sim-compare-current-btn" ${canCompare ? "" : "disabled"}>Compare current layout</button>
+        <button type="button" class="text-btn" id="sim-reset-baseline-btn" ${hasBaseline ? "" : "disabled"}>Reset baseline</button>
+      </div>
+    </div>
+    <p class="studio-replay-message" id="sim-layout-compare-status" role="status"${isError ? " data-error" : ""}>${escapeHtml(statusMessage)}</p>
+    ${summaryMarkup}
+  </div>`;
+}
+
+export function renderResultsDeckMarkup(viewState, { layoutCompare = null } = {}) {
   const state = normalizeSimulationViewState(viewState);
   const layoutToggleMarkup = state.hasLayoutToggle
     ? `<div class="twin-layout-toggle" role="group" aria-label="3D layout preview">
@@ -288,7 +364,12 @@ export function renderResultsDeckMarkup(viewState) {
         </div>
       </div>
       ${renderBeforeAfterMarkup(state.beforeScores, state.afterScores)}
-      ${renderRedesignMarkup(state.redesignActions)}
+      ${renderRedesignMarkup(state.redesignActions, {
+        redesignStatus: state.redesignStatus,
+        canProposeRedesign: state.canProposeRedesign,
+        canApplyRedesign: state.canApplyRedesign,
+      })}
+      ${renderLayoutCompareMarkup(layoutCompare)}
     </section>
   </div>`;
 }
@@ -308,19 +389,26 @@ export function createDemoControlsController({
   onToggleRoutes = () => {},
   onSelectFinding = () => {},
   onSelectLayoutView = () => {},
+  onProposeRedesign = () => {},
+  onApplyRedesignAndReplay = () => {},
+  onCaptureBaseline = () => {},
+  onCompareCurrentLayout = () => {},
+  onResetBaseline = () => {},
   onChange = () => {},
 } = {}) {
   let state = normalizeSimulationViewState(initialState);
   let personas = [];
+  let layoutCompare = null;
 
   function emit() {
-    onChange(state, personas);
+    onChange(state, personas, layoutCompare);
   }
 
   return {
     getScenarios: () => scenarios,
     getState: () => ({ ...state }),
     getPersonas: () => [...personas],
+    getLayoutCompare: () => (layoutCompare ? { ...layoutCompare } : null),
     setState(patch = {}) {
       state = normalizeSimulationViewState({ ...state, ...patch });
       emit();
@@ -328,6 +416,10 @@ export function createDemoControlsController({
     },
     setPersonas(nextPersonas = []) {
       personas = Array.isArray(nextPersonas) ? [...nextPersonas] : [];
+      emit();
+    },
+    setLayoutCompare(nextCompare = null) {
+      layoutCompare = nextCompare ? { ...nextCompare } : null;
       emit();
     },
     selectScenario(scenarioId) {
@@ -385,6 +477,21 @@ export function createDemoControlsController({
       emit();
       return state;
     },
+    triggerProposeRedesign() {
+      onProposeRedesign(state);
+    },
+    triggerApplyRedesign() {
+      onApplyRedesignAndReplay(state);
+    },
+    triggerCaptureBaseline() {
+      onCaptureBaseline();
+    },
+    triggerCompareCurrentLayout() {
+      onCompareCurrentLayout();
+    },
+    triggerResetBaseline() {
+      onResetBaseline();
+    },
   };
 }
 
@@ -405,10 +512,15 @@ export function mountDemoControls({
   onToggleRoutes = () => {},
   onSelectFinding = () => {},
   onSelectLayoutView = () => {},
+  onProposeRedesign = () => {},
+  onApplyRedesignAndReplay = () => {},
+  onCaptureBaseline = () => {},
+  onCompareCurrentLayout = () => {},
+  onResetBaseline = () => {},
 } = {}) {
   let visible = false;
 
-  function renderDOM(state, personas) {
+  function renderDOM(state, personas, layoutCompare) {
     if (controlHost) {
       controlHost.hidden = !visible;
       if (visible) {
@@ -421,7 +533,7 @@ export function mountDemoControls({
     if (resultsHost) {
       resultsHost.hidden = !visible;
       if (visible) {
-        resultsHost.innerHTML = renderResultsDeckMarkup(state);
+        resultsHost.innerHTML = renderResultsDeckMarkup(state, { layoutCompare });
       }
     }
   }
@@ -438,6 +550,11 @@ export function mountDemoControls({
     onToggleRoutes,
     onSelectFinding,
     onSelectLayoutView,
+    onProposeRedesign,
+    onApplyRedesignAndReplay,
+    onCaptureBaseline,
+    onCompareCurrentLayout,
+    onResetBaseline,
     onChange: renderDOM,
   });
 
@@ -474,6 +591,29 @@ export function mountDemoControls({
       controller.selectLayoutView(layoutBtn.dataset.layoutView);
       return;
     }
+    const btn = event.target.closest("button");
+    if (btn) {
+      if (btn.id === "sim-propose-redesign-btn") {
+        controller.triggerProposeRedesign();
+        return;
+      }
+      if (btn.id === "sim-apply-redesign-btn") {
+        controller.triggerApplyRedesign();
+        return;
+      }
+      if (btn.id === "sim-capture-baseline-btn") {
+        controller.triggerCaptureBaseline();
+        return;
+      }
+      if (btn.id === "sim-compare-current-btn") {
+        controller.triggerCompareCurrentLayout();
+        return;
+      }
+      if (btn.id === "sim-reset-baseline-btn") {
+        controller.triggerResetBaseline();
+        return;
+      }
+    }
     const findingCard = event.target.closest("[data-finding-id]");
     if (findingCard) {
       controller.selectFinding(findingCard.dataset.findingId);
@@ -493,7 +633,7 @@ export function mountDemoControls({
   controlHost?.addEventListener("input", handleControlInput);
   resultsHost?.addEventListener("click", handleResultsClick);
   resultsHost?.addEventListener("keydown", handleResultsKeydown);
-  renderDOM(controller.getState(), controller.getPersonas());
+  renderDOM(controller.getState(), controller.getPersonas(), controller.getLayoutCompare());
 
   return {
     ...controller,
@@ -518,7 +658,7 @@ export function mountDemoControls({
       const bool = Boolean(nextVisible);
       if (visible === bool) return;
       visible = bool;
-      renderDOM(controller.getState(), controller.getPersonas());
+      renderDOM(controller.getState(), controller.getPersonas(), controller.getLayoutCompare());
     },
     isVisible: () => visible,
     destroy() {

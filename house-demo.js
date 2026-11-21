@@ -499,7 +499,10 @@ export function createWholeHomeDemoState() {
           social: 0.5,
         },
         schedule: [
-          { activity: "work", roomId: "room-1", startMinute: 540, endMinute: 1020 },
+          { activity: "sleep", roomId: "bedroom", startMinute: 420, endMinute: 435 },
+          { activity: "bathroom", roomId: "bathroom", startMinute: 435, endMinute: 450 },
+          { activity: "cook", roomId: "kitchen", startMinute: 450, endMinute: 490 },
+          { activity: "work", roomId: "living-room", startMinute: 490, endMinute: 1020 },
         ],
       },
       {
@@ -516,8 +519,10 @@ export function createWholeHomeDemoState() {
           social: 0.75,
         },
         schedule: [
-          { activity: "cook", roomId: "room-1", startMinute: 450, endMinute: 510 },
-          { activity: "watchTv", roomId: "room-1", startMinute: 960, endMinute: 1080 },
+          { activity: "sleep", roomId: "bedroom", startMinute: 420, endMinute: 445 },
+          { activity: "bathroom", roomId: "bathroom", startMinute: 445, endMinute: 460 },
+          { activity: "eat", roomId: "kitchen", startMinute: 460, endMinute: 495 },
+          { activity: "watchTv", roomId: "living-room", startMinute: 960, endMinute: 1080 },
         ],
       },
     ],
