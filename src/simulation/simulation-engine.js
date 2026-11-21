@@ -953,7 +953,7 @@ function applyLocalAgentSeparation(rawEntries, nav = null) {
         const minDist = a.visualRadius + b.visualRadius + VISIBLE_GAP;
         let dx = b.snap.position[0] - a.snap.position[0];
         let dz = b.snap.position[1] - a.snap.position[1];
-        let dist = Math.hypot(dx, dz);
+        const dist = Math.hypot(dx, dz);
 
         if (dist >= minDist) continue;
 
@@ -962,7 +962,6 @@ function applyLocalAgentSeparation(rawEntries, nav = null) {
           const angle = ((i * 7 + j * 13) % 12) * ((Math.PI * 2) / 12);
           dx = Math.cos(angle);
           dz = Math.sin(angle);
-          dist = 1;
         } else {
           dx /= dist;
           dz /= dist;
@@ -970,7 +969,7 @@ function applyLocalAgentSeparation(rawEntries, nav = null) {
 
         const overlap = minDist - dist;
         const weightA = a.info?.usesWheelchair ? 0.15 : a.snap.isMoving ? 0.5 : 0.35;
-        const weightB = b.info?.usesWheelchair ? 0.15 : b.snap.isMoving ? 0.5 : 0.65;
+        const weightB = b.info?.usesWheelchair ? 0.15 : b.snap.isMoving ? 0.5 : 0.35;
         const sumW = weightA + weightB || 1;
         const shareA = weightA / sumW;
         const shareB = weightB / sumW;

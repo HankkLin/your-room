@@ -1,3 +1,4 @@
+import { setPlaybackSpeed } from "./playback-speed.js";
 import { expect, test } from "@playwright/test";
 
 test("Household believability: Family of 4 heights, slow continuous 1x walking (no teleport), Grandparents wheelchair accessibility findings, staged Friends waves, and demoHooks checkpoints", async ({
@@ -24,8 +25,8 @@ test("Household believability: Family of 4 heights, slow continuous 1x walking (
 
   // 2. Run Morning Routine at 1x -> verify slow, readable continuous time flow & checkpoint hooks
   await page.locator("#sim-scenario").selectOption("morning-routine");
-  await page.locator('[data-sim-speed="1"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 1);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "RUNNING");
 
   // Jump via `window.__stillroom.demoHooks` right before Dad walks to bathroom (07:12 = 432 min = 25920s)
@@ -63,8 +64,8 @@ test("Household believability: Family of 4 heights, slow continuous 1x walking (
 
   // 3. Switch to Grandparents Visit — Accessibility and run at 20x
   await page.locator("#sim-scenario").selectOption("grandparents-visit");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
 
   // Verify 6 avatars (4 family + Grandpa in wheelchair + Grandma) and structured accessibility findings
@@ -85,8 +86,8 @@ test("Household believability: Family of 4 heights, slow continuous 1x walking (
 
   // 4. Switch to Friends Arrive — Staged Crowd and verify 12 avatars & staged arrival checkpoint
   await page.locator("#sim-scenario").selectOption("friends-arrival");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
 
   const crowdStats = await page.evaluate(() =>

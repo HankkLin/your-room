@@ -1,3 +1,4 @@
+import { setPlaybackSpeed } from "./playback-speed.js";
 import { test, expect } from "@playwright/test";
 
 test("whole-home demo controls drive real scenario selection, speed, Running -> Complete simulation, real findings, Gemini redesign Before/After scores, and preserve 3D Orbit + WASD", async ({
@@ -74,13 +75,10 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await expect(page.locator("#sim-before-after-empty")).toBeVisible();
 
   // Select speed 20x and scenario Morning Routine, then click Run Simulation
-  await page.locator('[data-sim-speed="20"]').click();
-  await expect(page.locator('[data-sim-speed="20"]')).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await setPlaybackSpeed(page, 20);
+  await expect(page.locator("#sim-speed-value")).toHaveText("20×");
   await page.locator("#sim-scenario").selectOption("morning-routine");
-  await page.locator("#sim-run-btn").click();
+  await page.locator("#sim-play-toggle").click();
 
   // Transitions to COMPLETE with real findings and real scorecard (no mock badge)
   await expect(page.locator("#sim-status")).toHaveAttribute(
@@ -89,7 +87,7 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
     { timeout: 20000 },
   );
   await expect(page.locator(".twin-mock-badge")).toHaveCount(0);
-  await expect(page.locator("#sim-run-btn")).toHaveText("Run Again");
+  await expect(page.locator("#sim-play-toggle")).toHaveAccessibleName("Run Again");
   await expect(page.locator("#sim-findings-list")).toContainText(
     "Kitchen congestion",
   );
@@ -107,7 +105,7 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await expect(page.locator("#sim-approve-redesign")).toHaveCount(0);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")))).toEqual(beforeApproval);
   await page.locator("#sim-scenario").selectOption("morning-routine");
-  await page.locator("#sim-run-btn").click();
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
   await page.locator("#sim-propose-redesign-btn").click();
   await page.locator("#sim-approve-redesign").click();
@@ -122,8 +120,8 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
 
   // Switch scenario to Dinner Party — 8 Guests and run at 20x
   await page.locator("#sim-scenario").selectOption("dinner-party-8-guests");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",

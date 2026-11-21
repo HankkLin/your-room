@@ -1,3 +1,4 @@
+import { setPlaybackSpeed } from "./playback-speed.js";
 import { expect, test } from "@playwright/test";
 
 const alex = {
@@ -71,8 +72,8 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
 
   await expect(page.locator("#studio-replay-panel")).toBeVisible();
   await page.locator("#sim-scenario").selectOption("saved-routine");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
   await expect(page.locator("#sim-findings-list")).toContainText(
     "Blocked route: Bedroom → Kitchen",
@@ -83,7 +84,7 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
   await page.locator("#objectbar [data-action=remove]").click();
   await expect(obstacle).toHaveCount(0);
 
-  await page.locator("#sim-run-btn").click();
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
   await expect(page.locator("#sim-findings-panel")).not.toContainText(
     "Blocked route: Bedroom → Kitchen",

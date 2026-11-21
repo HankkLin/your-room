@@ -255,11 +255,11 @@ test("room selection rejects out-of-area moves and invalidates a preview after i
 test("regional replay displays measured regression and no change for an approved two-person routine", async ({ page }) => {
   const { capture } = await openDemo(page);
   const seeded = await project(page);
-  seeded.items = seeded.items.map(item => item.id === sofa.id ? { ...item, x: 3.4, z: 7 } : item);
+  seeded.items = seeded.items.map(item => item.id === sofa.id ? { ...item, x: 1.5, z: 0.6 } : item);
   seeded.personas.push({ ...seeded.personas[0], id: "bea", name: "Bea" });
   await page.evaluate(state => localStorage.setItem("living-blueprint.project.v1", JSON.stringify(state)), seeded);
   await page.reload();
-  const positions = [[1.5, 0, .6], [1.6, 0, .6]];
+  const positions = [[3.4, 0, 7], [3.5, 0, 7]];
   await page.route(api, route => route.fulfill({ json: { ...regionalPatch, targetFindings: [],
     operations: [{ ...regionalPatch.operations[0], position: positions.shift() }] } }));
   for (const [index, message] of ["more issues", "No change"].entries()) {

@@ -1,3 +1,4 @@
+import { setPlaybackSpeed } from "./playback-speed.js";
 import { expect, test } from "@playwright/test";
 
 test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine -> avatars, findings & scorecard -> mocked Gemini self-correcting redesign -> Before/After 3D toggle -> shopping list preserves redesigned products", async ({
@@ -109,8 +110,8 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
 
   // Step 5 & 6 (E1, E2): Run real Morning Routine -> Family of Four moves, no mock badge
   await page.locator("#sim-scenario").selectOption("morning-routine");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
 
   await expect(page.locator(".twin-mock-badge")).toHaveCount(0);
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
@@ -267,8 +268,8 @@ test("Blueprint 8-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 8-step hea
   await expect(page.locator("#sim-friends-control")).toBeVisible();
   await page.locator('[data-friend-preset="12"]').click();
   await expect(page.locator("#sim-friends-count")).toHaveText("12");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", {
     timeout: 20000,
   });
@@ -278,8 +279,8 @@ test("Blueprint 8-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 8-step hea
 
   // U8: Switch via visual card to Grandparents Staying Over -> accessibility banner + 5-step Gemini stepper
   await page.locator('[data-scenario-card="grandparents-visit"]').click();
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", {
     timeout: 20000,
   });

@@ -780,3 +780,12 @@ test("Studio replay reports the restored route after a committed sofa move", asy
   const starts = ({ events }) => events.filter(({ type }) => type === SIMULATION_EVENT_TYPES.SCHEDULE_START);
   assert.deepEqual(starts(before), starts(after));
 });
+
+test("coincident wheelchair users get separate playback positions without moving their timeline records", () => {
+  const agents = ["a", "b"].map(id => ({ id, usesWheelchair: true, radiusMeters: 0.45 }));
+  const timeline = agents.map(({ id }) => ({ agentId: id, timestamp: 0, position: [0, 0] }));
+  const [a, b] = getSimulationSnapshotAt({ agents, timeline }, 0);
+  const distance = Math.hypot(a.position[0] - b.position[0], a.position[1] - b.position[1]);
+  assert.ok(distance >= 0.999);
+  assert.deepEqual(timeline.map(frame => frame.position), [[0, 0], [0, 0]]);
+});

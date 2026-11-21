@@ -1,3 +1,4 @@
+import { setPlaybackSpeed } from "./playback-speed.js";
 import { test, expect } from "@playwright/test";
 
 test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, clickable finding hotspots & sightlines, 10-guest party, fire evacuation, Before/After layout toggle, and clean reset", async ({
@@ -40,8 +41,8 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
 
   // 1. Select Morning Routine at 1x speed and click Run Simulation
   await page.locator("#sim-scenario").selectOption("morning-routine");
-  await page.locator('[data-sim-speed="1"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 1);
+  await page.locator("#sim-play-toggle").click();
 
   // 2. Verify Family of Four real avatars spawn in 3D scene and clock advances (no mock badge)
   await expect(page.locator("#sim-status")).toHaveAttribute(
@@ -56,15 +57,15 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   await expect(page.locator("#sim-clock")).not.toHaveText("");
 
   // 3. Click Pause -> verify PAUSED and Resume button label -> click Resume at 20x
-  await page.locator("#sim-pause-btn").click();
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "PAUSED",
   );
-  await expect(page.locator("#sim-run-btn")).toHaveText("Resume");
+  await expect(page.locator("#sim-play-toggle")).toHaveAccessibleName("Resume");
 
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
@@ -135,8 +136,8 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
 
   // 8. Dinner Party — 8 Guests renders 12 concurrent avatars (4 family + 8 guests) smoothly
   await page.locator("#sim-scenario").selectOption("dinner-party-8-guests");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
@@ -149,8 +150,8 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
 
   // 8b. Friends Arrive — Staged Crowd & Grandparents Visit — Accessibility run cleanly
   await page.locator("#sim-scenario").selectOption("friends-arrival");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
@@ -165,8 +166,8 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
     .click();
 
   await page.locator("#sim-scenario").selectOption("grandparents-visit");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
@@ -178,8 +179,8 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
 
   // 9. Fire Emergency renders evacuation paths and exit bottleneck evidence
   await page.locator("#sim-scenario").selectOption("fire-emergency");
-  await page.locator('[data-sim-speed="20"]').click();
-  await page.locator("#sim-run-btn").click();
+  await setPlaybackSpeed(page, 20);
+  await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
