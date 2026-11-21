@@ -42,8 +42,10 @@ export {
 } from "./simulation-engine.js";
 
 export {
+  GRANDPARENTS_STAYOVER_SCENARIO,
   MORNING_ROUTINE_SCENARIO,
   createDemoHousehold,
+  createFamilyStayoverPersonas,
   createWholeHomeDemoPersonas,
   runMorningRoutineDemo,
 } from "./demo-household.js";

@@ -54,7 +54,10 @@ import {
   createSimulationPlaybackController,
   sampleTimelineAt,
 } from "./src/components/simulation/playback-controller.js";
-import { getSimulationSnapshotAt } from "./src/simulation/index.js";
+import {
+  createFamilyStayoverPersonas,
+  getSimulationSnapshotAt,
+} from "./src/simulation/index.js";
 import { captureStudioLayout, runStudioReplay } from "./src/simulation/studio-replay.js";
 import {
   executeStudioRedesign,
@@ -193,6 +196,8 @@ const playbackController = createSimulationPlaybackController({
         errorMessage: null,
         isMockData: false,
       });
+      const legendEl = $("#studio-overlay-legend");
+      if (legendEl) legendEl.hidden = true;
       render();
       return;
     }
@@ -209,6 +214,8 @@ const playbackController = createSimulationPlaybackController({
         house: previewLayoutHouse || activeHouse(),
         items: previewLayoutItems || state.items,
       });
+      const legendEl = $("#studio-overlay-legend");
+      if (legendEl) legendEl.hidden = findingsToShow.length === 0;
       if (redesignSession && currentViewMode === "after") {
         scene?.showPatchTransition?.(redesignSession.patchChanges || []);
       }
@@ -257,6 +264,7 @@ const playbackController = createSimulationPlaybackController({
         redesignStatus: redesignSession?.uiPayload?.redesignStatus ?? null,
         isMockData: Boolean(ds.isMockData),
       });
+      syncPlannerJourneyStrip();
       return;
     }
 
@@ -272,6 +280,7 @@ const playbackController = createSimulationPlaybackController({
       canRedesign: Boolean(ds?.canRedesign && pb.status !== "RUNNING"),
       isMockData: Boolean(ds?.isMockData),
     });
+    syncPlannerJourneyStrip();
   },
 });
 
@@ -282,10 +291,14 @@ function startPlaybackFromDataset(dataset, { preserveRedesign = false } = {}) {
     previewLayoutHouse = null;
   }
   activePlaybackDataset = dataset;
+  if (Array.isArray(dataset.displayPersonas) && dataset.displayPersonas.length > 0) {
+    demoControls.setPersonas(dataset.displayPersonas);
+  }
   scene?.clearPlayback?.();
   playbackController.setSpeed(demoControls.getState().speed);
   playbackController.load({
     simulation: dataset.simulation,
+    personas: dataset.displayPersonas || dataset.household || [],
     getSnapshotAt:
       dataset.getSnapshotAt || getSimulationSnapshotAt || sampleTimelineAt,
     agentRoutes: dataset.agentRoutes || [],
@@ -343,7 +356,10 @@ async function handleProposeRedesign(scenarioId) {
 
     redesignSession = {
       ...outcome,
-      beforeEvaluationFindings: outcome.replayResult.before.evaluation.findings,
+      beforeEvaluationFindings: [
+        ...(outcome.beforeAccessFindings || []),
+        ...(outcome.replayResult.before.evaluation.findings || []),
+      ],
     };
     previewLayoutItems = null;
     previewLayoutHouse = null;
@@ -500,7 +516,7 @@ const demoControls = mountDemoControls({
     simulationAdapter?.setSpeed?.(multiplier);
     playbackController.setSpeed(multiplier);
   },
-  onScenarioChange() {
+  onScenarioChange(nextScenarioId) {
     if (!simulationAdapter && (playbackController.getState().hasSimulation || redesignSession)) {
       redesignSession = null;
       activePlaybackDataset = null;
@@ -508,6 +524,15 @@ const demoControls = mountDemoControls({
       previewLayoutHouse = null;
       playbackController.reset();
     }
+    const house = activeHouse();
+    if (house) {
+      const nextPersonas =
+        nextScenarioId === "grandparents-stayover"
+          ? createFamilyStayoverPersonas(house)
+          : resolveValidHouseholdForHouse(state, house).displayPersonas;
+      demoControls.setPersonas(nextPersonas);
+    }
+    syncPlannerJourneyStrip();
   },
   onSeekTimeline(second) {
     playbackController.seek(second);
@@ -520,6 +545,14 @@ const demoControls = mountDemoControls({
   },
   onProposeRedesign(scenarioId) {
     void handleProposeRedesign(scenarioId);
+  },
+  onLoadFamilyHousehold() {
+    const house = activeHouse();
+    if (!house) return;
+    const family = createFamilyStayoverPersonas(house);
+    commit({ ...state, personas: family });
+    demoControls.selectScenario("grandparents-stayover");
+    toast("5-member family loaded (Dad, Mom, Leo, Maya & Grandma Evelyn ♿)");
   },
   onSelectLayoutView(viewMode) {
     const ds = activePlaybackDataset;
@@ -688,6 +721,62 @@ function inventoryPrice(item) {
   const quote = shopifyQuotes.get(item.shopify);
   return formatShopifyMoney(quote?.priceMinor, quote?.currency) ?? "Price unconfirmed";
 }
+function describeItemSuggestionReason(item) {
+  const ops = redesignSession?.replayResult?.selectedPatch?.operations || [];
+  const op = ops.find((entry) => entry?.objectId === item.id);
+  if (op) {
+    if (op.type === "replace") {
+      return "Gemini swap · Selected to open room walkway & sightline clearance";
+    }
+    if (op.type === "add") {
+      return "Gemini addition · Creates dedicated activity zone away from prep traffic";
+    }
+    if (op.type === "move" || op.type === "rotate") {
+      return "Gemini repositioned · Cleared bottleneck in household simulation";
+    }
+  }
+  if (!item.owned && !isObjectLocked(item)) {
+    return item.roomId
+      ? `Suggested furnishing for ${String(item.roomId).replace(/-/g, " ")}`
+      : "Suggested furnishing for room plan";
+  }
+  return null;
+}
+
+function syncPlannerJourneyStrip() {
+  const strip = $("#planner-flow-strip");
+  if (!strip) return;
+  const house = activeHouse();
+  strip.hidden = !house;
+  if (!house) return;
+
+  const simState = demoControls.getState();
+  let activeStep = 3;
+  if (stage === "setup") activeStep = 1;
+  else if (stage === "household") activeStep = 2;
+  else if (stage === "shop") activeStep = 7;
+  else if (simState.afterScores) activeStep = 6;
+  else if (simState.redesignPending) activeStep = 5;
+  else if (simState.status === "COMPLETE" && simState.findings.length > 0) {
+    activeStep = 4;
+  } else {
+    activeStep = 3;
+  }
+
+  strip.querySelectorAll("[data-journey-step]").forEach((btn) => {
+    const stepNum = Number(btn.dataset.journeyStep);
+    const stateLabel =
+      stepNum < activeStep
+        ? "done"
+        : stepNum === activeStep
+          ? "active"
+          : "upcoming";
+    btn.dataset.stepState = stateLabel;
+    if (stepNum === activeStep) btn.setAttribute("aria-current", "step");
+    else btn.removeAttribute("aria-current");
+  });
+}
+
 function render() {
   const house = activeHouse();
   $("#room-name").textContent = state.roomName;
@@ -710,6 +799,13 @@ function render() {
       ? `<strong>${escape(itemName(item))}</strong><span class="object-tools"><span class="locked-pill">${icon("lock")} ${item.type === "fixed" ? "Fixed fixture · Locked" : "Locked"}</span>${item.type === "fixed" ? "" : `<button data-action="unlock">Unlock</button>`}</span>`
       : `<strong>${escape(itemName(item))}</strong><span class="object-tools"><button data-action="rotate" title="Rotate 90 degrees">${icon("rotate")} Rotate</button>${item.owned ? "" : '<button data-action="save">Save piece</button>'}<button data-action="swap">${icon("swap")} Swap</button><button data-action="lock" title="Lock piece">${icon("lock")} Lock</button><button data-action="remove">${icon("trash")} Remove</button></span>`
     : `<span class="gesture">${icon("move")} ${view === "interior" ? "Drag to look around" : view === "plan" ? "Drag a piece to move" : "Drag to orbit"} <span aria-hidden="true">·</span> Select a piece to edit</span>`;
+
+  const patchedIds = new Set(
+    (redesignSession?.replayResult?.selectedPatch?.operations || [])
+      .map((op) => op?.objectId)
+      .filter(Boolean),
+  );
+
   $("#inventory").innerHTML =
     state.items
       .map((i) => {
@@ -717,29 +813,39 @@ function render() {
           ? house.rooms.find((r) => r.id === i.roomId)?.name ||
             getRoomAtPoint(house, i.x, i.z)?.name
           : null;
+        const merchantLabel = i.merchant || i.store || i.shopify?.sellerDomain || null;
+        const isPatched = patchedIds.has(i.id);
         const kindTag =
           i.type === "fixed"
             ? "Fixed fixture · Locked"
             : i.locked
               ? "Locked piece"
-              : i.owned
-                ? "Already owned"
-                : i.shopify
-                  ? "Approximate 3D preview"
-                  : "Suggested piece";
-        const sub = roomLabel ? `${escape(roomLabel)} · ${kindTag}` : kindTag;
-        return `<button class="item-row" data-item="${escape(i.id)}" data-locked="${Boolean(isObjectLocked(i))}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(itemName(i))}<small>${sub}</small></span><span class="price">${inventoryPrice(i)}</span></button>`;
+              : isPatched
+                ? "Updated by Gemini redesign"
+                : i.owned
+                  ? "Existing piece"
+                  : i.shopify
+                    ? "Approximate 3D preview"
+                    : "Suggested piece";
+        const metaParts = [roomLabel, merchantLabel, kindTag].filter(Boolean);
+        const whyNote = isPatched ? describeItemSuggestionReason(i) : null;
+        return `<button class="item-row${isPatched ? " item-row-redesigned" : ""}" data-item="${escape(i.id)}" data-locked="${Boolean(isObjectLocked(i))}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(itemName(i))}<small>${escape(metaParts.join(" · "))}</small>${whyNote ? `<small class="item-why-note">${escape(whyNote)}</small>` : ""}</span><span class="price">${inventoryPrice(i)}</span></button>`;
       })
       .join("") ||
     '<p class="muted">Add a piece or auto-style this room to start.</p>';
   const estimate = roomEstimate(state.items);
   $("#notes").textContent =
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(estimate.total)} ${estimate.partial ? "partial estimate" : "estimated"}`;
+  const isGrandparentsActive =
+    demoControls.getState().scenarioId === "grandparents-stayover" && house;
   const effectivePersonas = house
-    ? resolveValidHouseholdForHouse(state, house).displayPersonas
+    ? isGrandparentsActive
+      ? createFamilyStayoverPersonas(house)
+      : resolveValidHouseholdForHouse(state, house).displayPersonas
     : (state.personas || []);
   demoControls.setPersonas(effectivePersonas);
   demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
+  syncPlannerJourneyStrip();
   scene?.update(
     previewLayoutItems || state.items,
     selection,
@@ -1519,6 +1625,7 @@ $(".brand").onclick = (e) => {
   if (stage !== "setup") beginSetup();
 };
 function savePieces(items, { replaceExisting = false } = {}) {
+  const house = activeHouse();
   const saved = new Map(
     replaceExisting
       ? []
@@ -1526,11 +1633,22 @@ function savePieces(items, { replaceExisting = false } = {}) {
   );
   for (const item of items) {
     if (item.owned || isObjectLocked(item)) continue;
+    const roomLabel = house
+      ? house.rooms.find((r) => r.id === item.roomId)?.name ||
+        getRoomAtPoint(house, item.x, item.z)?.name ||
+        null
+      : null;
+    const suggestedReason = describeItemSuggestionReason(item);
+    const contextFields = {
+      ...(roomLabel ? { roomLabel } : {}),
+      ...(suggestedReason ? { suggestedReason } : {}),
+    };
     if (item.shopify) {
       saved.set(item.id, {
         id: item.id,
         name: item.name,
         shopify: item.shopify,
+        ...contextFields,
       });
     } else if (item.productId) {
       saved.set(item.id, {
@@ -1545,6 +1663,7 @@ function savePieces(items, { replaceExisting = false } = {}) {
         ...(Number.isFinite(Number(item.price)) ? { price: Number(item.price) } : {}),
         ...(item.url ? { url: item.url } : {}),
         ...(item.photo ? { photo: item.photo } : {}),
+        ...contextFields,
       });
     } else if (item.url || item.merchant || item.store) {
       saved.set(item.id, {
@@ -1556,6 +1675,7 @@ function savePieces(items, { replaceExisting = false } = {}) {
         price: Number(item.price) || 0,
         url: item.url || null,
         photo: item.photo || null,
+        ...contextFields,
       });
     }
   }
@@ -1566,13 +1686,41 @@ function savePieces(items, { replaceExisting = false } = {}) {
       : "Room saved to your shopping list",
   );
 }
-$("#save-room").onclick = () => {
+function saveRoomAndGoToShop() {
   savePieces(
     state.items.filter((i) => !i.owned && !isObjectLocked(i)),
     { replaceExisting: true },
   );
   navigate("shop");
-};
+}
+$("#save-room").onclick = saveRoomAndGoToShop;
+const trayReviewBtn = $("#tray-review-products");
+if (trayReviewBtn) trayReviewBtn.onclick = saveRoomAndGoToShop;
+
+$("#planner-flow-strip")?.addEventListener("click", (event) => {
+  const stepBtn = event.target.closest("[data-journey-action]");
+  if (!stepBtn) return;
+  const action = stepBtn.dataset.journeyAction;
+  if (action === "setup") {
+    beginSetup();
+  } else if (action === "household") {
+    navigate("household");
+  } else if (action === "simulate") {
+    if (stage !== "tour") navigate("tour");
+    $("#demo-controls-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } else if (action === "findings") {
+    if (stage !== "tour") navigate("tour");
+    $("#sim-findings-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  } else if (action === "redesign") {
+    if (stage !== "tour") navigate("tour");
+    $("#sim-comparison-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  } else if (action === "compare") {
+    if (stage !== "tour") navigate("tour");
+    $("#sim-comparison-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  } else if (action === "shop") {
+    saveRoomAndGoToShop();
+  }
+});
 async function refreshShopifyQuotes() {
   quoteRefresh?.abort();
   const shopping = stage === "shop";
@@ -1788,6 +1936,7 @@ window.__stillroom = {
   getCandidateProducts: () => getCandidateProducts({ sceneItems: state.items }),
   proposeRedesign: (scenarioId = demoControls.getState().scenarioId) =>
     handleProposeRedesign(scenarioId),
+  loadFamilyHousehold: () => demoControls.triggerLoadFamily(),
   connectSimulationPlayback(payload = {}) {
     simulationAdapter?.dispose?.();
     simulationAdapter = null;

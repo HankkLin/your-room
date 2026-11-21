@@ -93,7 +93,15 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       photo.append(image);
     }
     const body = element("div", "shop-card-body");
-    body.append(element("span", "merchant", merchant), element("h2", null, title));
+    const topMeta = element("div", "shop-card-meta");
+    topMeta.append(element("span", "merchant", merchant));
+    if (row.roomLabel) {
+      topMeta.append(element("span", "shop-room-pill", row.roomLabel));
+    }
+    body.append(topMeta, element("h2", null, title));
+    if (row.suggestedReason) {
+      body.append(element("p", "shop-why-suggested", row.suggestedReason));
+    }
     if (variant && variant !== "Default Title") body.append(element("p", "variant", variant));
     if (price) body.append(element("strong", null, price));
     if (live) {

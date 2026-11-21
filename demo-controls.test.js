@@ -22,7 +22,7 @@ import {
   mockSimulationResult,
 } from "./demo-simulation-mock.js";
 
-test("Test 1 — Scenario selector renders all four required demo scenarios", () => {
+test("Test 1 — Scenario selector renders all five household story scenarios including Grandparents Stayover — Wheelchair", () => {
   const html = renderControlPanelMarkup({});
   for (const scenario of DEMO_SCENARIOS) {
     assert(
@@ -35,6 +35,7 @@ test("Test 1 — Scenario selector renders all four required demo scenarios", ()
     DEMO_SCENARIOS.map((s) => s.name),
     [
       "Morning Routine",
+      "Grandparents Stayover — Wheelchair",
       "Normal Day",
       "Dinner Party — 8 Guests",
       "Fire Emergency",
@@ -219,4 +220,76 @@ test("Test 7 — Running/loading, Paused, Complete, and Error status states rend
     adapter.run("morning-routine");
   });
   assert.deepEqual(transitions, ["RUNNING", "COMPLETE"]);
+});
+
+test("Test 8 — Family roles, wheelchair accessibility banner/chips, timeline milestones, and 5-step Gemini redesign stepper render cleanly", () => {
+  const controlWithTimeline = renderControlPanelMarkup(
+    {
+      scenarioId: "grandparents-stayover",
+      status: "PAUSED",
+      hasTimeline: true,
+      startSecond: 32400,
+      endSecond: 39600,
+      currentSecond: 34800,
+    },
+    {
+      personas: [
+        { id: "kevin", name: "Kevin", role: "Dad", heightLabel: "1.80 m", preferences: ["WFH"] },
+        {
+          id: "grandma-evelyn",
+          name: "Grandma Evelyn",
+          role: "Grandparent",
+          wheelchair: true,
+          heightLabel: "Wheelchair · 0.90 m",
+          needs: { accessibility: 0.98 },
+        },
+      ],
+    },
+  );
+  assert(controlWithTimeline.includes("Grandma Evelyn"));
+  assert(controlWithTimeline.includes("Grandparent"));
+  assert(controlWithTimeline.includes("Wheelchair · 0.90 m"));
+  assert(controlWithTimeline.includes("Grandparents arrive"));
+  assert(controlWithTimeline.includes("Wheelchair kitchen route"));
+
+  const accessFindingsHtml = renderFindingsMarkup({
+    status: "COMPLETE",
+    findings: [
+      {
+        id: "accessibility-door-bath",
+        type: "ACCESSIBILITY_CLEARANCE",
+        severity: 0.86,
+        title: "Bathroom wheelchair doorway pinch",
+        summary: "Bathroom doorway measures 0.76 m wide.",
+        location: "Bathroom doorway",
+        evidence: {
+          wheelchair: true,
+          measuredWidthMeters: 0.76,
+          requiredWidthMeters: 0.9,
+        },
+      },
+    ],
+  });
+  assert(accessFindingsHtml.includes("Mobility &amp; wheelchair check"));
+  assert(accessFindingsHtml.includes("♿ Wheelchair route"));
+  assert(accessFindingsHtml.includes("0.76 m gap"));
+  assert(accessFindingsHtml.includes("≥ 0.90 m needed"));
+  assert(accessFindingsHtml.includes("Why it matters:"));
+
+  const deckStepperHtml = renderResultsDeckMarkup({
+    status: "COMPLETE",
+    beforeScores: mockBeforeScores,
+    afterScores: mockAfterScores,
+    redesignActions: mockRedesignActions,
+    attemptSummaries: [
+      "Attempt 1 rejected — locked fixture protection",
+      "Gemini corrected the redesign",
+      "Attempt 2 accepted",
+    ],
+  });
+  assert(deckStepperHtml.includes("Gemini proposes"));
+  assert(deckStepperHtml.includes("Validator checks"));
+  assert(deckStepperHtml.includes("Retry if needed"));
+  assert(deckStepperHtml.includes("Patch accepted"));
+  assert(deckStepperHtml.includes("Replay begins"));
 });

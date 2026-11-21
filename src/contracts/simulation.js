@@ -31,10 +31,11 @@ export const DEFAULT_CONGESTION_CONFIG = Object.freeze({
 export const DEFAULT_LONG_PATH_METERS = 15.0;
 
 export const FINDING_TYPES = Object.freeze({
-  // Movement & Congestion
+  // Movement, Congestion & Accessibility
   NO_PATH: "NO_PATH",
   LONG_PATH: "LONG_PATH",
   CONGESTION: "CONGESTION",
+  ACCESSIBILITY_CLEARANCE: "ACCESSIBILITY_CLEARANCE",
 
   // Privacy Sightlines
   PRIVACY_SIGHTLINE: "PRIVACY_SIGHTLINE",
@@ -106,22 +107,62 @@ export const DEMO_SCENARIOS = Object.freeze([
   {
     id: "morning-routine",
     name: "Morning Routine",
-    description: "Household members move through their normal morning schedule.",
+    description:
+      "7:00–9:00 AM family rush: breakfast prep, school readiness, and early WFH setup.",
+    storyBadge: "Weekday morning",
+    markers: [
+      { minute: 435, label: "Bathroom queue" },
+      { minute: 465, label: "Breakfast prep" },
+      { minute: 495, label: "WFH & school" },
+    ],
+  },
+  {
+    id: "grandparents-stayover",
+    name: "Grandparents Stayover — Wheelchair",
+    description:
+      "Weekend family visit testing 0.90 m wheelchair clearance, turning space, and step-free routes.",
+    storyBadge: "Mobility & accessibility",
+    markers: [
+      { minute: 545, label: "Grandparents arrive" },
+      { minute: 565, label: "Wheelchair kitchen route" },
+      { minute: 590, label: "Family tea" },
+    ],
   },
   {
     id: "normal-day",
     name: "Normal Day",
-    description: "Full-day routine across work, meals, leisure, and rest.",
+    description:
+      "Full 15-hour household day across remote work calls, shared meals, study, and evening TV.",
+    storyBadge: "All-day living",
+    markers: [
+      { minute: 465, label: "Breakfast" },
+      { minute: 540, label: "Work call" },
+      { minute: 960, label: "Kids & TV" },
+      { minute: 1100, label: "Family dinner" },
+    ],
   },
   {
     id: "dinner-party-8-guests",
     name: "Dinner Party — 8 Guests",
-    description: "High-occupancy gathering stressing kitchen and hallway clearance.",
+    description:
+      "Friends suddenly arrive for dinner: 10 people circulating between entry, living room, and kitchen.",
+    storyBadge: "Friends arrive (10 people)",
+    markers: [
+      { minute: 1082, label: "Friends arrive" },
+      { minute: 1102, label: "Kitchen serving" },
+      { minute: 1140, label: "Living room mingler" },
+    ],
   },
   {
     id: "fire-emergency",
     name: "Fire Emergency",
-    description: "Emergency evacuation check from every room to the exterior exit.",
+    description:
+      "Simultaneous family fire drill checking unobstructed escape paths from every room to the exit.",
+    storyBadge: "Safety drill",
+    markers: [
+      { second: 1, label: "Alarm sounds" },
+      { second: 3, label: "Exit convergence" },
+    ],
   },
 ]);
 
@@ -154,6 +195,7 @@ const FINDING_TITLES = Object.freeze({
   NO_PATH: "Blocked household route",
   LONG_PATH: "Detour route length",
   CONGESTION: "Room congestion",
+  ACCESSIBILITY_CLEARANCE: "Wheelchair clearance fail",
   PRIVACY_SIGHTLINE: "Privacy sightline exposure",
   TV_OCCLUDED: "TV sightline blocked",
   TV_BAD_ANGLE: "Off-axis TV viewing angle",
@@ -221,9 +263,48 @@ export function formatFindingHeadline(finding = {}) {
   if (type === "NO_PATH" && finding.fromRoomId && finding.toRoomId) {
     const from = formatLocationLabel(null, finding.fromRoomId);
     const to = formatLocationLabel(null, finding.toRoomId);
+    if (finding.evidence?.wheelchair) {
+      return `Wheelchair clearance fail: ${from} → ${to}`;
+    }
     return `Blocked route: ${from} → ${to}`;
   }
+  if (type === "ACCESSIBILITY_CLEARANCE" && roomLabel) {
+    return `Wheelchair clearance fail (${roomLabel})`;
+  }
   return FINDING_TITLES[type] || String(finding.type || "Simulation finding");
+}
+
+export function formatFindingWhyItMatters(finding = {}) {
+  if (typeof finding.whyItMatters === "string" && finding.whyItMatters.trim()) {
+    return finding.whyItMatters.trim();
+  }
+  const type = String(finding.type || "").toUpperCase();
+  const ev = finding.evidence || {};
+  if (type === "ACCESSIBILITY_CLEARANCE" || ev.wheelchair) {
+    return "Wheelchair and mobility-aid users need ≥ 0.90 m clear passage and 1.50 m turning space.";
+  }
+  switch (type) {
+    case "CONGESTION":
+      return "People must squeeze past each other during peak routines, slowing meals and prep.";
+    case "NO_PATH":
+      return "Furniture or narrow gaps completely prevent reaching a scheduled room.";
+    case "PRIVACY_SIGHTLINE":
+      return "Open doors expose private fixtures or beds directly to shared social areas.";
+    case "NOISE_CONFLICT":
+      return "TV or social sound carries into a quiet work or study zone.";
+    case "TV_OCCLUDED":
+    case "TV_BAD_ANGLE":
+    case "TV_TOO_FAR":
+      return "Seated family members strain to see the screen comfortably.";
+    case "EVACUATION_BOTTLENECK":
+    case "NO_EVACUATION_PATH":
+    case "LONG_EVACUATION_ROUTE":
+      return "Delays safe whole-family egress during an emergency drill.";
+    case "SUN_GLARE":
+      return "Direct afternoon sun washes out screens and causes eye strain.";
+    default:
+      return "Affects daily comfort and room circulation.";
+  }
 }
 
 export function formatFindingSummaryText(finding = {}) {
@@ -253,7 +334,17 @@ export function formatFindingSummaryText(finding = {}) {
     case "NO_PATH": {
       const from = formatLocationLabel(null, finding.fromRoomId) || "origin";
       const to = formatLocationLabel(null, finding.toRoomId) || "destination";
+      if (ev.wheelchair) {
+        return `Passage between ${from} and ${to} is narrower than the ${Number(ev.requiredWidthMeters || 0.9).toFixed(2)} m wheelchair clearance requirement.`;
+      }
       return `No walkable clearance path from ${from} to ${to}.`;
+    }
+    case "ACCESSIBILITY_CLEARANCE": {
+      const clearM = Number.isFinite(Number(ev.measuredWidthMeters))
+        ? `${Number(ev.measuredWidthMeters).toFixed(2)} m`
+        : "narrow";
+      const reqM = Number(ev.requiredWidthMeters || 0.9).toFixed(2);
+      return `${roomLabel} passage or turn zone measures ${clearM} (requires ≥ ${reqM} m for wheelchair access).`;
     }
     case "NOISE_CONFLICT": {
       const mins = ev.overlapMinutes ? `${ev.overlapMinutes} min` : "scheduled window";
@@ -325,6 +416,10 @@ export function normalizeSimulationViewState(raw = {}) {
         level: resolveFindingLevel(f),
         title: formatFindingHeadline(f),
         summary: formatFindingSummaryText(f),
+        whyItMatters: formatFindingWhyItMatters(f),
+        isAccessibility:
+          String(f.type || "").toUpperCase() === "ACCESSIBILITY_CLEARANCE" ||
+          Boolean(f.evidence?.wheelchair || f.isAccessibility),
         location: formatLocationLabel(f.location, f.roomId),
         rawLocation:
           f.rawLocation ?? (typeof f.location === "object" ? f.location : null),

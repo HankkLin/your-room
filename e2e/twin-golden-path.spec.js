@@ -193,3 +193,67 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
 
   expect(errors).toEqual([]);
 });
+
+test("Planner UX: 7-step journey banner, Grandparents Stayover — Wheelchair accessibility check, timeline event milestones, and 5-step Gemini redesign stepper", async ({
+  page,
+}) => {
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/");
+  await page.locator("#try-sample-floorplan").click();
+  await expect(page.locator("#fp-status-card")).toContainText("Floorplan analyzed");
+  await page.locator("#fp-confirm-import").click();
+  await page.locator("#skip-household").click();
+  await page.locator("#tour-step").click();
+  await page.locator("#view-3d").click();
+
+  // 1. 7-step staged home-planning strip is visible & active at Step 3 (Simulate daily life)
+  const flowStrip = page.locator("#planner-flow-strip");
+  await expect(flowStrip).toBeVisible();
+  await expect(flowStrip.locator("[data-journey-step]")).toHaveCount(7);
+  await expect(flowStrip.locator('[data-journey-step="3"]')).toHaveAttribute(
+    "aria-current",
+    "step",
+  );
+
+  // 2. Select Grandparents Stayover — Wheelchair -> 5 family roles appear (Dad, Mom, Brother, Sister, Grandparent ♿)
+  await page.locator("#sim-scenario").selectOption("grandparents-stayover");
+  await expect(page.locator("#sim-persona-summary")).toContainText("Grandma Evelyn");
+  await expect(page.locator("#sim-persona-summary")).toContainText("Grandparent");
+  await expect(page.locator("#sim-persona-summary")).toContainText("Leo");
+  await expect(page.locator("#sim-persona-summary")).toContainText("Maya");
+  await expect(page.locator("#sim-persona-summary")).toContainText("0.90 m");
+
+  // 3. Run at 20x -> 5 avatars (including wheelchair) + Accessibility banner & findings + timeline milestones
+  await page.locator('[data-sim-speed="20"]').click();
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+
+  const stats = await page.evaluate(() =>
+    window.__stillroom.getScene().getPlaybackStats(),
+  );
+  expect(stats.avatarCount).toBe(5);
+
+  await expect(page.locator(".twin-accessibility-banner")).toBeVisible();
+  await expect(page.locator("#sim-findings-list")).toContainText(
+    "wheelchair doorway pinch",
+  );
+  await expect(page.locator("#sim-findings-list")).toContainText(
+    "♿ Wheelchair route",
+  );
+  await expect(page.locator(".twin-timeline-markers")).toContainText(
+    "Grandparents arrive",
+  );
+
+  // Journey strip advances automatically to Step 4 (See measured problems)
+  await expect(flowStrip.locator('[data-journey-step="4"]')).toHaveAttribute(
+    "aria-current",
+    "step",
+  );
+
+  // 5-stage Gemini redesign stepper renders in comparison panel
+  await expect(page.locator("#sim-redesign-stepper li")).toHaveCount(5);
+
+  expect(errors).toEqual([]);
+});

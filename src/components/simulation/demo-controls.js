@@ -27,18 +27,30 @@ const LEVEL_GLYPHS = Object.freeze({
 });
 
 const STATUS_LABELS = Object.freeze({
-  READY: "Ready",
-  RUNNING: "Running",
-  PAUSED: "Paused",
+  READY: "Ready to simulate",
+  RUNNING: "Simulating household life",
+  PAUSED: "Playback paused",
   COMPLETE: "Simulation complete",
   ERROR: "Simulation error",
 });
+
+const DEFAULT_PERSONA_COLORS = Object.freeze([
+  "#c5643b",
+  "#4d7d6e",
+  "#52719b",
+  "#b4823e",
+  "#2f6b8a",
+  "#7b5c8e",
+]);
 
 function summarizePersona(persona) {
   if (Array.isArray(persona?.preferences) && persona.preferences.length > 0) {
     return persona.preferences.slice(0, 2).join(" • ");
   }
   const traits = [];
+  if (persona?.wheelchair || Number(persona?.needs?.accessibility) >= 0.85) {
+    traits.push("Wheelchair • 0.90 m clearance");
+  }
   if (Number(persona?.needs?.quiet) >= 0.75) traits.push("Quiet preferred");
   if (Number(persona?.needs?.privacy) >= 0.75) traits.push("High privacy");
   if (Number(persona?.needs?.daylight) >= 0.7) traits.push("Likes daylight");
@@ -46,17 +58,140 @@ function summarizePersona(persona) {
   return traits.join(" • ") || "Household member";
 }
 
+function resolvePersonaRoleLabel(persona) {
+  if (persona?.role) return String(persona.role);
+  if (persona?.wheelchair) return "Mobility";
+  switch (persona?.ageGroup) {
+    case "child":
+      return "Child";
+    case "teen":
+      return "Teen";
+    case "olderAdult":
+      return "Elder";
+    default:
+      return null;
+  }
+}
+
+function resolvePersonaScaleMeta(persona) {
+  if (persona?.heightLabel) return String(persona.heightLabel);
+  if (persona?.wheelchair || Number(persona?.needs?.accessibility) >= 0.85) {
+    return "♿ Wheelchair · 0.90 m";
+  }
+  switch (persona?.ageGroup) {
+    case "child":
+      return "1.34 m";
+    case "teen":
+      return "1.62 m";
+    case "olderAdult":
+      return "1.65 m";
+    default:
+      return null;
+  }
+}
+
+function formatActivityLabel(activity, roomId) {
+  const act = String(activity || "").trim();
+  const room = String(roomId || "")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+  if (!act) return room || "Ready";
+  if (act.startsWith("going-to-")) {
+    const dest = act
+      .slice("going-to-".length)
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (m) => m.toUpperCase());
+    return `Walking → ${dest}`;
+  }
+  const prettyAct =
+    {
+      wake: "Waking up",
+      sleep: "Resting",
+      cook: "Cooking",
+      eat: "Dining",
+      work: "Working (WFH)",
+      study: "Studying",
+      watchTv: "Watching TV",
+      bathroom: "Bathroom",
+      socialize: "Hosting",
+      relax: "Relaxing",
+      evacuate: "Evacuating",
+    }[act] || act.replace(/\b\w/g, (m) => m.toUpperCase());
+  return room ? `${prettyAct} · ${room}` : prettyAct;
+}
+
 export function renderPersonaQuickViewMarkup(personas = []) {
   if (!Array.isArray(personas) || personas.length === 0) {
-    return `<div class="twin-personas" id="sim-persona-summary"><span class="section-label">Household</span><p class="muted" style="margin-top:5px">No household personas set yet. Use step 2 (Household) to add members.</p></div>`;
+    return `<div class="twin-personas" id="sim-persona-summary"><div class="twin-personas-head"><span class="section-label">Household members</span></div><p class="muted" style="margin-top:5px">No household personas set yet. Use step 2 (Household) to add members.</p></div>`;
   }
+  const hasWheelchairMember = personas.some(
+    (p) => Boolean(p?.wheelchair) || Number(p?.needs?.accessibility) >= 0.85,
+  );
   const items = personas
-    .map(
-      (p) =>
-        `<div class="twin-persona-item"><strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(summarizePersona(p))}</span></div>`,
-    )
+    .map((p, idx) => {
+      const id = p.id || `member-${idx + 1}`;
+      const color = p.color || DEFAULT_PERSONA_COLORS[idx % DEFAULT_PERSONA_COLORS.length];
+      const role = resolvePersonaRoleLabel(p);
+      const scaleMeta = resolvePersonaScaleMeta(p);
+      const isWheelchair =
+        Boolean(p?.wheelchair) || Number(p?.needs?.accessibility) >= 0.85;
+      return `<div class="twin-persona-item" data-agent-card="${escapeHtml(id)}"${isWheelchair ? ' data-wheelchair="true"' : ""}>
+        <div class="twin-persona-top">
+          <span class="twin-persona-ident">
+            <span class="twin-persona-dot" style="background:${escapeHtml(color)}" aria-hidden="true">${isWheelchair ? "♿" : ""}</span>
+            <strong>${escapeHtml(p.name)}</strong>
+            ${role ? `<em class="twin-persona-role">${escapeHtml(role)}</em>` : ""}
+          </span>
+          ${scaleMeta ? `<span class="twin-persona-scale">${escapeHtml(scaleMeta)}</span>` : ""}
+        </div>
+        <div class="twin-persona-sub">
+          <span>${escapeHtml(summarizePersona(p))}</span>
+          <small class="twin-persona-live" data-agent-status="${escapeHtml(id)}"></small>
+        </div>
+      </div>`;
+    })
     .join("");
-  return `<div class="twin-personas" id="sim-persona-summary"><span class="section-label">Household</span><div class="twin-persona-list">${items}</div></div>`;
+
+  const familyPresetBtn =
+    personas.length < 4
+      ? `<button type="button" class="twin-family-preset-btn" id="sim-load-family-btn" title="Load 5-person family with grandparents & wheelchair accessibility needs">+ Grandparents &amp; kids (5)</button>`
+      : hasWheelchairMember
+        ? `<span class="twin-access-pill">♿ 0.90 m route active</span>`
+        : "";
+
+  return `<div class="twin-personas" id="sim-persona-summary">
+    <div class="twin-personas-head">
+      <span class="section-label">Household (${personas.length})</span>
+      ${familyPresetBtn}
+    </div>
+    <div class="twin-persona-list">${items}</div>
+  </div>`;
+}
+
+export function renderTimelineMarkersMarkup(activeScenario, startSecond, endSecond) {
+  const markers = Array.isArray(activeScenario?.markers)
+    ? activeScenario.markers
+    : [];
+  const span = Number(endSecond) - Number(startSecond);
+  if (markers.length === 0 || !Number.isFinite(span) || span <= 0) {
+    return "";
+  }
+  const chips = markers
+    .map((m) => {
+      const targetSec = Number.isFinite(Number(m.second))
+        ? Number(startSecond) + Number(m.second)
+        : Number(m.minute) * 60;
+      const pct = Math.max(
+        0,
+        Math.min(100, ((targetSec - Number(startSecond)) / span) * 100),
+      );
+      return `<button type="button" class="twin-timeline-marker" data-seek-second="${Math.round(targetSec)}" style="--marker-pct:${pct.toFixed(1)}%" title="Jump to ${escapeHtml(m.label)}">
+        <span class="twin-marker-pip" aria-hidden="true"></span>
+        <span class="twin-marker-text">${escapeHtml(m.label)}</span>
+      </button>`;
+    })
+    .join("");
+  return `<div class="twin-timeline-markers" aria-label="Scenario timeline milestones">${chips}</div>`;
 }
 
 export function renderControlPanelMarkup(
@@ -87,10 +222,18 @@ export function renderControlPanelMarkup(
       ? state.errorMessage
       : STATUS_LABELS[state.status] || "Ready";
 
+  const markersMarkup = state.hasTimeline
+    ? renderTimelineMarkersMarkup(
+        activeScenario,
+        state.startSecond,
+        state.endSecond,
+      )
+    : "";
+
   const scrubberMarkup = state.hasTimeline
     ? `<div class="twin-scrubber-bar" id="sim-timeline-wrap">
         <label class="twin-scrubber-label" for="sim-scrubber">
-          <span class="section-label">Timeline</span>
+          <span class="section-label">Time flow</span>
           <span class="twin-route-toggle-wrap">
             <input type="checkbox" id="sim-toggle-routes" ${state.showAllRoutes ? "checked" : ""} />
             <span>Show all paths</span>
@@ -105,6 +248,7 @@ export function renderControlPanelMarkup(
           step="1"
           value="${Math.round(state.currentSecond)}"
         />
+        ${markersMarkup}
       </div>`
     : "";
 
@@ -120,13 +264,13 @@ export function renderControlPanelMarkup(
   return `<div class="twin-control-card" aria-label="Household Digital Twin controls">
     <div class="twin-card-head">
       <div>
-        <p class="eyebrow">Household Digital Twin</p>
+        <p class="eyebrow">Step 3 · Daily life planner</p>
         <h2>Simulate life</h2>
       </div>
-      ${state.isMockData ? '<span class="twin-mock-badge" title="Placeholder mock output while simulation engine is external">Demo mock</span>' : ""}
+      ${state.isMockData ? '<span class="twin-mock-badge" title="Placeholder mock output while simulation engine is external">Demo mock</span>' : activeScenario?.storyBadge ? `<span class="twin-story-badge">${escapeHtml(activeScenario.storyBadge)}</span>` : ""}
     </div>
     <label class="twin-field" for="sim-scenario">
-      <span class="section-label">Scenario</span>
+      <span class="section-label">Household story scenario</span>
       <select id="sim-scenario" aria-label="Simulation scenario" ${isRunning || state.redesignPending ? "disabled" : ""}>
         ${scenarios
           .map(
@@ -137,6 +281,10 @@ export function renderControlPanelMarkup(
       </select>
     </label>
     <p class="twin-scenario-desc" id="sim-scenario-desc">${escapeHtml(activeScenario?.description || "")}</p>
+    <div class="twin-status-row" id="sim-status" data-status="${escapeHtml(state.status)}" role="status" aria-live="polite">
+      <span class="twin-status-indicator"><span class="twin-dot" aria-hidden="true"></span><span>${escapeHtml(statusText)}</span></span>
+      <span class="twin-clock" id="sim-clock">${state.currentTime ? escapeHtml(state.currentTime) : ""}</span>
+    </div>
     <div class="twin-actions">
       <button type="button" class="primary" id="sim-run-btn" ${isRunning || state.redesignPending ? "disabled" : ""}>${escapeHtml(runLabel)}</button>
       <button type="button" class="secondary" id="sim-pause-btn" ${isRunning ? "" : "disabled"}>Pause</button>
@@ -144,7 +292,7 @@ export function renderControlPanelMarkup(
     </div>
     ${redesignButtonMarkup}
     <div class="twin-speed-bar">
-      <span class="section-label">Speed</span>
+      <span class="section-label">Playback speed</span>
       <div class="twin-speed-group" role="group" aria-label="Simulation speed">
         ${SIMULATION_SPEEDS.map(
           (mult) =>
@@ -153,31 +301,42 @@ export function renderControlPanelMarkup(
       </div>
     </div>
     ${scrubberMarkup}
-    <div class="twin-status-row" id="sim-status" data-status="${escapeHtml(state.status)}" role="status" aria-live="polite">
-      <span class="twin-status-indicator"><span class="twin-dot" aria-hidden="true"></span><span>${escapeHtml(statusText)}</span></span>
-      <span class="twin-clock" id="sim-clock">${state.currentTime ? escapeHtml(state.currentTime) : ""}</span>
-    </div>
     ${renderPersonaQuickViewMarkup(personas)}
+  </div>`;
+}
+
+export function renderAccessibilitySummaryMarkup(findings = []) {
+  const accessIssues = (findings || []).filter((f) => f.isAccessibility);
+  if (accessIssues.length === 0) return "";
+  return `<div class="twin-accessibility-banner" role="region" aria-label="Mobility and wheelchair accessibility check">
+    <span class="twin-access-icon" aria-hidden="true">♿</span>
+    <div>
+      <strong>Mobility &amp; wheelchair check · ${accessIssues.length} clearance ${accessIssues.length === 1 ? "bottleneck" : "bottlenecks"}</strong>
+      <p>Evaluated against 0.90 m doorway passage and 1.50 m turning circle standards. Click an item below to inspect in 3D.</p>
+    </div>
   </div>`;
 }
 
 export function renderFindingsMarkup(viewState) {
   const state = normalizeSimulationViewState(viewState);
   if (state.status === "RUNNING" && state.findings.length === 0) {
-    return `<div class="twin-empty" id="sim-findings-empty">Running scenario simulation… evaluating walkways, sightlines, and room schedules.</div>`;
+    return `<div class="twin-empty" id="sim-findings-empty">Running scenario simulation… evaluating walkways, wheelchair clearances, sightlines, and room schedules.</div>`;
   }
   if (state.status === "ERROR") {
     return `<div class="twin-finding" data-level="critical"><span class="twin-finding-icon" aria-hidden="true">⛔</span><div><strong>Simulation failed</strong><p>${escapeHtml(state.errorMessage || "Unable to complete simulation run.")}</p></div></div>`;
   }
   if (state.findings.length === 0) {
     if (state.status === "COMPLETE") {
-      return `<div class="twin-finding" id="sim-findings-clear" data-level="success"><span class="twin-finding-icon" aria-hidden="true">✓</span><div><strong>All measured spatial checks clear</strong><p>No congestion, blocked paths, sightline, noise, or evacuation bottlenecks detected in this scenario.</p></div></div>`;
+      return `<div class="twin-finding" id="sim-findings-clear" data-level="success"><span class="twin-finding-icon" aria-hidden="true">✓</span><div><strong>All measured spatial checks clear</strong><p>No congestion, blocked paths, sightline, noise, accessibility, or evacuation bottlenecks detected in this scenario.</p></div></div>`;
     }
     return `<div class="twin-empty" id="sim-findings-empty">No findings yet. Choose a scenario and click <strong>Run Simulation</strong> to inspect spatial issues.</div>`;
   }
-  return `<div class="twin-findings-list" id="sim-findings-list">${state.findings
+
+  return `${renderAccessibilitySummaryMarkup(state.findings)}<div class="twin-findings-list" id="sim-findings-list">${state.findings
     .map((finding) => {
-      const glyph = LEVEL_GLYPHS[finding.level] || LEVEL_GLYPHS.info;
+      const glyph = finding.isAccessibility
+        ? "♿"
+        : LEVEL_GLYPHS[finding.level] || LEVEL_GLYPHS.info;
       const isSelected = state.selectedFindingId === finding.id;
       const chips = formatFindingEvidenceChips(finding);
       const chipsMarkup =
@@ -186,14 +345,22 @@ export function renderFindingsMarkup(viewState) {
               .map((c) => `<span class="twin-evidence-chip">${escapeHtml(c)}</span>`)
               .join("")}</div>`
           : "";
-      return `<article class="twin-finding twin-finding-interactive" tabindex="0" role="button" aria-pressed="${isSelected}" data-finding-id="${escapeHtml(finding.id)}" data-level="${escapeHtml(finding.level)}" data-finding-type="${escapeHtml(finding.type)}">
+      const whyLine =
+        finding.whyItMatters && finding.whyItMatters !== finding.summary
+          ? `<p class="twin-finding-why"><strong>Why it matters:</strong> ${escapeHtml(finding.whyItMatters)}</p>`
+          : "";
+      return `<article class="twin-finding twin-finding-interactive" tabindex="0" role="button" aria-pressed="${isSelected}" data-finding-id="${escapeHtml(finding.id)}" data-level="${escapeHtml(finding.level)}" data-finding-type="${escapeHtml(finding.type)}"${finding.isAccessibility ? ' data-accessibility="true"' : ""}>
         <span class="twin-finding-icon" aria-label="${escapeHtml(finding.level)}">${glyph}</span>
         <div>
           <div class="twin-finding-head">
             <strong>${escapeHtml(finding.title)}</strong>
-            ${finding.location ? `<span class="twin-finding-loc">${escapeHtml(finding.location)}</span>` : ""}
+            <span class="twin-finding-badges">
+              ${finding.location ? `<span class="twin-finding-loc">${escapeHtml(finding.location)}</span>` : ""}
+              <span class="twin-finding-focus-hint">${isSelected ? "Focused in 3D" : "Inspect 3D →"}</span>
+            </span>
           </div>
           ${finding.summary ? `<p>${escapeHtml(finding.summary)}</p>` : ""}
+          ${whyLine}
           ${chipsMarkup}
         </div>
       </article>`;
@@ -203,7 +370,7 @@ export function renderFindingsMarkup(viewState) {
 
 export function renderScorecardMarkup(scores) {
   return `<div class="twin-scorecard" id="sim-scorecard" aria-label="Household scorecard">
-    <span class="section-label">Household scorecard</span>
+    <span class="section-label">Household comfort scorecard</span>
     ${SCORE_CATEGORIES.map(({ key, label }) => {
       const value = scores?.[key];
       const hasVal = typeof value === "number" && Number.isFinite(value);
@@ -303,7 +470,7 @@ export function renderFindingsDiffMarkup(viewState) {
     .join("");
 
   return `<div class="twin-findings-diff" id="sim-findings-diff" aria-label="Findings comparison">
-    <span class="section-label">Findings comparison</span>
+    <span class="section-label">What changed in daily life</span>
     <ul class="twin-diff-list">
       ${resolvedList || '<li class="twin-diff-item" data-diff="info"><span>•</span><span>No findings eliminated yet</span></li>'}
       ${introducedList}
@@ -326,6 +493,48 @@ export function renderAttemptTrailMarkup(attemptSummaries = []) {
   </div>`;
 }
 
+const REDESIGN_PIPELINE_STEPS = Object.freeze([
+  { step: 1, label: "Gemini proposes" },
+  { step: 2, label: "Validator checks" },
+  { step: 3, label: "Retry if needed" },
+  { step: 4, label: "Patch accepted" },
+  { step: 5, label: "Replay begins" },
+]);
+
+export function renderRedesignStepperMarkup(state) {
+  const isPending = Boolean(state.redesignPending);
+  const isAccepted =
+    Boolean(state.afterScores) ||
+    state.redesignStatus === "IMPROVED" ||
+    (Array.isArray(state.redesignActions) && state.redesignActions.length > 0);
+  const isFailed =
+    state.redesignStatus === "FAILED" || state.redesignStatus === "NO_IMPROVEMENT";
+  const hadRetry = (state.attemptSummaries || []).some((s) =>
+    /rejected|corrected|fallback/i.test(s),
+  );
+
+  const items = REDESIGN_PIPELINE_STEPS.map(({ step, label }) => {
+    let stepState = "idle";
+    if (isPending) {
+      stepState = step === 1 ? "active" : step === 2 ? "next" : "idle";
+    } else if (isAccepted) {
+      if (step === 3 && !hadRetry) {
+        stepState = "skipped";
+      } else {
+        stepState = "done";
+      }
+    } else if (isFailed) {
+      stepState = step <= 3 ? "failed" : "idle";
+    }
+    return `<li class="twin-pipe-step" data-pipe-state="${stepState}">
+      <span class="twin-pipe-num" aria-hidden="true">${stepState === "done" ? "✓" : step}</span>
+      <span class="twin-pipe-label">${escapeHtml(label)}</span>
+    </li>`;
+  }).join("");
+
+  return `<ol class="twin-redesign-stepper" id="sim-redesign-stepper" aria-label="Gemini redesign verification pipeline">${items}</ol>`;
+}
+
 export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
   const state = normalizeSimulationViewState({
     ...viewState,
@@ -334,8 +543,12 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
 
   if (state.redesignPending) {
     return `<div class="twin-redesign-box" id="sim-redesign-panel" role="status" aria-live="polite">
-      <span class="section-label">Gemini redesign</span>
-      <p class="twin-redesign-working" id="sim-redesign-working">Gemini is redesigning… validating candidate ScenePatch and replaying household life.</p>
+      <div class="twin-redesign-head">
+        <span class="section-label">Step 5 · Gemini spatial redesign</span>
+        <span class="twin-working-pill">Working…</span>
+      </div>
+      ${renderRedesignStepperMarkup(state)}
+      <p class="twin-redesign-working" id="sim-redesign-working">Gemini is redesigning… checking locked fixtures, doorway clearances, and replaying household life.</p>
     </div>`;
   }
 
@@ -344,7 +557,8 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
     (state.redesignStatus === "FAILED" || state.redesignStatus === "NO_IMPROVEMENT")
   ) {
     return `<div class="twin-redesign-box" id="sim-redesign-panel">
-      <span class="section-label">Gemini redesign</span>
+      <span class="section-label">Step 5 · Gemini spatial redesign</span>
+      ${renderRedesignStepperMarkup(state)}
       <p class="twin-redesign-rejected" id="sim-redesign-rejected">${escapeHtml(state.redesignMessage)}</p>
       ${renderAttemptTrailMarkup(state.attemptSummaries)}
     </div>`;
@@ -355,22 +569,24 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
       ? `<button type="button" class="primary twin-propose-inline-btn" id="sim-propose-redesign-inline">Propose Gemini Redesign</button>`
       : "";
     return `<div class="twin-redesign-box" id="sim-redesign-panel">
-      <span class="section-label">Gemini redesign</span>
-      <p class="muted" style="margin-top:6px">Proposed ScenePatch improvements will appear here after simulation analysis.</p>
+      <span class="section-label">Step 5 · Gemini spatial redesign</span>
+      ${renderRedesignStepperMarkup(state)}
+      <p class="muted" style="margin-top:8px">Gemini proposes movable furniture adjustments or verified product swaps while keeping walls, plumbing, and locked fixtures untouched.</p>
       ${cta}
     </div>`;
   }
 
   const fallbackBadge = state.isFallbackRedesign
     ? '<span class="twin-fallback-pill" title="Verified deterministic ScenePatch applied while Gemini API was offline or unavailable">Deterministic fallback</span>'
-    : "";
+    : '<span class="twin-verified-pill">Validator verified</span>';
 
   return `<div class="twin-redesign-box" id="sim-redesign-panel">
     <div class="twin-redesign-head">
-      <span class="section-label">Gemini redesign</span>
+      <span class="section-label">Step 5 · Gemini spatial redesign</span>
       ${fallbackBadge}
     </div>
-    ${state.redesignMessage ? `<p class="twin-redesign-note">${escapeHtml(state.redesignMessage)}</p>` : ""}
+    ${renderRedesignStepperMarkup(state)}
+    ${state.redesignMessage ? `<p class="twin-redesign-note"><strong>Why changed:</strong> ${escapeHtml(state.redesignMessage)}</p>` : ""}
     <ul class="twin-redesign-list" id="sim-redesign-list">
       ${redesignActions
         .map(
@@ -401,10 +617,10 @@ export function renderResultsDeckMarkup(viewState) {
     <section class="twin-deck-card" id="sim-findings-panel" aria-labelledby="sim-findings-heading">
       <div class="twin-deck-head">
         <div>
-          <p class="eyebrow">Spatial validation</p>
+          <p class="eyebrow">Step 4 · Measured spatial issues</p>
           <h3 id="sim-findings-heading">Findings &amp; scorecard</h3>
         </div>
-        ${state.isMockData ? '<span class="twin-mock-badge">Mock preview</span>' : ""}
+        ${state.isMockData ? '<span class="twin-mock-badge">Mock preview</span>' : `<span class="twin-count-pill">${state.findings.length} ${state.findings.length === 1 ? "issue" : "issues"}</span>`}
       </div>
       ${renderFindingsMarkup(state)}
       ${renderScorecardMarkup(state.scores)}
@@ -412,7 +628,7 @@ export function renderResultsDeckMarkup(viewState) {
     <section class="twin-deck-card" id="sim-comparison-panel" aria-labelledby="sim-compare-heading">
       <div class="twin-deck-head">
         <div>
-          <p class="eyebrow">Measurable impact</p>
+          <p class="eyebrow">Step 5 &amp; 6 · Redesign &amp; compare</p>
           <h3 id="sim-compare-heading">Before / After redesign</h3>
         </div>
         <div class="twin-deck-head-actions">
@@ -447,6 +663,7 @@ export function createDemoControlsController({
   onSelectFinding = () => {},
   onSelectLayoutView = () => {},
   onProposeRedesign = () => {},
+  onLoadFamilyHousehold = () => {},
   onChange = () => {},
 } = {}) {
   let state = normalizeSimulationViewState(initialState);
@@ -491,6 +708,10 @@ export function createDemoControlsController({
     triggerRedesign() {
       if (state.redesignPending || state.status === "RUNNING") return;
       onProposeRedesign(state.scenarioId);
+    },
+    triggerLoadFamily() {
+      if (state.status === "RUNNING" || state.redesignPending) return;
+      onLoadFamilyHousehold();
     },
     selectSpeed(multiplier) {
       const numeric = Number(multiplier);
@@ -550,6 +771,7 @@ export function mountDemoControls({
   onSelectFinding = () => {},
   onSelectLayoutView = () => {},
   onProposeRedesign = () => {},
+  onLoadFamilyHousehold = () => {},
 } = {}) {
   let visible = false;
 
@@ -584,10 +806,16 @@ export function mountDemoControls({
     onSelectFinding,
     onSelectLayoutView,
     onProposeRedesign,
+    onLoadFamilyHousehold,
     onChange: renderDOM,
   });
 
   function handleControlClick(event) {
+    const markerBtn = event.target.closest("[data-seek-second]");
+    if (markerBtn) {
+      controller.seekTimeline(Number(markerBtn.dataset.seekSecond));
+      return;
+    }
     const speedBtn = event.target.closest("[data-sim-speed]");
     if (speedBtn) {
       controller.selectSpeed(Number(speedBtn.dataset.simSpeed));
@@ -599,6 +827,7 @@ export function mountDemoControls({
     else if (btn.id === "sim-pause-btn") controller.triggerPause();
     else if (btn.id === "sim-reset-btn") controller.triggerReset();
     else if (btn.id === "sim-propose-redesign-btn") controller.triggerRedesign();
+    else if (btn.id === "sim-load-family-btn") controller.triggerLoadFamily();
   }
 
   function handleControlChange(event) {
@@ -652,10 +881,16 @@ export function mountDemoControls({
   return {
     ...controller,
     /**
-     * Fast in-place clock + scrubber update during 60fps animation frames.
+     * Fast in-place clock, scrubber, and per-member live status update during 60fps animation frames.
      * Avoids replacing `controlHost.innerHTML` while buttons are being clicked.
      */
-    updateClockAndProgress({ currentTime, currentSecond, startSecond, endSecond } = {}) {
+    updateClockAndProgress({
+      currentTime,
+      currentSecond,
+      startSecond,
+      endSecond,
+      snapshots,
+    } = {}) {
       if (!visible || !controlHost) return;
       const clockEl = controlHost.querySelector("#sim-clock");
       if (clockEl && typeof currentTime === "string") {
@@ -666,6 +901,17 @@ export function mountDemoControls({
         if (Number.isFinite(Number(startSecond))) scrubber.min = String(startSecond);
         if (Number.isFinite(Number(endSecond))) scrubber.max = String(endSecond);
         scrubber.value = String(Math.round(Number(currentSecond)));
+      }
+      if (Array.isArray(snapshots)) {
+        for (const snap of snapshots) {
+          if (!snap?.agentId) continue;
+          const badge = controlHost.querySelector(
+            `[data-agent-status="${CSS.escape ? CSS.escape(snap.agentId) : snap.agentId}"]`,
+          );
+          if (badge) {
+            badge.textContent = formatActivityLabel(snap.activity, snap.roomId);
+          }
+        }
       }
     },
     setVisible(nextVisible) {

@@ -75,9 +75,39 @@
       </footer>
     </main>
     <main id="studio" hidden>
+      <nav class="planner-flow-strip" id="planner-flow-strip" aria-label="7-step home planning journey">
+        <button type="button" class="planner-flow-step" data-journey-step="1" data-journey-action="setup">
+          <span class="planner-step-num">1</span>
+          <span>Choose / import home</span>
+        </button>
+        <button type="button" class="planner-flow-step" data-journey-step="2" data-journey-action="household">
+          <span class="planner-step-num">2</span>
+          <span>Meet the household</span>
+        </button>
+        <button type="button" class="planner-flow-step" data-journey-step="3" data-journey-action="simulate">
+          <span class="planner-step-num">3</span>
+          <span>Simulate daily life</span>
+        </button>
+        <button type="button" class="planner-flow-step" data-journey-step="4" data-journey-action="findings">
+          <span class="planner-step-num">4</span>
+          <span>See measured problems</span>
+        </button>
+        <button type="button" class="planner-flow-step" data-journey-step="5" data-journey-action="redesign">
+          <span class="planner-step-num">5</span>
+          <span>Ask Gemini to redesign</span>
+        </button>
+        <button type="button" class="planner-flow-step" data-journey-step="6" data-journey-action="compare">
+          <span class="planner-step-num">6</span>
+          <span>Compare before / after</span>
+        </button>
+        <button type="button" class="planner-flow-step" data-journey-step="7" data-journey-action="shop">
+          <span class="planner-step-num">7</span>
+          <span>Review suggested products</span>
+        </button>
+      </nav>
       <section class="intro">
         <div>
-          <p class="eyebrow">Interior design studio</p>
+          <p class="eyebrow">Home digital twin planner</p>
           <h1 id="room-name">Living room</h1>
           <p class="subtitle">5.4 × 4.2 m · Living space</p>
         </div>
@@ -105,7 +135,12 @@
         <section class="studio" aria-label="Room editor">
           <div class="studio-head">
             <div class="studio-title">
-              <span data-icon="cube"></span> Room preview
+              <span data-icon="cube"></span> <span>3D Home planner</span>
+              <span class="studio-legend-pills" id="studio-overlay-legend" hidden>
+                <span class="legend-pill legend-hotspot">Hotspot</span>
+                <span class="legend-pill legend-sightline">Sightline</span>
+                <span class="legend-pill legend-access">♿ Clearance</span>
+              </span>
             </div>
             <div class="view-switch" aria-label="Camera view">
               <button type="button" id="view-3d" aria-pressed="true">
@@ -258,26 +293,35 @@
         </aside>
       </div>
       <section id="twin-results-section" hidden></section>
-      <section class="inventory">
+      <section class="inventory" aria-label="Furnishing and suggested products tray">
         <div class="inventory-head">
           <div>
-            <p class="eyebrow">Furniture inventory</p>
-            <h2>In this room <span id="item-count"></span></h2>
+            <p class="eyebrow">Step 7 · Furnishings &amp; suggested products</p>
+            <h2>Pieces in this plan <span id="item-count"></span></h2>
           </div>
-          <button class="secondary" id="add-piece">
-            <span data-icon="plus"></span> Add furniture
-          </button>
+          <div class="inventory-actions">
+            <button class="secondary" id="add-piece">
+              <span data-icon="plus"></span> Add furniture
+            </button>
+            <button class="primary" id="tray-review-products" type="button">
+              Review products &amp; checkout →
+            </button>
+          </div>
         </div>
         <div class="item-list" id="inventory"></div>
       </section>
     </main>
     <main id="shop-page" hidden aria-labelledby="shop-title">
-      <p class="eyebrow">Shopping list</p>
-      <h1 id="shop-title">Saved pieces</h1>
+      <p class="eyebrow">Step 7 · Merchant shopping handoff</p>
+      <h1 id="shop-title">Suggested &amp; saved pieces</h1>
       <p class="shop-intro" id="shop-intro"></p>
+      <div class="shop-honesty-banner" id="shop-honesty-banner">
+        <strong>Direct merchant storefronts · No synthetic cross-merchant cart</strong>
+        <span>Each piece links directly to its own merchant listing or single-merchant Shopify checkout so pricing and stock come straight from the seller.</span>
+      </div>
       <div id="saved-products"></div>
       <div class="shop-foot">
-        <button id="back-to-tour" class="secondary">Back to the room</button
+        <button id="back-to-tour" class="secondary">Back to 3D home planner</button
         ><strong id="saved-total"></strong>
       </div>
     </main>

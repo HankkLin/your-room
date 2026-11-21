@@ -1,6 +1,6 @@
 import { mergeHouseFixturesIntoItems, toSceneObject } from "../house-model.js";
 import { prepareHouseholdReplay, validatePersonas } from "./contracts/persona.js";
-import { STRESS_SCENARIO_TYPES } from "./contracts/simulation.js";
+import { FINDING_TYPES, STRESS_SCENARIO_TYPES } from "./contracts/simulation.js";
 import { listPersonaRooms } from "./persona/rooms.js";
 import {
   extractCategoryScoreMap,
@@ -9,8 +9,11 @@ import {
 } from "./redesign/index.js";
 import { getCandidateProducts } from "./shopify/candidate-products.js";
 import {
+  GRANDPARENTS_STAYOVER_SCENARIO,
   MORNING_ROUTINE_SCENARIO,
+  buildNavigationModel,
   createDemoHousehold,
+  createFamilyStayoverPersonas,
   createWholeHomeDemoPersonas,
   evaluateHouseholdExperience,
   getSimulationSnapshotAt,
@@ -26,6 +29,107 @@ export const NORMAL_DAY_SCENARIO = Object.freeze({
   endMinute: 1320, // 22:00
   stepSeconds: 2,
 });
+
+const WHEELCHAIR_REQUIRED_WIDTH_M = 0.9;
+const WHEELCHAIR_TURNING_DIAMETER_M = 1.5;
+
+/**
+ * Deterministic wheelchair & mobility clearance validator:
+ * Checks interior doorways (`< 0.90 m` clear width) and primary room turning spaces
+ * (`< 1.50 m` free turning circle) when any household member has `wheelchair === true`
+ * or `needs.accessibility >= 0.75`.
+ */
+export function evaluateAccessibilityClearance(house, household = []) {
+  const needsWheelchair = (household || []).some(
+    (p) => Boolean(p?.wheelchair) || Number(p?.needs?.accessibility) >= 0.75,
+  );
+  if (!needsWheelchair || !house) return [];
+
+  const nav = buildNavigationModel(house, { agentRadius: 0.24 });
+  const findings = [];
+
+  for (const door of house.doors || []) {
+    if (!door || door.blocked || door.closed) continue;
+    const widthM = Math.round((Number(door.width) || 0.85) * 100) / 100;
+    if (widthM < WHEELCHAIR_REQUIRED_WIDTH_M - 0.005) {
+      const roomBName =
+        house.rooms?.find((r) => r.id === door.roomB)?.name ||
+        house.rooms?.find((r) => r.id === door.roomA)?.name ||
+        door.roomB ||
+        door.roomA ||
+        "Doorway";
+      const targetRoomId = door.roomB || door.roomA || null;
+      findings.push({
+        id: `accessibility-door-${door.id}`,
+        type: FINDING_TYPES.ACCESSIBILITY_CLEARANCE,
+        roomId: targetRoomId,
+        location: {
+          roomId: targetRoomId,
+          label: `${roomBName} doorway`,
+          position: Array.isArray(door.position)
+            ? [Number(door.position[0]), Number(door.position[1])]
+            : undefined,
+        },
+        severity: widthM < 0.82 ? 0.86 : 0.68,
+        title: `${roomBName} wheelchair doorway pinch`,
+        summary: `${roomBName} doorway measures ${widthM.toFixed(2)} m wide — narrower than the 0.90 m comfortable wheelchair passage standard.`,
+        evidence: {
+          wheelchair: true,
+          doorId: door.id,
+          measuredWidthMeters: widthM,
+          requiredWidthMeters: WHEELCHAIR_REQUIRED_WIDTH_M,
+        },
+      });
+    }
+  }
+
+  // Check 1.50 m wheelchair turning circle (radius >= 0.75 m free clearance) in Kitchen & Bathroom
+  for (const room of house.rooms || []) {
+    if (!room || !["kitchen", "bathroom"].includes(room.kind || room.id)) continue;
+    const roomIdx = nav.roomIndexById.get(room.id);
+    if (roomIdx == null) continue;
+
+    let maxRadius = 0;
+    let bestWorld = null;
+    for (let row = 0; row < nav.height; row += 1) {
+      for (let col = 0; col < nav.width; col += 1) {
+        const idx = row * nav.width + col;
+        if (nav.roomIndexGrid[idx] !== roomIdx) continue;
+        const r = nav.clearanceGrid[idx];
+        if (r > maxRadius) {
+          maxRadius = r;
+          bestWorld = nav.cellToWorld(col, row);
+        }
+      }
+    }
+
+    const turningDiameter = Math.round(maxRadius * 2 * 100) / 100;
+    if (turningDiameter > 0 && turningDiameter < WHEELCHAIR_TURNING_DIAMETER_M - 0.04) {
+      findings.push({
+        id: `accessibility-turn-${room.id}`,
+        type: FINDING_TYPES.ACCESSIBILITY_CLEARANCE,
+        roomId: room.id,
+        location: {
+          roomId: room.id,
+          label: room.name || room.id,
+          position: bestWorld || undefined,
+        },
+        severity: turningDiameter < 1.25 ? 0.78 : 0.62,
+        title: `${room.name || room.id} tight wheelchair turn`,
+        summary: `Largest clear turning circle in ${room.name || room.id} is ${turningDiameter.toFixed(2)} m across (1.50 m recommended for 360° wheelchair pivot).`,
+        evidence: {
+          wheelchair: true,
+          roomId: room.id,
+          measuredWidthMeters: turningDiameter,
+          requiredWidthMeters: WHEELCHAIR_TURNING_DIAMETER_M,
+          turningRadiusMeters: Math.round(maxRadius * 100) / 100,
+        },
+      });
+    }
+  }
+
+  return findings;
+}
 
 function summarizeErrorReason(reason = "") {
   const str = String(reason);
@@ -244,6 +348,59 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     };
   }
 
+  if (scenarioId === "grandparents-stayover") {
+    const familyPersonas = createFamilyStayoverPersonas(capturedHouse);
+    const simulation = simulateHouse(
+      capturedHouse,
+      familyPersonas,
+      GRANDPARENTS_STAYOVER_SCENARIO,
+    );
+    const evaluation = evaluateHouseholdExperience({
+      house: capturedHouse,
+      household: familyPersonas,
+      simulation,
+      scenario: GRANDPARENTS_STAYOVER_SCENARIO,
+    });
+    const accessibilityFindings = evaluateAccessibilityClearance(
+      capturedHouse,
+      familyPersonas,
+    );
+    const combinedFindings = [...accessibilityFindings, ...evaluation.findings];
+    const baseScores = extractCategoryScoreMap(evaluation);
+    const accessDeduction = Math.min(35, accessibilityFindings.length * 11);
+    const scores = {
+      ...baseScores,
+      movement: Math.max(0, (baseScores.movement ?? 80) - accessDeduction),
+    };
+    const overallBeforeScore = Math.max(
+      0,
+      Math.round(evaluation.overallScore - accessDeduction * 0.25),
+    );
+
+    return {
+      scenarioId,
+      scenarioConfig: GRANDPARENTS_STAYOVER_SCENARIO,
+      capturedHouse,
+      household: familyPersonas,
+      displayPersonas: familyPersonas,
+      simulation,
+      getSnapshotAt: getSimulationSnapshotAt,
+      agentRoutes: [],
+      isEvacuation: false,
+      clockMode: "clock",
+      simSecondsPerRealSecond: 400,
+      findings: combinedFindings,
+      scores,
+      beforeScores: scores,
+      afterScores: null,
+      overallBeforeScore,
+      overallAfterScore: null,
+      canRedesign: combinedFindings.length > 0,
+      isMockData: false,
+      evaluation,
+    };
+  }
+
   // `morning-routine` or `normal-day`
   const scenarioConfig =
     scenarioId === "normal-day"
@@ -321,17 +478,23 @@ export async function executeStudioRedesign({
     throw new Error("No active whole-home layout to redesign.");
   }
 
-  const { displayPersonas, simulationHousehold } = resolveValidHouseholdForHouse(
-    state,
-    beforeHouse,
-  );
+  const resolved = resolveValidHouseholdForHouse(state, beforeHouse);
+  const isGrandparentsScenario = scenarioId === "grandparents-stayover";
+  const displayPersonas = isGrandparentsScenario
+    ? createFamilyStayoverPersonas(beforeHouse)
+    : resolved.displayPersonas;
+  const simulationHousehold = isGrandparentsScenario
+    ? displayPersonas
+    : resolved.simulationHousehold;
 
   const scenario =
     scenarioId === "normal-day"
       ? NORMAL_DAY_SCENARIO
-      : MORNING_ROUTINE_SCENARIO;
+      : isGrandparentsScenario
+        ? GRANDPARENTS_STAYOVER_SCENARIO
+        : MORNING_ROUTINE_SCENARIO;
   const household =
-    scenarioId === "normal-day" && displayPersonas.length > 0
+    (scenarioId === "normal-day" || isGrandparentsScenario) && displayPersonas.length > 0
       ? displayPersonas
       : simulationHousehold;
 
@@ -376,6 +539,30 @@ export async function executeStudioRedesign({
     replayResult.selectedPatch,
   );
 
+  // Preserve deterministic wheelchair / mobility clearance checks on before & after layouts
+  const beforeAccessFindings = evaluateAccessibilityClearance(beforeHouse, household);
+  const afterAccessFindings = evaluateAccessibilityClearance(afterHouse, household);
+  if (beforeAccessFindings.length > 0 || afterAccessFindings.length > 0) {
+    const afterIds = new Set(afterAccessFindings.map((f) => f.id));
+    const beforeIds = new Set(beforeAccessFindings.map((f) => f.id));
+    const resolvedAccess = beforeAccessFindings.filter((f) => !afterIds.has(f.id));
+    const remainingAccess = afterAccessFindings.filter((f) => beforeIds.has(f.id));
+    const introducedAccess = afterAccessFindings.filter((f) => !beforeIds.has(f.id));
+    uiPayload.findings = [...afterAccessFindings, ...(uiPayload.findings || [])];
+    uiPayload.resolvedFindings = [
+      ...resolvedAccess,
+      ...(uiPayload.resolvedFindings || []),
+    ];
+    uiPayload.remainingFindings = [
+      ...remainingAccess,
+      ...(uiPayload.remainingFindings || []),
+    ];
+    uiPayload.introducedFindings = [
+      ...introducedAccess,
+      ...(uiPayload.introducedFindings || []),
+    ];
+  }
+
   return {
     accepted: true,
     replayResult,
@@ -389,6 +576,7 @@ export async function executeStudioRedesign({
     beforeItems,
     afterItems,
     patchChanges,
+    beforeAccessFindings,
     afterSimulation: replayResult.after.evaluation.simulation,
     beforeSimulation: replayResult.before.evaluation.simulation,
     redesignMessage: replayResult.selectedPatch?.reasoning || null,

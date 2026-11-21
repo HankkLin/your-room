@@ -123,6 +123,17 @@ export function formatFindingEvidenceChips(finding) {
     return chips;
   }
 
+  if (type === "ACCESSIBILITY_CLEARANCE" || ev.wheelchair) {
+    chips.push("♿ Wheelchair route");
+    if (Number.isFinite(Number(ev.measuredWidthMeters))) {
+      chips.push(`${Number(ev.measuredWidthMeters).toFixed(2)} m gap`);
+    }
+    if (Number.isFinite(Number(ev.requiredWidthMeters))) {
+      chips.push(`≥ ${Number(ev.requiredWidthMeters).toFixed(2)} m needed`);
+    }
+    return chips;
+  }
+
   if (Number.isFinite(Number(ev.distanceMeters))) {
     chips.push(`${Number(ev.distanceMeters).toFixed(1)} m`);
   }
@@ -282,23 +293,25 @@ export function mapFindingToOverlaySpec(finding, context = {}) {
   if (
     type === "EVACUATION_BOTTLENECK" ||
     type === "NO_EVACUATION_PATH" ||
-    type === "NO_PATH"
+    type === "NO_PATH" ||
+    type === "ACCESSIBILITY_CLEARANCE"
   ) {
     const position = resolvePointFromContext(
       locPos,
-      ev.exitDoorId,
+      ev.exitDoorId || ev.doorId || ev.blockingObjectId,
       roomId,
       context,
     );
     if (!position) return null;
+    const isWheelchair = type === "ACCESSIBILITY_CLEARANCE" || Boolean(ev.wheelchair);
     return {
       id: finding.id || `overlay-${type}`,
-      kind: "bottleneck",
+      kind: isWheelchair ? "accessibility" : "bottleneck",
       findingType: type,
-      color: "#c43828",
-      radius: 0.72,
+      color: isWheelchair ? "#2f6b8a" : "#c43828",
+      radius: isWheelchair ? 0.68 : 0.72,
       position,
-      doorId: ev.exitDoorId || null,
+      doorId: ev.exitDoorId || ev.doorId || null,
       roomId,
       relatedAgentIds,
     };
@@ -440,6 +453,7 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
     hotspotRing: new THREE.RingGeometry(0.84, 1.0, 32),
     endpointSphere: new THREE.SphereGeometry(0.075, 12, 10),
     bottleneckPillar: new THREE.CylinderGeometry(0.05, 0.05, 1.45, 12),
+    wheelRing: new THREE.TorusGeometry(0.23, 0.032, 10, 22),
   };
 
   const shadowMat = new THREE.MeshBasicMaterial({
@@ -491,16 +505,35 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
     rec.bodyMat.dispose();
     rec.headMat.dispose();
     rec.pipMat.dispose();
+    rec.wheelMat?.dispose();
     rec.label?.texture?.dispose();
     rec.label?.material?.dispose();
     avatarRecords.delete(agentId);
   }
 
-  function ensureAvatar(agentId, { name, color } = {}) {
+  function ensureAvatar(agentId, { name, color, ageGroup = "adult", wheelchair = false, heightScale = null } = {}) {
     const resolvedName = name || agentId;
     const style = deriveAgentStyle(agentId, color);
+    const scale =
+      Number.isFinite(Number(heightScale)) && Number(heightScale) > 0.4
+        ? Number(heightScale)
+        : wheelchair
+          ? 0.86
+          : ageGroup === "child"
+            ? 0.74
+            : ageGroup === "teen"
+              ? 0.88
+              : ageGroup === "olderAdult"
+                ? 0.94
+                : 1.0;
     const existing = avatarRecords.get(agentId);
-    if (existing && existing.name === resolvedName && existing.color === style.color) {
+    if (
+      existing &&
+      existing.name === resolvedName &&
+      existing.color === style.color &&
+      existing.wheelchair === Boolean(wheelchair) &&
+      Math.abs(existing.scale - scale) < 0.01
+    ) {
       return existing;
     }
     if (existing) removeAvatar(agentId);
@@ -551,23 +584,42 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
     pip.position.set(0, 0.94, 0.22);
     body.add(pip);
 
+    let wheelMat = null;
+    if (wheelchair) {
+      wheelMat = new THREE.MeshStandardMaterial({ color: "#3d4a52", roughness: 0.5 });
+      for (const side of [-0.23, 0.23]) {
+        const wheel = new THREE.Mesh(sharedGeometries.wheelRing, wheelMat);
+        wheel.rotation.y = Math.PI / 2;
+        wheel.position.set(side, 0.25, -0.02);
+        body.add(wheel);
+      }
+    }
+    body.scale.setScalar(scale);
+
     group.add(body);
 
     const label = createNameLabelSprite(resolvedName, style.color);
-    if (label) group.add(label.sprite);
+    if (label) {
+      label.sprite.position.y = 1.56 * scale + 0.32;
+      group.add(label.sprite);
+    }
 
     avatarsGroup.add(group);
     const record = {
       agentId,
       name: resolvedName,
       color: style.color,
+      wheelchair: Boolean(wheelchair),
+      scale,
       group,
       body,
       halo,
       bodyMat,
       headMat,
       pipMat,
+      wheelMat,
       label,
+      walkPhase: 0,
     };
     avatarRecords.set(agentId, record);
     return record;
@@ -582,8 +634,22 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
       const rec = ensureAvatar(snap.agentId, {
         name: meta.name || snap.name || snap.agentId,
         color: meta.color || null,
+        ageGroup: meta.ageGroup || snap.ageGroup || "adult",
+        wheelchair: Boolean(meta.wheelchair || snap.wheelchair),
+        heightScale: meta.heightScale ?? null,
       });
-      rec.group.position.set(Number(snap.position[0]), 0, Number(snap.position[1]));
+      const prevX = rec.group.position.x;
+      const prevZ = rec.group.position.z;
+      const nextX = Number(snap.position[0]);
+      const nextZ = Number(snap.position[1]);
+      const stepDist = Math.hypot(nextX - prevX, nextZ - prevZ);
+      rec.group.position.set(nextX, 0, nextZ);
+      if (snap.moving && !rec.wheelchair && stepDist > 0.002) {
+        rec.walkPhase = (rec.walkPhase + Math.min(0.65, stepDist * 4.2)) % (Math.PI * 2);
+        rec.body.position.y = Math.abs(Math.sin(rec.walkPhase)) * 0.032;
+      } else {
+        rec.body.position.y = 0;
+      }
       if (Number.isFinite(Number(snap.yaw))) {
         // Simulation yaw = atan2(dz, dx) in X/Z plane -> Three.js +Z forward rotates by PI/2 - yaw
         rec.body.rotation.y = Math.PI / 2 - Number(snap.yaw);
@@ -641,12 +707,12 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
       group.userData.findingId = spec.id;
       group.userData.findingType = spec.findingType;
 
-      if (spec.kind === "hotspot" || spec.kind === "bottleneck") {
-        const radius = spec.radius * (isFocused ? 1.22 : 1.0);
+      if (spec.kind === "hotspot" || spec.kind === "bottleneck" || spec.kind === "accessibility") {
+        const radius = spec.radius * (isFocused ? 1.24 : 1.0);
         const discMat = new THREE.MeshBasicMaterial({
           color: spec.color,
           transparent: true,
-          opacity: isFocused ? 0.34 : 0.18,
+          opacity: isFocused ? 0.36 : 0.2,
           side: THREE.DoubleSide,
           depthWrite: false,
         });
@@ -659,7 +725,7 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
         const ringMat = new THREE.MeshBasicMaterial({
           color: spec.color,
           transparent: true,
-          opacity: isFocused ? 0.98 : 0.72,
+          opacity: isFocused ? 0.98 : 0.78,
           side: THREE.DoubleSide,
           depthWrite: false,
         });
@@ -669,7 +735,22 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
         ring.position.set(spec.position[0], 0.036, spec.position[1]);
         group.add(ring);
 
-        if (spec.kind === "bottleneck" || isFocused) {
+        if (spec.kind === "accessibility") {
+          const outerMat = new THREE.MeshBasicMaterial({
+            color: spec.color,
+            transparent: true,
+            opacity: isFocused ? 0.75 : 0.42,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          });
+          const turnRing = new THREE.Mesh(sharedGeometries.hotspotRing, outerMat);
+          turnRing.rotation.x = -Math.PI / 2;
+          turnRing.scale.setScalar(0.75); // 1.50 m turning diameter indicator
+          turnRing.position.set(spec.position[0], 0.039, spec.position[1]);
+          group.add(turnRing);
+        }
+
+        if (spec.kind === "bottleneck" || spec.kind === "accessibility" || isFocused) {
           const pillarMat = new THREE.MeshBasicMaterial({
             color: spec.color,
             transparent: true,

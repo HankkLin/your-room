@@ -164,6 +164,7 @@ export function createSimulationPlaybackController({
         endSecond,
         progress,
         currentTime,
+        snapshots,
       });
     }
     return { currentTime, snapshots, visibleRoutes };
@@ -221,12 +222,23 @@ export function createSimulationPlaybackController({
     selectedFindingId = null;
 
     agentMeta = new Map();
+    const personaLookup = new Map(
+      (payload?.personas || []).map((p) => [p?.id, p]),
+    );
     for (const agent of sim?.agents || []) {
       if (!agent?.id) continue;
+      const persona = personaLookup.get(agent.id);
       agentMeta.set(agent.id, {
         id: agent.id,
-        name: agent.name || agent.id,
-        color: agent.color || null,
+        name: agent.name || persona?.name || agent.id,
+        color: agent.color || persona?.color || null,
+        role: agent.role || persona?.role || null,
+        ageGroup: agent.ageGroup || persona?.ageGroup || "adult",
+        wheelchair: Boolean(
+          agent.wheelchair ||
+            persona?.wheelchair ||
+            Number(persona?.needs?.accessibility) >= 0.85,
+        ),
       });
     }
     status = "READY";
