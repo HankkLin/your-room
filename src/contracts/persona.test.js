@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validatePersonaRooms, validatePersonas } from './persona.js';
+import { prepareHouseholdReplay, validatePersonaRooms, validatePersonas } from './persona.js';
+import { compareHouseholdLayouts } from '../persona/compare-household-layouts.js';
 import { listPersonaRooms } from '../persona/rooms.js';
 import { createSampleHousehold } from '../persona/sample-household.js';
 
 const rooms = [{ id: 'study', name: 'Study' }, { id: 'living-room', name: 'Living room' }];
+const singleRoom = listPersonaRooms({ roomName: 'Family room' });
+
+function flexibleActivity(activity, overrides = {}) {
+  return { activity, roomId: 'room-1', windowStartMinute: 510, windowEndMinute: 720, durationMinutes: 45, ...overrides };
+}
 
 test('the two-room handoff preserves Sam’s destination and the overlap with Alex’s work', () => {
   const personas = createSampleHousehold(rooms);
@@ -39,6 +45,70 @@ test('a schedule can use midnight and adjacent entries regardless of input order
   assert.equal(alex.schedule[0].startMinute, 1320);
 });
 
+test('flexible windows resolve deterministically around fixed times and retain destinations', () => {
+  const [alex] = createSampleHousehold(singleRoom);
+  alex.schedule = [
+    { activity: 'work', roomId: 'room-1', startMinute: 540, endMinute: 600 },
+    flexibleActivity('exercise'),
+    flexibleActivity('eat', { durationMinutes: 30 }),
+    flexibleActivity('relax', { windowStartMinute: 1410, windowEndMinute: 1440, durationMinutes: 30 }),
+  ];
+  const before = structuredClone(alex);
+  const replay = prepareHouseholdReplay([alex], singleRoom);
+  assert.deepEqual(replay[0].schedule, [
+    { activity: 'work', roomId: 'room-1', startMinute: 540, endMinute: 600 },
+    { activity: 'exercise', roomId: 'room-1', startMinute: 600, endMinute: 645 },
+    { activity: 'eat', roomId: 'room-1', startMinute: 645, endMinute: 675 },
+    { activity: 'relax', roomId: 'room-1', startMinute: 1410, endMinute: 1440 },
+  ]);
+  assert.deepEqual(alex, before);
+});
+
+test('an unscheduled guest keeps their profile and has no events in the daily replay', () => {
+  const [guest] = createSampleHousehold(singleRoom);
+  guest.schedule = [];
+  assert.equal(validatePersonas([guest], singleRoom), null);
+  assert.deepEqual(prepareHouseholdReplay([guest], singleRoom), []);
+  assert.equal(guest.preferences[0], 'Quiet workspace');
+});
+
+test('a before/after comparison reuses the resolved household despite changes during the first run', async () => {
+  const [alex, guest] = createSampleHousehold(singleRoom);
+  const work = { activity: 'work', roomId: 'room-1', startMinute: 540, endMinute: 600 };
+  alex.schedule = [flexibleActivity('exercise'), work];
+  guest.schedule = [];
+  const expected = [{ ...alex, schedule: [
+    work,
+    { activity: 'exercise', roomId: 'room-1', startMinute: 600, endMinute: 645 },
+  ] }];
+  const scenes = [{ layout: 'before' }, { layout: 'after' }];
+  const calls = [];
+  const result = await compareHouseholdLayouts({
+    beforeScene: scenes[0], afterScene: scenes[1], personas: [alex, guest], rooms: singleRoom,
+    async simulate(scene, replay) {
+      calls.push({ scene, replay: structuredClone(replay) });
+      replay[0].schedule[0].roomId = 'mutated';
+      alex.schedule[0].windowStartMinute = 630;
+      return scene.layout;
+    },
+  });
+  assert.deepEqual(result, { before: 'before', after: 'after' });
+  assert.deepEqual(calls, scenes.map((scene) => ({ scene, replay: expected })));
+});
+
+test('a flexible activity blocked by a fixed activity produces an error before replay', async () => {
+  const [alex] = createSampleHousehold(singleRoom);
+  alex.schedule = [
+    { activity: 'work', roomId: 'room-1', startMinute: 540, endMinute: 600 },
+    flexibleActivity('exercise', { windowEndMinute: 600 }),
+  ];
+  assert.match(validatePersonas([alex], singleRoom), /cannot fit/);
+  await assert.rejects(compareHouseholdLayouts({
+    beforeScene: {}, afterScene: {}, personas: [alex], rooms: singleRoom,
+    simulate: () => assert.fail('Invalid schedules should not reach the simulator'),
+  }), /cannot fit/);
+});
+
 const invalidCases = [
   ['blank name', ([alex]) => { alex.name = ' '; }, /ID and name/],
   ['duplicate person ID', ([alex, sam]) => { sam.id = alex.id; }, /unique IDs/],
@@ -50,7 +120,19 @@ const invalidCases = [
   ['reversed times', ([alex]) => { alex.schedule[0].endMinute = 500; }, /activity times/],
   ['fractional times', ([alex]) => { alex.schedule[0].endMinute = 541.5; }, /activity times/],
   ['after midnight', ([alex]) => { alex.schedule[0].endMinute = 1441; }, /activity times/],
-  ['empty schedule', ([alex]) => { alex.schedule = []; }, /schedule entries/],
+  ['missing schedule', ([alex]) => { delete alex.schedule; }, /schedule entries/],
+  ['incomplete flexible window', ([alex]) => {
+    alex.schedule = [{ activity: 'work', roomId: 'study', windowStartMinute: 540 }];
+  }, /window and duration/],
+  ['duration longer than the window', ([alex]) => {
+    alex.schedule = [flexibleActivity('work', { roomId: 'study', durationMinutes: 211 })];
+  }, /window and duration/],
+  ['mixed fixed and flexible timing', ([alex]) => {
+    alex.schedule[0].durationMinutes = 45;
+  }, /window and duration/],
+  ['flexible time outside the day', ([alex]) => {
+    alex.schedule = [flexibleActivity('work', { roomId: 'study', windowEndMinute: 1441 })];
+  }, /window and duration/],
   ['same-person overlap', ([, sam]) => { sam.schedule[1].startMinute = 959; }, /overlapping/],
 ];
 

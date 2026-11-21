@@ -74,26 +74,45 @@ function timeField(label, entry, key) {
   return field(label, input);
 }
 
-function memberCard(member, rooms) {
+function durationField(entry) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "1";
+  input.max = "1440";
+  if (Number.isFinite(entry.durationMinutes)) input.value = entry.durationMinutes;
+  input.addEventListener("input", () => {
+    entry.durationMinutes = input.valueAsNumber;
+  });
+  return field("Duration (minutes)", input);
+}
+
+function memberCard(member, rooms, onRemoveGuest) {
   const card = document.createElement("article");
   card.className = "household-member";
   const heading = document.createElement("h3");
-  heading.textContent = member.name;
+  const fallbackName = onRemoveGuest ? "Guest" : "Household member";
+  heading.textContent = member.name || fallbackName;
   const name = document.createElement("input");
   name.value = member.name;
   name.maxLength = 80;
   name.addEventListener("input", () => {
     member.name = name.value;
-    heading.textContent = name.value.trim() || "Household member";
+    heading.textContent = name.value.trim() || fallbackName;
   });
   const nameField = field("Name", name);
   nameField.classList.add("household-member-name");
 
   const entries = document.createElement("div");
   entries.className = "household-schedule";
+  const noRoutine = document.createElement("p");
+  noRoutine.className = "muted";
+  noRoutine.textContent = "No routine";
+  noRoutine.hidden = member.schedule.length > 0;
+  entries.append(noRoutine);
   const add = button("Add activity");
 
-  function appendEntry(entry) {
+  function appendEntry(initialEntry) {
+    let entry = initialEntry;
     const row = document.createElement("div");
     row.className = "household-schedule-entry";
     const activity = document.createElement("select");
@@ -108,18 +127,56 @@ function memberCard(member, rooms) {
     room.addEventListener("change", () => {
       entry.roomId = room.value;
     });
+    const timing = document.createElement("select");
+    timing.append(new Option("Fixed time", "fixed"), new Option("Flexible window", "flexible"));
+    timing.value = Object.hasOwn(entry, "windowStartMinute") ? "flexible" : "fixed";
+    const timingFields = document.createElement("div");
+    timingFields.className = "household-timing-fields";
+
+    function renderTimingFields() {
+      const flexible = timing.value === "flexible";
+      row.classList.toggle("household-schedule-flexible", flexible);
+      timingFields.replaceChildren(...(flexible ? [
+        timeField("Earliest start", entry, "windowStartMinute"),
+        timeField("Latest finish", entry, "windowEndMinute"),
+        durationField(entry),
+      ] : [
+        timeField("Start time", entry, "startMinute"),
+        timeField("End time", entry, "endMinute"),
+      ]));
+    }
+
+    timing.addEventListener("change", () => {
+      const index = member.schedule.indexOf(entry);
+      const { activity, roomId, startMinute, endMinute, windowStartMinute, durationMinutes } = entry;
+      if (timing.value === "flexible") {
+        entry = {
+          activity, roomId, windowStartMinute: startMinute, windowEndMinute: endMinute,
+          durationMinutes: endMinute - startMinute,
+        };
+      } else {
+        entry = {
+          activity, roomId, startMinute: windowStartMinute,
+          endMinute: windowStartMinute + durationMinutes,
+        };
+      }
+      member.schedule[index] = entry;
+      renderTimingFields();
+    });
+    renderTimingFields();
     const remove = button("Remove", "text-btn");
     remove.setAttribute("aria-label", "Remove activity");
     remove.addEventListener("click", () => {
       member.schedule.splice(member.schedule.indexOf(entry), 1);
       row.remove();
+      noRoutine.hidden = member.schedule.length > 0;
       add.focus();
     });
     row.append(
       field("Activity", activity),
       field("Room", room),
-      timeField("Start time", entry, "startMinute"),
-      timeField("End time", entry, "endMinute"),
+      field("Timing", timing),
+      timingFields,
       remove,
     );
     entries.append(row);
@@ -130,9 +187,18 @@ function memberCard(member, rooms) {
   add.addEventListener("click", () => {
     const entry = { activity: "other", roomId: rooms[0]?.id ?? "", startMinute: NaN, endMinute: NaN };
     member.schedule.push(entry);
+    noRoutine.hidden = true;
     appendEntry(entry).focus();
   });
-  card.append(heading, nameField, memberDetails(member), entries, add);
+  const header = document.createElement("header");
+  header.className = "household-member-header";
+  header.append(heading);
+  if (onRemoveGuest) {
+    const removeGuest = button("Remove guest", "text-btn");
+    removeGuest.addEventListener("click", onRemoveGuest);
+    header.append(removeGuest);
+  }
+  card.append(header, nameField, memberDetails(member), entries, add);
   return card;
 }
 
@@ -145,6 +211,7 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
   const roomList = container.querySelector("#household-rooms-list");
   const review = container.querySelector("#household-review");
   const members = container.querySelector("#household-members");
+  const addGuest = container.querySelector("#add-household-guest");
   const save = container.querySelector("#save-household");
   const skip = container.querySelector("#skip-household");
   const generationStatus = container.querySelector("#household-status");
@@ -164,14 +231,19 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
     sample.disabled = !rooms.length;
     save.disabled = pending || !draft.length;
     members.disabled = pending;
+    addGuest.disabled = pending;
+  }
+
+  function updateDraft() {
+    review.hidden = !draft.length;
+    announce(saveStatus);
+    updateControls();
   }
 
   function replaceDraft(personas) {
     draft = structuredClone(personas);
     members.replaceChildren(...draft.map((member) => memberCard(member, rooms)));
-    review.hidden = !draft.length;
-    announce(saveStatus);
-    updateControls();
+    updateDraft();
   }
 
   function close() {
@@ -245,11 +317,34 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
     announce(generationStatus, "Sample household loaded. Review it before saving.");
   });
 
+  addGuest.addEventListener("click", () => {
+    const guest = {
+      id: crypto.randomUUID(),
+      name: "",
+      ageGroup: "adult",
+      preferences: [],
+      dislikes: [],
+      needs: { privacy: 0.5, quiet: 0.5, accessibility: 0.5, daylight: 0.5, social: 0.5 },
+      schedule: [],
+    };
+    const card = memberCard(guest, rooms, () => {
+      draft.splice(draft.indexOf(guest), 1);
+      card.remove();
+      updateDraft();
+      addGuest.focus();
+    });
+    draft.push(guest);
+    members.append(card);
+    updateDraft();
+    card.querySelector(".household-member-name input").focus();
+  });
+
   save.addEventListener("click", () => {
     const personas = draft.map((member) => ({
       ...member,
       name: member.name.trim(),
-      schedule: [...member.schedule].sort((left, right) => left.startMinute - right.startMinute),
+      schedule: [...member.schedule].sort((left, right) =>
+        (left.windowStartMinute ?? left.startMinute) - (right.windowStartMinute ?? right.startMinute)),
     }));
     const error = validatePersonas(personas, rooms);
     if (error) announce(saveStatus, error, true);

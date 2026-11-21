@@ -55,6 +55,15 @@
   padding: 0;
   margin: 0;
 }
+.household-member-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.household-member-header button {
+  flex-shrink: 0;
+}
 .household-member-name {
   max-width: 320px;
 }
@@ -85,11 +94,17 @@
 }
 .household-schedule-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.4fr) repeat(2, minmax(66px, .7fr)) auto;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.4fr) minmax(114px, 1fr) repeat(2, minmax(68px, .7fr)) auto;
   align-items: end;
   gap: 9px;
   padding-bottom: 9px;
   border-bottom: 1px solid var(--line);
+}
+.household-schedule-flexible {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.4fr) minmax(114px, 1fr) repeat(2, minmax(80px, .7fr)) minmax(114px, .8fr) auto;
+}
+.household-timing-fields {
+  display: contents;
 }
 .household-schedule-entry .field {
   margin: 0;
@@ -125,8 +140,6 @@
   .household-rooms {
     grid-row: 1;
   }
-}
-@media (max-width: 560px) {
   .household-schedule-entry {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

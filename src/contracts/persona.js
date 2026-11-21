@@ -1,3 +1,5 @@
+import { isFlexibleActivity, resolveSchedule } from '../persona/resolve-schedule.js';
+
 export const personaActivities = Object.freeze([
   'sleep', 'work', 'study', 'cook', 'eat', 'relax', 'watchTv',
   'bathroom', 'socialize', 'exercise', 'other',
@@ -25,9 +27,14 @@ export function validatePersonaRooms(rooms) {
   return null;
 }
 
-function validateSchedule(schedule, roomIds, name) {
-  if (!Array.isArray(schedule) || !schedule.length || schedule.length > limits.schedule) {
-    return `${name} needs between 1 and ${limits.schedule} schedule entries.`;
+function validTimeRange(start, end) {
+  return Number.isInteger(start) && Number.isInteger(end) &&
+    start >= 0 && start < end && end <= minutesPerDay;
+}
+
+function validateScheduleEntries(schedule, roomIds, name) {
+  if (!Array.isArray(schedule) || schedule.length > limits.schedule) {
+    return `${name} can have up to ${limits.schedule} schedule entries.`;
   }
   for (const entry of schedule) {
     if (!isRecord(entry) || !personaActivities.includes(entry.activity)) {
@@ -35,48 +42,67 @@ function validateSchedule(schedule, roomIds, name) {
     }
     const { roomId, startMinute, endMinute } = entry;
     if (!roomIds.has(roomId)) return `Choose an available room for each of ${name}’s activities.`;
-    if (!Number.isInteger(startMinute) || !Number.isInteger(endMinute) ||
-        startMinute < 0 || startMinute >= endMinute || endMinute > minutesPerDay) {
+    if (isFlexibleActivity(entry)) {
+      const { windowStartMinute, windowEndMinute, durationMinutes } = entry;
+      if (Object.hasOwn(entry, 'startMinute') || Object.hasOwn(entry, 'endMinute') ||
+          !validTimeRange(windowStartMinute, windowEndMinute) || !Number.isInteger(durationMinutes) ||
+          durationMinutes <= 0 || durationMinutes > windowEndMinute - windowStartMinute) {
+        return `Check ${name}’s flexible window and duration. The activity must fit inside the window.`;
+      }
+    } else if (!validTimeRange(startMinute, endMinute)) {
       return `Check ${name}’s activity times. Use an end time after the start, and split overnight activities at midnight.`;
     }
-  }
-  const ordered = [...schedule].sort((a, b) => a.startMinute - b.startMinute);
-  if (ordered.some((entry, index) => index > 0 && entry.startMinute < ordered[index - 1].endMinute)) {
-    return `${name} has overlapping activities.`;
   }
   return null;
 }
 
-export function validatePersonas(personas, rooms) {
+function evaluateHousehold(personas, rooms) {
   if (!Array.isArray(personas) || personas.length > limits.people) {
-    return `A household can have up to ${limits.people} people.`;
+    return { error: `A household can have up to ${limits.people} people.` };
   }
-  if (!personas.length) return null;
+  if (!personas.length) return { replay: [] };
   const roomsError = validatePersonaRooms(rooms);
-  if (roomsError) return roomsError;
+  if (roomsError) return { error: roomsError };
   const roomIds = new Set(rooms.map(({ id }) => id));
   const ids = new Set();
   const validList = (list) => Array.isArray(list) && list.length <= limits.list &&
     list.every((entry) => validText(entry, limits.preference));
 
+  const replay = [];
   for (const persona of personas) {
     if (!isRecord(persona) || !validText(persona.id, limits.name) || !validText(persona.name, limits.name)) {
-      return 'Each household member needs a valid ID and name.';
+      return { error: 'Each household member needs a valid ID and name.' };
     }
     const { id, name, ageGroup, preferences, dislikes, needs, schedule } = persona;
-    if (ids.has(id)) return 'Household members must have unique IDs.';
+    if (ids.has(id)) return { error: 'Household members must have unique IDs.' };
     ids.add(id);
     if (!ageGroups.includes(ageGroup) || !validList(preferences) || !validList(dislikes)) {
-      return `Check ${name}’s age group, preferences, and dislikes.`;
+      return { error: `Check ${name}’s age group, preferences, and dislikes.` };
     }
     if (!isRecord(needs) || Object.keys(needs).length !== needNames.length || needNames.some((key) =>
       !Object.hasOwn(needs, key) || !Number.isFinite(needs[key]) || needs[key] < 0 || needs[key] > 1)) {
-      return `${name}’s needs must each be a number from 0 to 1.`;
+      return { error: `${name}’s needs must each be a number from 0 to 1.` };
     }
-    const scheduleError = validateSchedule(schedule, roomIds, name);
-    if (scheduleError) return scheduleError;
+    const scheduleError = validateScheduleEntries(schedule, roomIds, name);
+    if (scheduleError) return { error: scheduleError };
+    const result = resolveSchedule(schedule);
+    if (result.error === 'overlap') return { error: `${name} has overlapping activities.` };
+    if (result.error === 'window') {
+      return { error: `${name} has a flexible activity that cannot fit. Adjust its window, duration, or other activities.` };
+    }
+    if (result.schedule.length) replay.push({ ...persona, schedule: result.schedule });
   }
-  return null;
+  return { replay };
+}
+
+export function validatePersonas(personas, rooms) {
+  return evaluateHousehold(personas, rooms).error ?? null;
+}
+
+export function prepareHouseholdReplay(personas, rooms) {
+  const { error, replay } = evaluateHousehold(personas, rooms);
+  if (error) throw new Error(error);
+  return structuredClone(replay);
 }
 
 const objectSchema = (properties) => ({
@@ -85,6 +111,7 @@ const objectSchema = (properties) => ({
 const stringEnum = (values) => ({ type: 'string', enum: [...values] });
 const textListSchema = { type: 'array', items: { type: 'string' } };
 const minuteSchema = { type: 'integer', minimum: 0, maximum: minutesPerDay };
+const destinationSchema = { activity: stringEnum(personaActivities), roomId: { type: 'string' } };
 
 // Gemini drafts omit IDs. The server supplies them after parsing the response.
 export const personaDraftSchema = objectSchema({
@@ -99,13 +126,16 @@ export const personaDraftSchema = objectSchema({
         type: 'number', minimum: 0, maximum: 1,
       }]))),
       schedule: {
-        type: 'array', minItems: 1,
-        items: objectSchema({
-          activity: stringEnum(personaActivities),
-          roomId: { type: 'string' },
-          startMinute: minuteSchema,
-          endMinute: minuteSchema,
-        }),
+        type: 'array',
+        items: { anyOf: [
+          objectSchema({ ...destinationSchema, startMinute: minuteSchema, endMinute: minuteSchema }),
+          objectSchema({
+            ...destinationSchema,
+            windowStartMinute: minuteSchema,
+            windowEndMinute: minuteSchema,
+            durationMinutes: { type: 'integer', minimum: 1 },
+          }),
+        ] },
       },
     }),
   },

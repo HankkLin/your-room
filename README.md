@@ -11,7 +11,7 @@ For live household generation, copy `.env.example` to `.env.local` and set `GEMI
 ## The five steps
 
 1. **Room setup** — Upload a photo, try the sample photo, or build a floor plan. Accept the starting footprint or drag its wall handles, enter dimensions, choose a rectangle or L-shape, place doors and windows, and pick finishes. Confirm, correct, or remove detected furniture before continuing.
-2. **Household** — Describe who lives there and when they use the space. Generate a draft or load the sample household, review and edit the schedule, then save or skip to Design.
+2. **Household** — Describe who lives there and when they use the space. Generate a draft or load the sample household. Give each activity fixed times or a flexible window and duration. You can add an occasional guest with no routine. Review the household, then save or skip to Design.
 3. **Design brief** — Add a style reference, choose a palette, set a budget, and describe your requirements. Auto-style places catalog pieces around the furniture you kept. Try “A reading corner with a lamp and no rug under $550.”
 4. **Explore room** — The room opens at eye level. Drag the background to look around, use the minimap viewpoints, or walk using the arrow buttons or W/A/S/D. Drag a piece to reposition it, or select it to rotate, replace, remove, or save it. Expand the room to fill the window. Orbit and overhead views are available for precise editing. The room command field accepts requests such as “remove the rug” and “add a lamp.”
 5. **Shopping list** — Save individual suggestions or save all suggested pieces from the room. The list includes product photos, a subtotal, and links to the selected variants on Shopify merchant stores. Saved projects resume in the same browser.
@@ -23,10 +23,11 @@ For live household generation, copy `.env.example` to `.env.local` and set `GEMI
 - `scene.js` renders the same room in interior, orbit, and floor-plan views. The canvas fallback supports floor-plan editing on devices without WebGL.
 - `offers.json` holds Shopify variant URLs and USD prices captured on November 21, 2026. Meshes and dimensions are approximations. Each merchant confirms current pricing, dimensions and availability. Product images load from merchant CDNs when viewing the shopping list.
 - `src/contracts/persona.js` validates household schedules at generation and save. The Gemini adapter runs on the local server, and approved households are saved in the browser with the project.
+- Flexible activities fit into the earliest free slot inside their window. The resolver reserves fixed activities first and places flexible activities by earliest window opening, breaking ties in entry order. An activity must fit for its full duration. Profiles with no routine stay saved and have no activity in the daily replay.
 
 ### Whole-home integration incomplete
 
-Revisit once Kevin publishes canonical room IDs and a simulator input for household schedules. Update `src/persona/rooms.js` to expose those destinations and ask users to reassign any saved destinations that no longer exist. Use the Alex and Sam fixture to run the same saved schedules before and after clearing a blocked path. Close the milestone when the demo shows the measured change in path availability, as described in the hackathon brief.
+Revisit once Kevin publishes canonical room IDs and a simulator input for household schedules. Update `src/persona/rooms.js` to expose those destinations and ask users to reassign any saved destinations that no longer exist. Pass the two layouts and the simulator to `compareHouseholdLayouts` in `src/persona/compare-household-layouts.js`. It resolves the approved household once and sends both runs the same activity times and room IDs. Use the Alex and Sam fixture to verify that clearing a blocked path changes measured path availability.
 
 ## Verification
 

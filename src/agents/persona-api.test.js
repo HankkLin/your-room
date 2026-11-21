@@ -18,6 +18,9 @@ const draft = {
   needs: { privacy: 0.5, quiet: 0.9, accessibility: 0.2, daylight: 0.5, social: 0.4 },
   schedule: [{ roomId: "room-1", activity: "work", startMinute: 540, endMinute: 1020 }],
 };
+const flexibleEntry = {
+  roomId: "room-1", activity: "exercise", windowStartMinute: 1020, windowEndMinute: 1200, durationMinutes: 30,
+};
 
 function geminiResponse(text) {
   return Response.json({
@@ -88,6 +91,32 @@ test("persona API sends only household context and returns validated personas wi
   assert.deepEqual(persona, draft);
 });
 
+test("persona API preserves fixed times, flexible windows and an occasional guest without a routine", async () => {
+  const household = [
+    { ...draft, schedule: [...draft.schedule, flexibleEntry] },
+    { ...draft, name: "Sam", schedule: [] },
+  ];
+  const response = await callMiddleware(generator((_, options) => {
+    const prompt = JSON.parse(options.body);
+    const instructions = prompt.systemInstruction.parts[0].text;
+    assert.match(instructions, /earliest start.*latest end/);
+    assert.match(instructions, /empty schedule.*guests/);
+    const schedule = prompt.generationConfig.responseJsonSchema.properties.personas.items.properties.schedule;
+    assert.equal(schedule.minItems ?? 0, 0);
+    assert.match(JSON.stringify(schedule.items), /"durationMinutes"/);
+    return geminiResponse(JSON.stringify({ personas: household }));
+  }), {
+    body: {
+      ...input,
+      description: "Alex works at home 9 AM to 5 PM and exercises for 30 minutes anytime from 5 to 8 PM. Sam only visits occasionally.",
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const { personas } = JSON.parse(response.text);
+  assert.deepEqual(personas.map(({ id, ...persona }) => persona), household);
+});
+
 test("persona generation chooses an available structured-output fallback", async () => {
   const response = await callMiddleware(generator((url) => {
     assert.match(url, /\/gemini-4-neon:generateContent$/);
@@ -133,11 +162,18 @@ test("invalid persona API requests never invoke Gemini", async () => {
 
 test("malformed, blocked, empty and invalid Gemini drafts return safe errors", async () => {
   const unknownRoom = { ...draft, schedule: [{ ...draft.schedule[0], roomId: "unavailable" }] };
+  const invalidFlexibleSchedules = [
+    { ...flexibleEntry, durationMinutes: 181 },
+    { ...flexibleEntry, startMinute: 1050, endMinute: 1080 },
+  ];
   const results = [
     () => geminiResponse(`bad response ${key}`),
     () => Response.json({ promptFeedback: { blockReason: "SAFETY" } }),
     () => geminiResponse(JSON.stringify({ personas: [] })),
     () => geminiResponse(JSON.stringify({ personas: [unknownRoom] })),
+    ...invalidFlexibleSchedules.map((entry) => () => geminiResponse(JSON.stringify({
+      personas: [{ ...draft, schedule: [entry] }],
+    }))),
     () => Response.json({ error: `upstream details ${key}` }, { status: 403 }),
   ];
 

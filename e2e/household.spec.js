@@ -101,6 +101,69 @@ test("a generated household can be edited, saved, and reopened after furnishing"
   await expect(personName(page)).toHaveCount(0);
 });
 
+test("flexible activities and guests without a routine survive the design flow", async ({ page }) => {
+  const flexibleWork = {
+    activity: "work",
+    roomId: "room-1",
+    windowStartMinute: 780,
+    windowEndMinute: 960,
+    durationMinutes: 30,
+  };
+  const scheduled = { ...personas[0], schedule: [flexibleWork] };
+  const unscheduled = { ...personas[1], schedule: [] };
+  await page.route(endpoint, (route) => route.fulfill({
+    json: { personas: [scheduled, unscheduled] },
+  }));
+  await createRoom(page);
+  await household(page).getByLabel("Household description").fill(
+    "Alex works for 30 minutes between 13:00 and 16:00. Sam is a guest without a routine.",
+  );
+  await generateButton(page).click();
+
+  const members = household(page).locator(".household-member");
+  const work = members.nth(0).locator(".household-schedule-entry");
+  const earliest = work.getByLabel("Earliest start", { exact: true });
+  const latest = work.getByLabel("Latest finish", { exact: true });
+  const duration = work.getByRole("spinbutton", { name: "Duration (minutes)", exact: true });
+  await expect(work.getByRole("combobox", { name: "Timing", exact: true })).toHaveValue("flexible");
+  await expect(earliest).toHaveValue("13:00");
+  await expect(latest).toHaveValue("16:00");
+  await expect(duration).toHaveValue("30");
+  await expect(members.nth(1).getByText("No routine", { exact: false })).toBeVisible();
+
+  await household(page).getByRole("button", { name: "Add guest", exact: true }).click();
+  const addedGuest = members.nth(2);
+  await addedGuest.getByLabel("Name", { exact: true }).fill("Jordan");
+  await expect(addedGuest.getByText("No routine", { exact: false })).toBeVisible();
+
+  await earliest.fill("13:30");
+  await duration.fill("180");
+  await household(page).getByRole("button", { name: "Save and continue" }).click();
+  await expect(page.locator("#household-save-status")).toContainText("fit inside the window");
+  expect(await savedPersonas(page)).toEqual([]);
+
+  await duration.fill("40");
+  await saveHousehold(page);
+  const approved = await savedPersonas(page);
+  expect(approved).toHaveLength(3);
+  expect(approved[0]).toEqual({
+    ...scheduled,
+    schedule: [{ ...flexibleWork, windowStartMinute: 810, durationMinutes: 40 }],
+  });
+  expect(approved[1]).toEqual(unscheduled);
+  expect(approved[2]).toMatchObject({ name: "Jordan", schedule: [] });
+
+  await page.locator("#generate").click();
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
+  await page.reload();
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
+  await page.locator("#household-step").click();
+  await expect(earliest).toHaveValue("13:30");
+  await expect(duration).toHaveValue("40");
+  await expect(addedGuest.getByLabel("Name", { exact: true })).toHaveValue("Jordan");
+  expect(await savedPersonas(page)).toEqual(approved);
+});
+
 test("the sample works without Gemini and a failed generation preserves the saved household", async ({ page }) => {
   let generationCalls = 0;
   await page.route(endpoint, (route) => {
