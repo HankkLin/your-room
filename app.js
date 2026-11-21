@@ -6,7 +6,6 @@ import {
   catalog,
   styles,
   createItem,
-  createShopifyPreview,
   furniturePreviewKinds,
   createOwnedItems,
   getSpend,
@@ -40,10 +39,12 @@ import { createHouseholdPage } from "./src/components/persona/household-page.js"
 import { createStudioReplayPanel } from "./src/components/simulation/studio-replay-panel.js";
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
+import { createCandidateSession } from "./src/shopify/candidate-session.js";
+import { createCandidatePlacement } from "./src/shopify/scene-candidate.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
 import { formatShopifyMoney } from "./src/components/catalog/shopify-ui.js";
-import { createShopifyQuotes, shopifyRef, shopifyRequest } from "./src/shopify/shopify-client.js";
+import { createShopifyQuotes, shopifyRequest } from "./src/shopify/shopify-client.js";
 import { showParsedGeometryModal } from "./floorplan-import-ui.js";
 import {
   clearConfirmedImportedHouse,
@@ -118,6 +119,7 @@ let scene;
 let clearCatalog;
 let quoteRefresh;
 const dialog = $("#dialog");
+const candidateSession = createCandidateSession();
 const shopifyQuotes = createShopifyQuotes(() => {
   if (stage === "shop") shoppingList.render();
   if (stage === "tour") render();
@@ -395,7 +397,7 @@ function catalogDialog(swapId = null) {
     body.onclick = null;
   };
 
-  function place(makeItem) {
+  function place(makeItem, saveApproved = false) {
     if (!dialog.open) return false;
     const current = state.items.find((item) => item.id === swapId);
     if (swapId && (!current || isObjectLocked(current))) return false;
@@ -422,7 +424,11 @@ function catalogDialog(swapId = null) {
       return false;
     }
     selection = item.id;
-    commit({ ...state, items: [...remaining, item] });
+    const savedProducts = saveApproved ? [
+      ...(state.savedProducts ?? []).filter((row) => row.id !== swapId),
+      { id: item.id, name: item.name, shopify: item.shopify },
+    ] : state.savedProducts;
+    commit({ ...state, items: [...remaining, item], savedProducts });
     dialog.close();
     return true;
   }
@@ -439,6 +445,8 @@ function catalogDialog(swapId = null) {
       if (useShopify) {
         unmountPicker = mountShopifyPicker(shopify, {
           swap: Boolean(old),
+          objectId: old?.id,
+          candidateSession,
           initialKind: old?.kind ?? "table",
           kinds: furniturePreviewKinds.map((kind) => ({
             value: kind,
@@ -446,8 +454,8 @@ function catalogDialog(swapId = null) {
           })),
           shopifyRequest,
           onQuote: (product) => shopifyQuotes.remember(product),
-          onPlace: (product, kind) =>
-            place((placement) => createShopifyPreview(kind, shopifyRef(product), placement)),
+          onPlace: (product, kind, approved) =>
+            place((placement) => createCandidatePlacement(product, kind, placement), approved),
         });
         shopify.querySelector("input").focus();
       } else {

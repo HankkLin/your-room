@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { createProductCandidate, productCandidateId, shopifyHttpsUrl as httpsUrl } from "../contracts/product.js";
+import { recommendProductCandidate } from "../agents/product-recommendation.js";
 
 const endpoint = "https://mcp.shop.com/";
 const protocolVersion = "2026-07-28";
@@ -8,8 +10,6 @@ const maxQueryLength = 200;
 const maxRequestBytes = 32 * 1024;
 const maxLookupRefs = 50;
 const searchLimit = 8;
-const variantPattern = /^gid:\/\/shopify\/ProductVariant\/[A-Za-z0-9_-]{1,128}$/;
-const domainPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 const totalLabels = {
   subtotal: "Subtotal",
   items_discount: "Item discounts",
@@ -32,37 +32,15 @@ function textValue(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function httpsUrl(value) {
-  if (typeof value !== "string" || !/^https:\/\//i.test(value) || /[\s\\]/.test(value)) return null;
-  try {
-    const parsed = new URL(value);
-    return parsed.hostname && !parsed.username && !parsed.password ? value : null;
-  } catch {
-    return null;
-  }
-}
-
 function validCurrency(value) {
   return typeof value === "string" && /^[A-Z]{3}$/.test(value) ? value : null;
 }
 
-function isVariantId(value) {
-  return typeof value === "string" && variantPattern.test(value);
-}
-
-function isSellerDomain(value) {
-  return typeof value === "string" && value.length <= 253 && domainPattern.test(value);
-}
-
 function readRef(value) {
-  if (!isVariantId(value?.variantId) || !isSellerDomain(value?.sellerDomain)) {
+  if (!productCandidateId(value)) {
     throw new ShopifyApiError(400, "Choose a Shopify variant and merchant from the catalog.");
   }
   return { variantId: value.variantId, sellerDomain: value.sellerDomain };
-}
-
-function refKey({ variantId, sellerDomain }) {
-  return `${variantId}|${sellerDomain.toLowerCase()}`;
 }
 
 function list(value) {
@@ -95,36 +73,6 @@ function warningsFrom(document, types = ["warning"]) {
       ...(path ? { path } : {}),
     }];
   });
-}
-
-function productImage(media) {
-  return list(media)
-    .map((item) => httpsUrl(item?.type === "image" ? item.url : item?.preview?.url))
-    .find(Boolean) ?? null;
-}
-
-function normalizeProduct(product, variant) {
-  const variantId = variant?.id;
-  const sellerDomain = variant?.seller?.domain;
-  const title = textValue(product?.title) ?? textValue(variant?.title);
-  if (!isVariantId(variantId) || !isSellerDomain(sellerDomain) || !title) return null;
-
-  const options = list(variant.options).map((option) => textValue(option?.label)).filter(Boolean).join(" / ");
-  const variantTitle = textValue(variant.title);
-  const currency = validCurrency(variant.price?.currency);
-  const amount = variant.price?.amount;
-  return {
-    variantId,
-    sellerDomain,
-    title,
-    variantTitle: options || (variantTitle && variantTitle !== title ? variantTitle : null),
-    merchant: textValue(variant.seller.name),
-    priceMinor: currency && Number.isSafeInteger(amount) && amount >= 0 ? amount : null,
-    currency,
-    available: typeof variant.availability?.available === "boolean" ? variant.availability.available : null,
-    imageUrl: productImage(variant.media) ?? productImage(product.media),
-    productUrl: httpsUrl(variant.url),
-  };
 }
 
 function retrySeconds(value) {
@@ -233,8 +181,12 @@ async function searchProducts(call, { query: rawQuery }) {
   });
   const uniqueProducts = new Map();
   for (const item of productsFrom(document)) {
-    const product = normalizeProduct(item, item?.variants?.[0]);
-    if (product && !uniqueProducts.has(refKey(product))) uniqueProducts.set(refKey(product), product);
+    for (const variant of list(item?.variants)) {
+      const product = createProductCandidate(item, variant);
+      if (product && !uniqueProducts.has(product.id)) uniqueProducts.set(product.id, product);
+      if (uniqueProducts.size >= maxLookupRefs) break;
+    }
+    if (uniqueProducts.size >= maxLookupRefs) break;
   }
   return { products: [...uniqueProducts.values()], warnings: warningsFrom(document) };
 }
@@ -246,11 +198,11 @@ async function findVariant(call, ref) {
   const { product } = document;
   if (!Array.isArray(product?.variants)) throw catalogFailure();
 
-  const key = refKey(ref);
+  const key = productCandidateId(ref);
   const warnings = warningsFrom(document);
   for (const variant of product.variants) {
-    const candidate = normalizeProduct(product, variant);
-    if (candidate && refKey(candidate) === key) return { product: candidate, warnings };
+    const candidate = createProductCandidate(product, variant);
+    if (candidate?.id === key) return { product: candidate, warnings };
   }
   throw new ShopifyApiError(404, "Shopify could not find this exact variant from the selected merchant.", { warnings });
 }
@@ -260,7 +212,7 @@ async function lookupProducts(call, { refs: rawRefs }) {
     throw new ShopifyApiError(400, `Choose between 1 and ${maxLookupRefs} Shopify variants to refresh.`);
   }
   const refs = rawRefs.map(readRef);
-  const requested = new Set(refs.map(refKey));
+  const requested = new Set(refs.map(productCandidateId));
   const ids = [...new Set(refs.map(({ variantId }) => variantId))];
   const document = await call("lookup_catalog", {
     catalog: { ids, context, filters: { available: false } },
@@ -268,10 +220,10 @@ async function lookupProducts(call, { refs: rawRefs }) {
   const matches = new Map();
   for (const product of productsFrom(document)) {
     for (const variant of list(product?.variants)) {
-      const candidate = normalizeProduct(product, variant);
+      const candidate = createProductCandidate(product, variant);
       const exact = list(variant?.inputs).some((input) => input?.id === candidate?.variantId && input?.match === "exact");
       if (!candidate || !exact) continue;
-      const key = refKey(candidate);
+      const key = candidate.id;
       if (requested.has(key)) matches.set(key, candidate);
     }
   }
@@ -341,9 +293,19 @@ function respond(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_000 } = {}) {
+export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_000, generateRecommendation } = {}) {
   const routes = new Map([
     [`${apiPrefix}search`, searchProducts],
+    [`${apiPrefix}recommend`, async (call, input) => {
+      const { mode, instruction, kind, objectId } = input;
+      if (mode === "replace" && (!textValue(objectId) || objectId.length > 160)) throw new ShopifyApiError(400, "Select the piece to replace.");
+      if (!["add", "replace"].includes(mode) || !textValue(instruction) || instruction.length > maxQueryLength ||
+          !textValue(kind) || kind.length > 40) throw new ShopifyApiError(400, "Choose furniture and enter a short design instruction.");
+      const catalog = await lookupProducts(call, input);
+      const choice = await recommendProductCandidate({ mode, instruction, kind, candidates: catalog.products }, generateRecommendation);
+      const operation = mode === "replace" ? { type: mode, objectId, productId: choice } : { type: mode, productId: choice };
+      return { ...catalog, scenePatch: { operations: [operation] } };
+    }],
     [`${apiPrefix}variant`, (call, { ref }) => findVariant(call, readRef(ref))],
     [`${apiPrefix}lookup`, lookupProducts],
     [`${apiPrefix}checkout`, (call, { ref }) => startCheckout(call, readRef(ref))],
@@ -371,8 +333,8 @@ export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_0
       const result = await route(call, body);
       respond(response, 200, result);
     } catch (error) {
-      if (error instanceof ShopifyApiError) {
-        if (error.details.retryAfter) response.setHeader("Retry-After", String(error.details.retryAfter));
+      if (error instanceof ShopifyApiError || error.name === "ProductRecommendationError") {
+        if (error.details?.retryAfter) response.setHeader("Retry-After", String(error.details.retryAfter));
         return respond(response, error.status, { error: error.message, ...error.details });
       }
       respond(response, 500, { error: "The Shopify service could not complete the request." });
