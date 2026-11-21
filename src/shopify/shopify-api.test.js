@@ -106,7 +106,8 @@ test("search sends an anonymous Shop MCP request and preserves merchant attribut
   assert.equal(response.headers["Cache-Control"], "no-store");
   assert.deepEqual(response.json, {
     products: [{
-      ...ref,
+      ...ref, id: ref.variantId + "|" + ref.sellerDomain, productId: null,
+      deliveryEstimate: null, dimensions: null, dimensionsSource: null,
       title: "Oak Coffee Table",
       variantTitle: "Natural Oak",
       merchant: "Oak & Co.",
@@ -147,7 +148,8 @@ test("variant refresh requires the same variant and seller and allows missing op
   }, { route: "variant", input: { ref } });
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json.product, {
-    ...ref,
+    ...ref, id: ref.variantId + "|" + ref.sellerDomain, productId: null,
+    deliveryEstimate: null, dimensions: null, dimensionsSource: null,
     title: "Oak Coffee Table",
     variantTitle: "Oil / Small",
     merchant: "Oak & Co.",

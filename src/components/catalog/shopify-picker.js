@@ -1,7 +1,6 @@
 import "./shopify-picker.css";
+import { productCandidateId, canAdoptCandidate } from "../../contracts/product.js";
 import { formatShopifyMoney, renderShopifyWarnings, shopifyHttpsUrl } from "./shopify-ui.js";
-
-const quoteMaxAge = 10 * 60 * 1000;
 
 function createResult(product, label, onSelect) {
   const card = document.createElement("li");
@@ -27,7 +26,18 @@ function createResult(product, label, onSelect) {
   const offer = document.createElement("p");
   offer.className = "shopify-picker-offer";
   const price = formatShopifyMoney(product.priceMinor, product.currency);
-  offer.textContent = [price ?? "Price unavailable", product.available ? "In stock" : "Unavailable"].join(" · ");
+  const stock = product.available == null ? "Stock unknown" : product.available ? "In stock" : "Unavailable";
+  offer.textContent = [price ?? "Price unavailable", stock, product.deliveryEstimate ? "Delivery " + product.deliveryEstimate : "Delivery unknown"].join(" · ");
+
+  const size = document.createElement("p");
+  size.className = "muted";
+  const dimensions = product.dimensions;
+  if (dimensions && product.dimensionsSource === "merchant") {
+    const meters = (value) => Number(value.toPrecision(6)).toString();
+    size.textContent = `Merchant dimensions (W × D × H) · ${meters(dimensions.width)} × ${meters(dimensions.depth)} × ${meters(dimensions.height)} m`;
+  } else {
+    size.textContent = "Estimated preview size";
+  }
 
   const actions = document.createElement("div");
   actions.className = "shopify-picker-actions";
@@ -49,13 +59,15 @@ function createResult(product, label, onSelect) {
     actions.append(link);
   }
 
-  content.append(title, details, offer, actions);
+  content.append(title, details, offer, size, actions);
   card.append(content);
   return [card, place];
 }
 
 export function mountShopifyPicker(root, {
   swap,
+  objectId,
+  candidateSession,
   initialKind,
   kinds,
   shopifyRequest,
@@ -67,7 +79,8 @@ export function mountShopifyPicker(root, {
     '<label class="field">Search Shopify<input type="search" placeholder="Compact walnut side table" required></label>' +
     '<button class="primary" type="submit">Search</button>' +
     '<label class="field shopify-picker-kind">Preview type<select></select></label>' +
-    '</form><p class="muted">3D previews use approximate dimensions for the selected furniture type.</p>' +
+    '</form>' +
+    '<button type="button" class="secondary" data-recommend hidden>Ask Gemini to choose</button>' +
     '<p class="shopify-picker-status muted" role="status"></p><div data-shopify-warnings hidden></div>' +
     '<ul class="shopify-picker-results"></ul></div>';
   const form = root.querySelector("form");
@@ -75,6 +88,7 @@ export function mountShopifyPicker(root, {
   const kindSelect = form.querySelector("select");
   const status = root.querySelector("[role=status]");
   const warningTarget = root.querySelector("[data-shopify-warnings]");
+  const recommend = root.querySelector("[data-recommend]");
   const results = root.querySelector(".shopify-picker-results");
   for (const { value, label } of kinds) kindSelect.add(new Option(label, value));
   if (kinds.some(({ value }) => value === initialKind)) kindSelect.value = initialKind;
@@ -86,6 +100,8 @@ export function mountShopifyPicker(root, {
   let actions = [];
   let searchWarnings = [];
   let offerWithNotices;
+  let recommendedId;
+  let searchQuery = "";
   let disposed = false;
   const actionLabel = swap ? "Swap piece" : "Add to room";
 
@@ -113,9 +129,13 @@ export function mountShopifyPicker(root, {
   }
 
   function renderResults() {
+    recommend.hidden = !products.length;
+    recommend.disabled = Boolean(pending) || !products.some(canAdoptCandidate);
     actions = [];
     results.replaceChildren(...products.map((product, index) => {
-      const [card, action] = createResult(product, actionLabel, () => selectProduct(index));
+      const chosen = Boolean(recommendedId && productCandidateId(product) === recommendedId);
+      const label = chosen ? (swap ? "Approve replacement" : "Approve addition") : actionLabel;
+      const [card, action] = createResult(product, label, () => selectProduct(index, chosen));
       actions.push(action);
       return card;
     }));
@@ -123,9 +143,11 @@ export function mountShopifyPicker(root, {
 
   function expireResults() {
     clearTimeout(expiryTimer);
+    candidateSession.clear();
     pending?.abort();
     pending = undefined;
     products = [];
+    recommendedId = undefined;
     searchWarnings = [];
     offerWithNotices = undefined;
     kindSelect.disabled = false;
@@ -134,13 +156,14 @@ export function mountShopifyPicker(root, {
     showStatus("Shopify results expired. Search again for current prices.");
   }
 
-  function placeProduct(product, kind) {
-    const placed = onPlace(product, kind);
+  function placeProduct(product, kind, approved) {
+    candidateSession.remember({ query: searchQuery, kind, products, warnings: searchWarnings }, expiresAt);
+    const placed = onPlace(product, kind, approved);
     showStatus(placed ? "" : "This piece needs more clear space in the room.", !placed);
     return placed;
   }
 
-  async function selectProduct(index) {
+  async function selectProduct(index, approved = false) {
     const selected = products[index];
     if (disposed || pending || !selected?.available) return;
     if (Date.now() >= expiresAt) {
@@ -148,10 +171,11 @@ export function mountShopifyPicker(root, {
       return;
     }
     const previewKind = kindSelect.value;
-    if (selected === offerWithNotices) {
-      placeProduct(selected, previewKind);
+    if (selected === offerWithNotices && !approved) {
+      placeProduct(selected, previewKind, false);
       return;
     }
+    const acknowledged = selected === offerWithNotices;
     offerWithNotices = undefined;
     const ref = { variantId: selected.variantId, sellerDomain: selected.sellerDomain };
     const controller = beginRequest();
@@ -177,13 +201,20 @@ export function mountShopifyPicker(root, {
         showStatus("Shopify could not confirm the price for this variant.", true);
         return;
       }
-      if (warnings?.length) {
+      const changed = product.priceMinor !== selected.priceMinor || product.currency !== selected.currency ||
+        JSON.stringify(product.dimensions ?? null) !== JSON.stringify(selected.dimensions ?? null) ||
+        product.deliveryEstimate !== selected.deliveryEstimate;
+      if (approved && changed) {
+        showStatus("This offer changed. Review the updated details before approving.");
+        return;
+      }
+      if (warnings?.length && !acknowledged) {
         offerWithNotices = product;
         showStatus("Review the Shopify notices, then select " + actionLabel + " again.");
         warningTarget.scrollIntoView({ block: "nearest" });
         return;
       }
-      placed = placeProduct(product, previewKind);
+      placed = placeProduct(product, previewKind, approved);
     } catch (error) {
       if (isCurrent(controller)) showError(error);
     } finally {
@@ -198,11 +229,55 @@ export function mountShopifyPicker(root, {
     }
   }
 
+  async function requestRecommendation() {
+    if (disposed || pending || !products.length) return;
+    if (Date.now() >= expiresAt) return expireResults();
+    const mode = swap ? "replace" : "add";
+    const controller = beginRequest();
+    recommendedId = undefined;
+    offerWithNotices = undefined;
+    renderResults();
+    kindSelect.disabled = true;
+    showStatus("Comparing current Shopify variants…");
+    try {
+      const refs = products.map(({ variantId, sellerDomain }) => ({ variantId, sellerDomain }));
+      const data = await shopifyRequest("recommend", {
+        mode, ...(swap ? { objectId } : {}), instruction: searchQuery, kind: kindSelect.value, refs,
+      }, { signal: controller.signal });
+      if (!isCurrent(controller)) return;
+      const op = data.scenePatch?.operations?.[0];
+      const requested = new Set(products.map(productCandidateId));
+      const fresh = (data.products ?? []).filter((product) => requested.has(productCandidateId(product)));
+      if (data.scenePatch?.operations?.length !== 1 || op?.type !== mode || (swap && op.objectId !== objectId) ||
+          !fresh.some((product) => canAdoptCandidate(product) && productCandidateId(product) === op.productId)) {
+        throw new Error("Gemini could not confirm a matching variant. Choose one directly.");
+      }
+      const byId = new Map(fresh.map((product) => [productCandidateId(product), product]));
+      products = products.map((product) => byId.get(productCandidateId(product)) ??
+        { ...product, available: null, priceMinor: null, deliveryEstimate: null });
+      recommendedId = op.productId;
+      candidateSession.remember({ query: searchQuery, kind: kindSelect.value, products, warnings: searchWarnings }, expiresAt);
+      renderShopifyWarnings(warningTarget, [...searchWarnings, ...(data.warnings ?? [])]);
+      showStatus("Review Gemini’s selection and approve it to save it to your layout and shopping list.");
+    } catch (error) {
+      if (isCurrent(controller)) showError(error);
+    } finally {
+      if (isCurrent(controller)) {
+        pending = undefined;
+        kindSelect.disabled = false;
+        renderResults();
+      }
+    }
+  }
+
   async function search(event) {
     event.preventDefault();
     const query = input.value.trim();
     if (disposed || !query) return;
     clearTimeout(expiryTimer);
+    candidateSession.clear();
+    searchQuery = query;
+    recommendedId = undefined;
     const controller = beginRequest();
     kindSelect.disabled = false;
     products = [];
@@ -217,8 +292,8 @@ export function mountShopifyPicker(root, {
       products = data.products;
       searchWarnings = data.warnings ?? [];
       if (products.length) {
-        expiresAt = Date.now() + quoteMaxAge;
-        expiryTimer = setTimeout(expireResults, quoteMaxAge);
+        ({ expiresAt } = candidateSession.remember({ query, kind: kindSelect.value, products, warnings: searchWarnings }));
+        expiryTimer = setTimeout(expireResults, expiresAt - Date.now());
       }
       renderShopifyWarnings(warningTarget, searchWarnings);
       renderResults();
@@ -226,10 +301,30 @@ export function mountShopifyPicker(root, {
     } catch (error) {
       if (isCurrent(controller)) showError(error);
     } finally {
-      if (isCurrent(controller)) pending = undefined;
+      if (isCurrent(controller)) {
+        pending = undefined;
+        renderResults();
+      }
     }
   }
 
+  const previous = candidateSession.read();
+  if (previous) {
+    searchQuery = input.value = previous.query;
+    products = [...previous.products];
+    searchWarnings = previous.warnings;
+    expiresAt = previous.expiresAt;
+    if (!swap && kinds.some(({ value }) => value === previous.kind)) kindSelect.value = previous.kind;
+    renderShopifyWarnings(warningTarget, searchWarnings);
+    renderResults();
+    expiryTimer = setTimeout(expireResults, Math.max(0, expiresAt - Date.now()));
+  }
+
+  recommend.addEventListener("click", requestRecommendation);
+  kindSelect.addEventListener("change", () => {
+    recommendedId = undefined;
+    renderResults();
+  });
   form.addEventListener("submit", search);
   return () => {
     disposed = true;
