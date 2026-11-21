@@ -79,6 +79,8 @@ test("a generated household can be edited, saved, and reopened after furnishing"
   await page.reload();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   await page.locator("#room-settings").click();
+  await expect(page.locator("#floorplan-upload")).toBeAttached();
+  await page.locator("#edit-current-home").click();
   await page.locator("#setup-name").fill("Family room");
   await page.locator("#setup-next").click();
   await page.locator("#setup-next").click();

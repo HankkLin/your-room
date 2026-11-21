@@ -15,12 +15,13 @@ import {
   getSpend,
 } from "./model.js";
 import { createWholeHomeDemoState } from "./house-demo.js";
+import { normalizeHouse, fitItemInHouse } from "./house-model.js";
 import { icon } from "./icons.js";
 import { openFloorplanImporter } from "./floorplan-import-ui.js";
 import { toSceneObject } from "./src/contracts/scene.js";
 import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
 import { confirmImportedHouse, importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
-import { OWNED_KIND_DEFAULTS, createOwnedFurnitureCandidate } from "./src/spatial/owned-furniture.js";
+import { OWNED_KIND_DEFAULTS, createOwnedFurnitureCandidate, ownedCandidateToSceneObject } from "./src/spatial/owned-furniture.js";
 import { createBlockedRouteDemo } from "./src/simulation/studio-replay-demo.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
@@ -335,7 +336,20 @@ function resizedItems(items, oldRoom, room) {
   return placed;
 }
 
-export function openSetup({ state, isNew, initialStep = null, onApply, onCancel, readPhoto }) {
+function housePreview(house, items) {
+  const { minX, minZ, width, depth } = house.bounds;
+  const rooms = house.rooms.map(room =>
+    `<polygon points="${room.polygon.map(p => p.join(",")).join(" ")}" fill="#ebe5d6" stroke="#696d61" stroke-width=".08"/>`,
+  );
+  const pieces = items.map(item => `<rect transform="translate(${item.x} ${item.z}) rotate(${-item.rotation || 0})"
+    x="${-item.width / 2}" y="${-item.depth / 2}" width="${item.width}" height="${item.depth}" rx=".06" fill="#a99c83"/>`);
+  const labels = house.rooms.map(room => `<text x="${room.bounds.centerX}" y="${room.bounds.centerZ}"
+    text-anchor="middle" font-size=".35" paint-order="stroke" stroke="#fff" stroke-width=".07">${esc(room.name)}</text>`);
+  return `<svg class="setup-drawing" role="img" aria-label="Whole-home floor plan" viewBox="${minX - .25} ${minZ - .25} ${width + .5} ${depth + .5}">
+    ${rooms.join("")}${pieces.join("")}${labels.join("")}</svg>`;
+}
+
+export function openSetup({ state, isNew, initialStep = null, onApply, onCancel, onEditCurrent, readPhoto }) {
   const host = document.getElementById("setup-page");
   let step = initialStep ?? (isNew ? 1 : 2);
   let source = isNew ? "custom" : state.roomPhoto ? "photo" : "custom";
@@ -346,6 +360,9 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
     items: isNew ? [] : structuredClone(state.items),
     additions: [],
   };
+  const rawHouse = !isNew && (state.importedHouse || state.house);
+  const house = rawHouse ? normalizeHouse(rawHouse) : null;
+  const houseInventory = Boolean(house && initialStep === 3);
   let detection = "idle",
     message = "",
     error = "",
@@ -359,7 +376,9 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
     " × " +
     draft.room.depth.toFixed(1) +
     " m</span>";
+  let closeImporter;
   function onExit() {
+    closeImporter?.();
     active = false;
     ++photoToken;
     host.onpointermove = null;
@@ -545,7 +564,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
     return "";
   }
   function inventory() {
-    const owned = draft.items.filter((i) => i.owned);
+    const owned = draft.items.filter((i) => i.owned && !i.locked && i.type !== "fixed");
     const rows =
       owned
         .map(
@@ -628,7 +647,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
         .join("");
     return (
       '<div class="setup-grid setup-review-grid"><section class="setup-photo-pane">' +
-      (draft.photo
+      (house ? housePreview(house, draft.items) : draft.photo
         ? '<img src="' +
           esc(draft.photo) +
           '" alt="Your uploaded room" class="review-photo">'
@@ -636,7 +655,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       '<div class="review-caption"><span>' +
       esc(draft.roomName) +
       "</span>" +
-      dims() +
+      (house ? `<span>${house.rooms.length} rooms</span>` : dims()) +
       "</div>" +
       '<label class="start-option start-option-photo" style="margin-top:12px"><span class="start-symbol">' +
       icon("image") +
@@ -658,7 +677,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
     const title = step === 2 ? "Shape your room." : "Keep your furniture.";
     host.innerHTML =
       '<div class="setup-shell">' +
-      stepper() +
+      (houseInventory ? "" : stepper()) +
       (step === 1
         ? first()
         : '<div class="setup-heading"><p class="eyebrow">Room setup</p><h1 tabindex="-1">' +
@@ -672,12 +691,14 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
             ? source === "photo"
               ? "Use this footprint"
               : "Review furniture"
+            : houseInventory ? "Continue to AI Design"
             : detection === "loading"
               ? "Use current list"
               : "Continue to styling") +
           ' <span aria-hidden="true">→</span></button></div>') +
+      (step === 1 && onEditCurrent ? '<button class="text-btn" id="edit-current-home">Edit current home details</button>' : "") +
       (isNew && step === 1 && typeof onCancel === "function"
-        ? '<button class="text-btn" id="resume-room">Resume current room</button>'
+        ? '<button class="text-btn" id="resume-room">Resume current project</button>'
         : !isNew
           ? '<button class="text-btn" id="setup-cancel">Cancel changes</button>'
           : "") +
@@ -816,6 +837,23 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       : [...draft.items];
     for (const piece of draft.additions) {
       for (let n = 0; n < piece.count; n++) {
+        if (house) {
+          const hint = piece.positions?.[n];
+          const defaults = OWNED_KIND_DEFAULTS[piece.kind];
+          const candidate = createOwnedFurnitureCandidate({
+            ...piece, ...hint, name: piece.name, id: uid(),
+            dimensions: piece.userCorrectedDims ? {
+              width: piece.customWidth ?? defaults.width,
+              depth: piece.customDepth ?? defaults.depth,
+              height: piece.customHeight ?? defaults.height,
+            } : undefined,
+          });
+          const base = ownedCandidateToSceneObject(candidate);
+          const placed = fitItemInHouse(base, house, items, house.rooms.find(room => room.kind === "living")?.id);
+          if (!placed) throw Error(`No clear spot for ${piece.name} in this home.`);
+          items.push({ ...ownedCandidateToSceneObject(candidate, { roomId: placed.roomId, x: placed.x, z: placed.z, rotation: placed.rotation }), ...(piece.detected ? { photoPreview: true } : {}) });
+          continue;
+        }
         const [item] = createOwnedItems(
           kinds[piece.kind],
           items.map((i) => ({ ...i, owned: false })),
@@ -893,7 +931,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
         ...state,
         house: isNew ? null : state.house,
         roomName: draft.roomName.trim() || "My living room",
-        room: draft.room,
+        room: houseInventory ? state.room : draft.room,
         roomPhoto: draft.photo,
         importedHouse: isNew ? null : state.importedHouse,
         items,
@@ -916,11 +954,12 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
   function launchFloorplanFlow(initialMode, initialFile = null) {
     ++photoToken;
     detection = "idle";
-    openFloorplanImporter({
+    closeImporter = openFloorplanImporter({
       host,
       initialMode,
       initialFile,
       onBack() {
+        closeImporter = null;
         bindSetupHandlers();
         render(true);
       },
@@ -939,6 +978,10 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
   host.onclick = (e) => {
     const b = e.target.closest("button");
     if (!b || !host.contains(b)) return;
+    if (b.id === "edit-current-home") {
+      onEditCurrent?.();
+      return;
+    }
     if (b.id === "setup-cancel" || b.id === "resume-room") {
       onExit();
       onCancel?.();
@@ -998,6 +1041,11 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       return;
     }
     if (b.id === "setup-back") {
+      if (houseInventory) {
+        onExit();
+        onCancel?.();
+        return;
+      }
       stepTo(step - 1);
       return;
     }
@@ -1174,4 +1222,5 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
   }
   bindSetupHandlers();
   render(true);
+  return onExit;
 }

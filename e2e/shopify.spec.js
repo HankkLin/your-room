@@ -113,6 +113,7 @@ test("a live Shopify swap preserves the whole-home room and locked fixtures", as
   await mockShopify(page);
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#tour-step").click();
   const fixture = page.locator('[data-item="fixture-bathroom-toilet"]');
   await fixture.click();
   await expect(page.locator("#objectbar").getByRole("button", { name: "Swap" })).toHaveCount(0);
@@ -313,6 +314,7 @@ test("whole-home review saves room context and checks out exact quantities per m
   });
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#tour-step").click();
   const placements = [
     ["home-lamp", lamp], ["home-desk", lamp], ["home-coffee-table", shade], ["home-rug", rug],
   ].map(([id, product]) => ({ id, name: product.title, shopify: lineFor(product).ref }));
@@ -396,6 +398,7 @@ test("whole-home review keeps legacy quantities and shows a partial subtotal for
   const calls = await mockShopify(page);
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#tour-step").click();
   await page.evaluate(({ ref, lampName }) => {
     const key = "living-blueprint.project.v1";
     const saved = JSON.parse(localStorage.getItem(key));

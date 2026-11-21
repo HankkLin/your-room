@@ -280,6 +280,8 @@ test("a household uses imported room IDs and keeps destinations after room setti
   await page.reload();
   await expect(page.locator("#view-house-json")).toBeVisible();
   await page.locator("#room-settings").click();
+  await expect(page.locator("#floorplan-upload")).toBeAttached();
+  await page.locator("#edit-current-home").click();
   await page.locator("#setup-name").fill("Updated Mercer Apartment");
   await page.locator("#room-width").fill("6.6");
   await page.locator("#setup-next").click();

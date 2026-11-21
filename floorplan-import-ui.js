@@ -1027,4 +1027,5 @@ export function openFloorplanImporter({
   } else {
     loadSample();
   }
+  return cleanup;
 }

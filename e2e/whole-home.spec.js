@@ -9,6 +9,8 @@ test("whole-home demo renders multiple connected rooms, enforces locked fixtures
   await page.goto("/");
   await expect(page.locator("#whole-home-demo")).toBeVisible();
   await page.locator("#whole-home-demo").click();
+  await page.locator("#tour-step").click();
+  await page.locator("#view-3d").click();
 
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
   await expect(page.locator("#scene canvas")).toHaveAttribute(
@@ -283,4 +285,40 @@ test("re-style shows progress, supports cancellation and explains an identical l
   await page.locator("#style-step").click();
   await page.locator("#generate").click();
   await expect(page.locator("#restyle-tour-result")).toContainText("No layout changes");
+});
+
+test("demo walkthrough carries the same house and style through furniture and design", async ({ page }) => {
+  const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
+  await page.goto("/");
+  await page.locator("#whole-home-demo").click();
+  await expect(page.locator("#style-step")).toHaveAttribute("aria-current", "step");
+  const original = await saved();
+  await page.locator("#brief").fill("Quiet rooms and warm lighting");
+  await page.locator("#budget").fill("4200");
+  await page.locator("#continue-furniture").click();
+  const plan = page.getByRole("img", { name: "Whole-home floor plan" });
+  for (const room of original.house.rooms) await expect(plan).toContainText(room.name);
+  await page.locator("#owned-kind").selectOption("lamp");
+  await page.locator("#add-owned").click();
+  await page.locator("[data-name]").last().fill("Hall lamp");
+  await page.getByRole("button", { name: /Continue to AI Design/ }).click();
+  await expect(page.locator("#ai-design-step")).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("#brief")).toHaveValue("Quiet rooms and warm lighting");
+  await expect(page.locator("#budget")).toHaveValue("4200");
+  const edited = await saved();
+  const lamp = edited.items.find(item => item.name === "Hall lamp");
+  expect(original.house.rooms.map(room => room.id)).toContain(lamp.roomId);
+  expect(edited.house.rooms).toEqual(original.house.rooms);
+  await page.locator("#generate").click();
+  await expect(page.locator("#tour-step")).toHaveAttribute("aria-current", "step");
+  const styled = await saved();
+  expect(styled.items.find(item => item.id === lamp.id)).toMatchObject({ roomId: lamp.roomId, owned: true });
+  expect(styled.house.rooms).toEqual(original.house.rooms);
+  await page.locator("#room-settings").click();
+  await expect(page.getByRole("heading", { name: "Start with your home." })).toBeVisible();
+  await expect(page.locator("label", { has: page.locator("#floorplan-upload") })).toBeVisible();
+  await expect(page.locator("#room-width")).toHaveCount(0);
+  await page.locator("#resume-room").click();
+  await expect(page.locator("#tour-step")).toHaveAttribute("aria-current", "step");
+  expect((await saved()).items).toEqual(styled.items);
 });

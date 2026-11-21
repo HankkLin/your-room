@@ -150,6 +150,7 @@ let history = [];
 let view = "interior";
 let stage = "setup";
 let activeBpStep = "1";
+let closeSetup;
 let toastTimer;
 let scene;
 let clearCatalog;
@@ -1177,7 +1178,7 @@ $("#style-form").onsubmit = async (e) => {
   const budget = Number($("#budget").value);
   const overrides = {};
   if (pickedStyle) overrides.style = draftStyle;
-  if (budget !== state.budget) overrides.budget = budget;
+  if (editedDesignBudget || budget !== state.budget) overrides.budget = budget;
   await applyRestyle({ ...state, style: draftStyle, budget, brief: $("#brief").value.trim(), reference }, overrides, true);
 };
 
@@ -1394,6 +1395,10 @@ function updateBpNavHighlight(bpStep) {
 }
 
 function markStage(next, bpStep = null) {
+  if (stage === "setup") {
+    closeSetup?.();
+    closeSetup = null;
+  }
   if (next === "design") designSearch.enter();
   else if (stage === "design") designSearch.leave();
   if (next !== stage) cancelTwinReview();
@@ -1407,6 +1412,9 @@ function markStage(next, bpStep = null) {
   stage = next;
   document.body.dataset.stage = next;
   updateBpNavHighlight(bpStep || defaultBpStepForStage(next));
+  const houseStyleStep = next === "design" && activeBpStep === "2" && Boolean(activeHouse());
+  $("#continue-furniture").hidden = !houseStyleStep;
+  $("#generate").className = houseStyleStep ? "secondary" : "primary";
   $("#studio").hidden = !["design", "tour"].includes(next);
   $("#shop-page").hidden = next !== "shop";
   $("#setup-page").hidden = next !== "setup";
@@ -1450,6 +1458,7 @@ function navigate(next, { householdDraft, bpStep = null } = {}) {
   } else {
     enterEditor();
     render();
+    if (next === "design" && activeHouse()) changeView($("#view-3d").disabled ? "plan" : "3d");
     if (next === "tour" && !$("#view-interior").disabled)
       changeView("interior");
   }
@@ -1473,17 +1482,21 @@ function loadWholeHomeDemo() {
   commit(createWholeHomeDemoState());
   history = [];
   syncForm();
-  navigate("tour");
-  jumpTo("living-room");
-  changeView($("#view-3d").disabled ? "plan" : "3d");
-  toast("Whole-home demo loaded · Orbit or switch to Interior to walk between rooms");
+  navigate("design", { bpStep: "2" });
 }
 $("#whole-home-btn").onclick = loadWholeHomeDemo;
 function beginSetup(fresh = false, initialStep = null) {
+  const houseInventory = initialStep === 3 && !fresh && Boolean(activeHouse());
+  if (houseInventory && stage === "design") {
+    if (!$("#style-form").reportValidity()) return;
+    state = { ...state, style: draftStyle, budget: Number($("#budget").value), brief: $("#brief").value.trim(), reference };
+    persist();
+  }
   const previous = stage === "setup" ? state.screen || "design" : stage;
   markStage("setup", initialStep === 3 ? "3" : "1");
   window.scrollTo(0, 0);
-  openSetup({
+  closeSetup = openSetup({
+    onEditCurrent: fresh && hasProject ? () => beginSetup(false) : null,
     state: fresh ? initialState() : state,
     isNew: fresh,
     initialStep,
@@ -1523,11 +1536,11 @@ function beginSetup(fresh = false, initialStep = null) {
       });
       if (newProject) history = [];
       selection = null;
-      syncForm();
+      if (!houseInventory) syncForm();
       const nextStage = sample ? "tour" : newProject ? "household" : "design";
-      navigate(nextStage, { householdDraft });
+      navigate(nextStage, { householdDraft, bpStep: houseInventory ? "4" : null });
       if (scene) {
-        if (importedHouse) {
+        if (importedHouse || next.house) {
           changeView($("#view-3d").disabled ? "plan" : "3d");
         } else {
           changeView($("#view-interior").disabled ? "plan" : "interior");
@@ -1731,8 +1744,8 @@ window.addEventListener("keydown", (event) => {
     walk(direction);
   }
 });
-$("#room-settings").onclick = () => beginSetup(false);
-$("#furniture-step").onclick = () => beginSetup(false, 3);
+$("#room-settings").onclick = () => beginSetup(true);
+$("#continue-furniture").onclick = $("#furniture-step").onclick = () => beginSetup(false, 3);
 $("#new-project").onclick = () => beginSetup(true);
 $("#household-step").onclick = () => navigate("household", { bpStep: "6" });
 $("#style-step").onclick = $("#revise-brief").onclick = () =>
