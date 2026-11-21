@@ -158,7 +158,7 @@ export function canModifyObject(target, operationType) {
 
 /**
  * Normalize either a canonical FixedFixture / SceneObject (`position: [x,y,z]`,
- * `rotation: [0,yawRad,0]`) or a flat Stillroom item (`x, z, rotation` in deg)
+ * `rotation: [0,yawRad,0]`) or a flat Living Blueprint item (`x, z, rotation` in deg)
  * into a unified renderable SceneObject preserving all Shopify/product metadata.
  *
  * @param {object} item

@@ -2,7 +2,7 @@ import { createEnvironmentSnapshot, validTimeZone } from "./environment-context.
 
 const day = 86400000;
 const fields = ["temperature_2m", "relative_humidity_2m", "wind_speed_10m", "wind_direction_10m"];
-const headers = { Accept: "application/json", "User-Agent": "Stillroom-Studio (https://github.com/HankkLin/your-room)" };
+const headers = { Accept: "application/json", "User-Agent": "Living-Blueprint (https://github.com/HankkLin/your-room)" };
 
 async function readJson(fetchImpl, url) {
   const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(8000), redirect: "error" });

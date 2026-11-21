@@ -17,7 +17,7 @@ const lamp = {
 };
 const checkoutUrl = "https://fixture-shop.myshopify.com/checkouts/example";
 const project = (page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 
 async function mockShopify(page, handlers = {}) {
   const calls = [];
@@ -264,7 +264,7 @@ async function openSavedMerchants(page, handlers = {}) {
     id: `saved-${i}`, name: p.title, shopify: lineFor(p).ref,
   }));
   await page.evaluate(rows => {
-    const key = "stillroom.project.v1";
+    const key = "living-blueprint.project.v1";
     const saved = JSON.parse(localStorage.getItem(key));
     saved.savedProducts = rows;
     localStorage.setItem(key, JSON.stringify(saved));
@@ -327,10 +327,11 @@ test("re-saving the same placement keeps the original unit quote and saved quant
   const firstSave = (await project(page)).savedProducts.find(row => row.shopify);
   expect(firstSave.savedPrice).toEqual({ priceMinor: lamp.priceMinor, currency: lamp.currency });
   await page.evaluate(id => {
-    const key = "stillroom.project.v1";
+    const key = "living-blueprint.project.v1";
     const saved = JSON.parse(localStorage.getItem(key));
     saved.savedProducts.find(row => row.id === id).quantity = 3;
-    localStorage.setItem(key, JSON.stringify(saved));
+    localStorage.setItem("stillroom.project.v1", JSON.stringify(saved));
+    localStorage.removeItem(key);
   }, firstSave.id);
   livePrice = 19900;
   await page.reload();

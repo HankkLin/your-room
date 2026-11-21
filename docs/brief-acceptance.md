@@ -1,6 +1,6 @@
 # Whole-home demo acceptance
 
-This maps the 「步驟」 section of the [Hackathon idea brief](https://docs.google.com/document/d/17mqughSaghJRQH1NwVg86Ux1c8ouHhj6iHOxLKPXLtg/edit?tab=t.0) to the combined Stillroom demo. Run `npm ci` and `npm run dev` from the repository root.
+This maps the 「步驟」 section of the [Hackathon idea brief](https://docs.google.com/document/d/17mqughSaghJRQH1NwVg86Ux1c8ouHhj6iHOxLKPXLtg/edit?tab=t.0) to the combined Living Blueprint demo. Run `npm ci` and `npm run dev` from the repository root.
 
 | Brief step | Demo and expected evidence | Reproducible coverage |
 | --- | --- | --- |

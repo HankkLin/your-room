@@ -8,7 +8,7 @@ const chosen = { variantId: "gid://shopify/ProductVariant/80401", sellerDomain: 
 const alternative = { ...chosen, variantId: "gid://shopify/ProductVariant/80402", variantTitle: "Walnut", deliveryEstimate: null };
 const ref = { variantId: chosen.variantId, sellerDomain: chosen.sellerDomain };
 const handoff = "https://fixture-lamps.myshopify.com/checkouts/demo";
-const project = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+const project = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 
 test("a household reviews two live alternatives, reapproves a changed offer, fixes its route and checks out the approved SKU", async ({ page }) => {
   let current = chosen;

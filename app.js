@@ -16,6 +16,7 @@ import {
 import { createScene } from "./scene.js";
 import { createPlanScene } from "./scene-fallback.js";
 import { openSetup } from "./setup.js";
+import { resolveStorageKey } from "./src/lib/browser-storage.js";
 import {
   normalizeArchitecture,
   footprintCorners,
@@ -43,7 +44,7 @@ import { createHouseholdPage } from "./src/components/persona/household-page.js"
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
 import { createCandidateSession } from "./src/shopify/candidate-session.js";
-import { createCandidatePlacement, savedShopifyRow } from "./src/shopify/scene-candidate.js";
+import { createCandidatePlacement, refreshPatchCandidates, savedProductsForPatch, savedShopifyRow } from "./src/shopify/scene-candidate.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
 import { dimensionLabel } from "./src/shopify/product-assets.js";
@@ -91,7 +92,7 @@ const palettes = {
   "Soft modern": ["#c4cbd0", "#919fa6", "#727780"],
   "Earthy eclectic": ["#b0654b", "#868c62", "#c4a258"],
 };
-const storageKey = "stillroom.project.v1";
+const storageKey = resolveStorageKey("project.v1");
 const demo = initialState();
 let state = demo;
 let hasProject = false;
@@ -434,7 +435,6 @@ async function approveTwinReview() {
   review.applying = true;
   demoControls.setState({ redesignPending: true });
   try {
-    const { refreshPatchCandidates, savedProductsForPatch } = await import("./src/shopify/scene-candidate.js");
     const patch = review.outcome.replayResult.selectedPatch;
     const candidates = await refreshPatchCandidates(patch, review.outcome.candidateProducts);
     if (pendingTwinReview !== review || !isCurrentRun(review.baseline)) return;
@@ -1920,7 +1920,7 @@ $("#edit-request").onsubmit = (e) => {
       "Try “add a lamp”, “remove the rug”, “rotate this”, or “soft modern under $800”.";
   result.textContent = message;
 };
-window.__stillroom = {
+window.__livingBlueprint = {
   getState: () => state,
   getScene: () => scene,
   simulationUI: demoControls,

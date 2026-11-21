@@ -8,7 +8,7 @@ const suggestion = {
   scenePatch: { operations: [{ type: "move", objectId: sofa.id, position: [3.4, 0, 7] }] },
 };
 const project = (page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 
 async function openDemo(page) {
   await page.goto("/");
@@ -248,7 +248,7 @@ test("regional replay displays measured regression and no change for an approved
   const seeded = await project(page);
   seeded.items = seeded.items.map(item => item.id === sofa.id ? { ...item, x: 3.4, z: 7 } : item);
   seeded.personas.push({ ...seeded.personas[0], id: "bea", name: "Bea" });
-  await page.evaluate(state => localStorage.setItem("stillroom.project.v1", JSON.stringify(state)), seeded);
+  await page.evaluate(state => localStorage.setItem("living-blueprint.project.v1", JSON.stringify(state)), seeded);
   await page.reload();
   const positions = [[1.5, 0, .6], [1.6, 0, .6]];
   await page.route(api, route => route.fulfill({ json: { ...regionalPatch, targetFindings: [],

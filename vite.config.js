@@ -36,12 +36,10 @@ export default defineConfig(({ command, mode }) => {
   }
 
   return {
-    plugins: [
-      {
-        name: "stillroom-api",
-        configureServer: configure,
-        configurePreviewServer: configure,
-      },
-    ],
+    plugins: [{
+      name: "living-blueprint-api",
+      configureServer: configure,
+      configurePreviewServer: configure,
+    }],
   };
 });

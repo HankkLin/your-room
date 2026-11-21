@@ -109,7 +109,7 @@ export function createPersonaApiMiddleware(generatePersonas) {
     }
     const expectedOrigin = `${request.socket.encrypted ? "https" : "http"}://${request.headers.host}`;
     if (request.headers.origin && request.headers.origin !== expectedOrigin) {
-      return respond(response, 403, { error: "Open Stillroom directly to generate a household." });
+      return respond(response, 403, { error: "Open Living Blueprint directly to generate a household." });
     }
     if (!/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] || "")) {
       return respond(response, 415, { error: "Send the household details as JSON." });

@@ -9,7 +9,7 @@ const lamp = {
 const other = { ...lamp, variantId: "gid://shopify/ProductVariant/132", variantTitle: "Walnut",
   dimensions: { width: 0.25, height: 1, depth: 0.25 }, dimensionsSource: "merchant", deliveryEstimate: "3 days" };
 const ref = { variantId: other.variantId, sellerDomain: other.sellerDomain };
-const readProject = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+const readProject = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 
 async function setup(page, options = {}) {
   const seen = [];

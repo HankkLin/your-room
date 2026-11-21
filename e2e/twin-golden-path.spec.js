@@ -90,7 +90,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await expect(page.locator("#sim-persona-summary")).toContainText("Alice");
 
   const initialFixtureSnapshot = await page.evaluate(() =>
-    window.__stillroom
+    window.__livingBlueprint
       .getState()
       .items.filter((i) => i.locked || i.type === "fixed")
       .map((i) => ({ id: i.id, x: i.x, z: i.z })),
@@ -106,7 +106,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
 
   const avatarStats = await page.evaluate(() =>
-    window.__stillroom.getScene().getPlaybackStats(),
+    window.__livingBlueprint.getScene().getPlaybackStats(),
   );
   expect(avatarStats.avatarCount).toBe(2);
 
@@ -124,10 +124,10 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   expect(beforeMovementScore).toBeLessThan(95);
 
   // Step 9–12 (E5, E6, E9): Click "Propose Gemini Redesign" -> Attempt 1 (locked toilet) rejected -> Attempt 2 accepted & applied
-  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
   await page.locator("#sim-propose-redesign-btn").click();
   await expect(page.locator("#sim-approve-redesign")).toBeVisible();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")))).toEqual(beforeApproval);
   await page.locator("#sim-approve-redesign").click();
   await expect(page.locator('[data-layout-view="after"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#sim-findings-list")).not.toContainText("Kitchen congestion");
@@ -146,7 +146,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   );
 
   // Verify locked fixtures remained completely unchanged (E9) while movable table moved & updated product (E6)
-  const afterState = await page.evaluate(() => window.__stillroom.getState());
+  const afterState = await page.evaluate(() => window.__livingBlueprint.getState());
   const afterFixtureSnapshot = afterState.items
     .filter((i) => i.locked || i.type === "fixed")
     .map((i) => ({ id: i.id, x: i.x, z: i.z }));

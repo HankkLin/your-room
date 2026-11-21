@@ -105,7 +105,7 @@ export function buildPatchChanges(beforeItems = [], afterItems = [], patch = nul
 }
 
 /**
- * Project a patched `afterHouse` back into Stillroom's flat `state.items` array,
+ * Project a patched `afterHouse` back into Living Blueprint's flat `state.items` array,
  * keeping all canonical `house.fixtures` locked and untouched while preserving
  * movable furniture & Shopify product metadata.
  */

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 const project = (p) =>
-  p.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  p.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 const owned = (s) => s.items.filter((i) => i.owned);
 const photo = "public/assets/sample-capture.jpg";
 async function startDemo(page) {
@@ -14,6 +14,8 @@ test("custom room flows through the brief, furnished tour and saved Shopify vari
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
+  await expect(page).toHaveTitle("Living Blueprint · Room studio");
+  await expect(page.getByRole("link", { name: "Living Blueprint", exact: true })).toBeVisible();
   await expect(page.locator("#setup-page")).toBeVisible();
   await expect(page.locator("#studio")).toBeHidden();
   await page.locator("#custom-room").click();

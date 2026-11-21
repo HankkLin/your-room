@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const state = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+const state = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 const proposal = { operations: [{ type: "add", candidateId: "oak-desk", roomId: "room-1", personaId: "sample-alex",
   need: "quiet", reason: "The pale oak desk gives Alex a quiet workspace and fits the warm minimal reference." }] };
 

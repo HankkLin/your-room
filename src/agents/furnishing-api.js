@@ -13,7 +13,7 @@ export function createFurnishingMiddleware({ apiKey, fetchImpl } = {}) {
     };
     if (request.method !== "POST") return send(405, { error: "Send a furnishing request with POST." });
     const origin = (request.socket.encrypted ? "https://" : "http://") + request.headers.host;
-    if (request.headers.origin && request.headers.origin !== origin) return send(403, { error: "Open Stillroom to request a proposal." });
+    if (request.headers.origin && request.headers.origin !== origin) return send(403, { error: "Open Living Blueprint to request a proposal." });
     if (!/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] || "")) return send(415, { error: "Send the design brief as JSON." });
     let input;
     try {

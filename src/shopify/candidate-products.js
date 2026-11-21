@@ -23,7 +23,7 @@ export function extractVariantIdFromProductUrl(url) {
 }
 
 /**
- * Build source-backed `ProductCandidate[]` from Stillroom's real `offers.json` +
+ * Build source-backed `ProductCandidate[]` from Living Blueprint's real `offers.json` +
  * `catalog` entries (and merge any live Shopify session picks if provided).
  *
  * Preserves:

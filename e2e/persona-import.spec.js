@@ -8,7 +8,7 @@ const member = {
     { activity: "relax", roomId: "old-den", windowStartMinute: 720, windowEndMinute: 840, durationMinutes: 35 },
   ],
 };
-const saved = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")).personas);
+const saved = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")).personas);
 
 async function openImport(page) {
   await page.goto("/");

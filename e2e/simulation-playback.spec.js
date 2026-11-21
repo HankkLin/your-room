@@ -49,7 +49,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   );
   await expect(page.locator(".twin-mock-badge")).toHaveCount(0);
   const initialStats = await page.evaluate(() =>
-    window.__stillroom.getScene().getPlaybackStats(),
+    window.__livingBlueprint.getScene().getPlaybackStats(),
   );
   expect(initialStats.avatarCount).toBe(2);
   await expect(page.locator("#sim-clock")).not.toHaveText("");
@@ -91,7 +91,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   await expect(privacyCard).toContainText("sightline");
 
   const completeStats = await page.evaluate(() =>
-    window.__stillroom.getScene().getPlaybackStats(),
+    window.__livingBlueprint.getScene().getPlaybackStats(),
   );
   expect(completeStats.overlayCount).toBeGreaterThanOrEqual(3);
 
@@ -103,10 +103,10 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   const beforeMovScoreText = await page
     .locator('#sim-scorecard [data-score-category="movement"] .twin-score-value')
     .textContent();
-  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
   await page.locator("#sim-propose-redesign-btn").click();
   await expect(page.locator("#sim-approve-redesign")).toBeVisible();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")))).toEqual(beforeApproval);
   await page.locator("#sim-approve-redesign").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
@@ -142,7 +142,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
     { timeout: 20000 },
   );
   const partyStats = await page.evaluate(() =>
-    window.__stillroom.getScene().getPlaybackStats(),
+    window.__livingBlueprint.getScene().getPlaybackStats(),
   );
   expect(partyStats.avatarCount).toBe(10);
 
@@ -168,7 +168,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
     "READY",
   );
   const resetStats = await page.evaluate(() =>
-    window.__stillroom.getScene().getPlaybackStats(),
+    window.__livingBlueprint.getScene().getPlaybackStats(),
   );
   expect(resetStats.avatarCount).toBe(0);
   expect(resetStats.overlayCount).toBe(0);
@@ -189,7 +189,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
 
   await page.locator("#view-interior").click();
   await page.evaluate(() => {
-    window.__stillroom.getScene().setEyePose(0.5, 1.8, Math.PI / 2);
+    window.__livingBlueprint.getScene().setEyePose(0.5, 1.8, Math.PI / 2);
   });
   for (let step = 0; step < 6; step += 1) {
     await page.keyboard.press("w");

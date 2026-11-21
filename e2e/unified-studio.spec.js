@@ -32,7 +32,7 @@ const sofa = {
 };
 
 const project = (page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 
 test("Studio replay measures that removing a sofa restores the scheduled route to the kitchen", async ({ page }) => {
   await page.route("**/api/personas/generate", (route) =>
@@ -60,7 +60,7 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
 
   // Seed only the obstruction. The normal placement editor protects doorway clearance.
   await page.evaluate((item) => {
-    const key = "stillroom.project.v1";
+    const key = "living-blueprint.project.v1";
     const state = JSON.parse(localStorage.getItem(key));
     state.items.push(item);
     localStorage.setItem(key, JSON.stringify(state));

@@ -97,14 +97,14 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   );
 
   // Click Propose Gemini Redesign -> applies ScenePatch, replays, and shows Before -> After improvement
-  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
   await page.locator("#sim-propose-redesign-btn").click();
   await expect(page.locator("#sim-approve-redesign")).toBeVisible();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")))).toEqual(beforeApproval);
   // Leaving the captured scenario invalidates its pending operations.
   await page.locator("#sim-scenario").selectOption("dinner-party-8-guests");
   await expect(page.locator("#sim-approve-redesign")).toHaveCount(0);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")))).toEqual(beforeApproval);
   await page.locator("#sim-scenario").selectOption("morning-routine");
   await page.locator("#sim-run-btn").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
@@ -154,7 +154,7 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
 
   await page.locator("#view-interior").click();
   await page.evaluate(() => {
-    window.__stillroom.getScene().setEyePose(0.5, 1.8, Math.PI / 2);
+    window.__livingBlueprint.getScene().setEyePose(0.5, 1.8, Math.PI / 2);
   });
   for (let step = 0; step < 6; step += 1) {
     await page.keyboard.press("w");
