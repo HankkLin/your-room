@@ -1,3 +1,4 @@
+import { withFurnitureFootprint } from "../spatial/furniture-footprint.js";
 import { getObjectBoundingBox, syncHouseObjects } from '../../house-model.js';
 import { environmentInputs } from '../environment/environment-context.js';
 import { compareHouseholdLayouts } from '../persona/compare-household-layouts.js';
@@ -7,22 +8,7 @@ function studioObstacle(object) {
     return { ...object, passable: true };
   }
 
-  const { x, z, width, depth, rotationRadians } = object;
-  const cos = Math.cos(rotationRadians[1]);
-  const sin = Math.sin(rotationRadians[1]);
-  const halfWidth = width / 2;
-  const halfDepth = depth / 2;
-  const corners = [
-    [-halfWidth, -halfDepth], [halfWidth, -halfDepth],
-    [halfWidth, halfDepth], [-halfWidth, halfDepth],
-  ];
-
-  // Project the Studio's Three.js Y rotation onto the X/Z floor plane.
-  const footprint = corners.map(([localX, localZ]) => [
-    x + localX * cos + localZ * sin,
-    z - localX * sin + localZ * cos,
-  ]);
-  return { ...object, footprint };
+  return withFurnitureFootprint(object);
 }
 
 export function captureStudioLayout(house, items) {

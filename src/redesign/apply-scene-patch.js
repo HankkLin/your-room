@@ -1,3 +1,4 @@
+import { withFurnitureFootprint } from "../spatial/furniture-footprint.js";
 import { catalog } from "../../model.js";
 import { toSceneObject } from "../contracts/scene.js";
 import { productCandidateId } from "../contracts/product.js";
@@ -78,12 +79,12 @@ function placeLiveProduct(op, candidate, previous, rooms) {
   const position = parsePositionTriple(op.position ?? spec.position, origin) ?? origin;
   const rotation = parseRotationTriple(op.rotation ?? spec.rotation) ?? previous?.rotationRadians ?? [0, 0, 0];
   const { offerSignature, ...placed } = candidate;
-  return toSceneObject({
+  return withFurnitureFootprint(toSceneObject({
     ...placed, id: op.objectId, type: "shopify", locked: false, owned: false, productId: candidate.product.productId,
     shopify: { ...candidate.shopify }, product: { ...candidate.product }, savedPrice: { ...candidate.savedPrice },
     roomId: resolveRoomIdForPoint(rooms, position[0], position[2], spec.roomId ?? previous?.roomId),
     x: position[0], y: position[1], elevation: position[1], z: position[2], position, rotation,
-  });
+  }));
 }
 
 function clearPreviousOffer(target) {
@@ -194,11 +195,11 @@ export function applyScenePatch(house, patch, options = {}) {
         objects = objects.map((obj) => {
           if (obj.id !== op.objectId) return obj;
           const pos = parsePositionTriple(op.position, obj.position) ?? obj.position;
-          const rot = op.rotation
+          const rot = op.rotation != null
             ? (parseRotationTriple(op.rotation) ?? obj.rotationRadians ?? obj.rotation)
             : (obj.rotationRadians ?? obj.rotation);
           const roomId = resolveRoomIdForPoint(rooms, pos[0], pos[2], obj.roomId);
-          return toSceneObject({
+          return withFurnitureFootprint(toSceneObject({
             ...obj,
             x: pos[0],
             y: pos[1],
@@ -207,7 +208,7 @@ export function applyScenePatch(house, patch, options = {}) {
             roomId,
             position: pos,
             rotation: rot,
-          });
+          }), obj);
         });
         break;
       }
@@ -217,10 +218,10 @@ export function applyScenePatch(house, patch, options = {}) {
           if (obj.id !== op.objectId) return obj;
           const rot =
             parseRotationTriple(op.rotation) ?? obj.rotationRadians ?? obj.rotation;
-          return toSceneObject({
+          return withFurnitureFootprint(toSceneObject({
             ...obj,
             rotation: rot,
-          });
+          }), obj);
         });
         break;
       }
@@ -246,9 +247,9 @@ export function applyScenePatch(house, patch, options = {}) {
               ? (parsePositionTriple(spec.position, obj.position) ?? obj.position)
               : obj.position;
           const baseRot = obj.rotationRadians ?? obj.rotation;
-          const rot = op.rotation
+          const rot = op.rotation != null
             ? (parseRotationTriple(op.rotation) ?? baseRot)
-            : spec.rotation
+            : spec.rotation != null
               ? (parseRotationTriple(spec.rotation) ?? baseRot)
               : baseRot;
 
@@ -310,7 +311,14 @@ export function applyScenePatch(house, patch, options = {}) {
             ...(op.productId ? { productId: op.productId } : {}),
           });
 
-          return toSceneObject(replaced);
+          const newPiece = hasProductRef || replaced.kind !== obj.kind;
+          if (newPiece) {
+            delete replaced.footprint;
+            delete replaced.localFootprint;
+            delete replaced.passable;
+          }
+          const next = toSceneObject(replaced);
+          return withFurnitureFootprint(next, newPiece ? next : obj);
         });
         break;
       }
@@ -382,7 +390,7 @@ export function applyScenePatch(house, patch, options = {}) {
           ...(op.productId ? { productId: op.productId } : {}),
         });
 
-        objects.push(toSceneObject(added));
+        objects.push(withFurnitureFootprint(toSceneObject(added)));
         break;
       }
 

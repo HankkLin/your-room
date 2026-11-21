@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
+import { prepareHouseholdReplay } from "./src/contracts/persona.js";
+import { captureStudioLayout, simulateStudioLayout } from "./src/simulation/studio-replay.js";
+import { createBlockedRouteDemo } from "./src/simulation/studio-replay-demo.js";
 import test from "node:test";
 import { createWholeHomeDemoState } from "./house-demo.js";
 import { createEnvironmentSnapshot } from "./src/environment/environment-context.js";
@@ -23,6 +26,52 @@ import {
   evaluateHouseholdExperience,
 } from "./src/simulation/index.js";
 import { importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
+
+test("A moved obstruction opens the same saved route in the patch and the recaptured Studio layout", async () => {
+  const house = importSampleFloorplan().house;
+  const { items, householdDraft } = createBlockedRouteDemo();
+  const approved = prepareHouseholdReplay(householdDraft, house.rooms);
+  const before = captureStudioLayout(house, items);
+  const moved = applyScenePatch(before, {
+    operations: [{ type: "move", objectId: items[0].id, position: [3.4, 0, 7] }],
+  });
+  const recaptured = captureStudioLayout(moved, moved.objects);
+  const baseline = await simulateStudioLayout(before, approved);
+  const patched = await simulateStudioLayout(moved, approved);
+  const fresh = await simulateStudioLayout(recaptured, approved);
+  assert.equal(baseline.summary.pathFailures, 1);
+  assert.equal(patched.summary.pathFailures, 0);
+  assert.deepEqual(fresh.routes, patched.routes);
+  assert.deepEqual(moved.objects[0].footprint, recaptured.objects[0].footprint);
+  assert.deepEqual(moved.fixtures, before.fixtures);
+});
+
+test("A concave measured outline follows repeated poses, local-axis resizing, and Studio recapture", () => {
+  const house = importSampleFloorplan().house;
+  const outline = [[1, 1.5], [3, 1.5], [3, 2], [2, 2], [2, 2.5], [1, 2.5]];
+  const item = { id: "corner-desk", kind: "desk", x: 2, z: 2, width: 2, depth: 1, height: 0.8, footprint: outline };
+  const before = captureStudioLayout(house, [item]);
+  const objectId = item.id;
+  const moved = applyScenePatch(before, { operations: [
+    { type: "move", objectId, position: [4, 0, 3] },
+    { type: "rotate", objectId, rotation: Math.PI / 2 },
+    { type: "replace", objectId, object: { dimensions: { width: 4, height: 0.8, depth: 2 } } },
+  ] });
+  const desk = moved.objects[0];
+  // Rotation commands round to milliradians. The original notch and winding must survive.
+  const rounded = points => points.map(point => point.map(n => Math.round(n * 100) / 100));
+  assert.deepEqual(rounded(desk.footprint), [[3, 5], [3, 1], [4, 1], [4, 3], [5, 3], [5, 5]]);
+  const reset = applyScenePatch(moved, { operations: [{ type: "move", objectId, position: [2, 0, 2], rotation: 0 }] });
+  assert.deepEqual(rounded(reset.objects[0].footprint), [[0, 1], [4, 1], [4, 2], [2, 2], [2, 3], [0, 3]]);
+  const manual = captureStudioLayout(moved, [{ ...desk, x: 5, z: 3, rotation: 0 }]);
+  assert.deepEqual(rounded(manual.objects[0].footprint), [[3, 2], [7, 2], [7, 3], [5, 3], [5, 4], [3, 4]]);
+  assert.deepEqual(before.objects[0].footprint, outline);
+  const replacement = applyScenePatch(moved, { operations: [{ type: "replace", objectId, productId: "walnut-table", rotation: 0 }] });
+  const table = replacement.objects[0];
+  assert.equal(table.footprint.length, 4);
+  assert.equal(table.footprint[0][0], table.x - table.width / 2);
+  assert.equal(table.footprint[0][1], table.z - table.depth / 2);
+});
 
 test("ScenePatch SP1 — Move movable object succeeds and updates room/position", () => {
   const house = createRedesignDemoHouse();
