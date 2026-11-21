@@ -123,6 +123,34 @@ export function formatFindingEvidenceChips(finding) {
     return chips;
   }
 
+  if (type === "ACCESSIBILITY_CLEARANCE_FAIL") {
+    if (Number.isFinite(Number(ev.measuredWidthMeters))) {
+      chips.push(`${Number(ev.measuredWidthMeters).toFixed(2)} m width`);
+    }
+    if (Number.isFinite(Number(ev.requiredWidthMeters))) {
+      chips.push(`≥ ${Number(ev.requiredWidthMeters).toFixed(2)} m required`);
+    }
+    return chips;
+  }
+
+  if (type === "ACCESSIBILITY_TURN_RADIUS_FAIL") {
+    if (Number.isFinite(Number(ev.measuredTurnDiameterMeters))) {
+      chips.push(`${Number(ev.measuredTurnDiameterMeters).toFixed(2)} m turn space`);
+    }
+    if (Number.isFinite(Number(ev.requiredTurnDiameterMeters))) {
+      chips.push(`${Number(ev.requiredTurnDiameterMeters).toFixed(2)} m needed`);
+    }
+    return chips;
+  }
+
+  if (type === "ACCESSIBILITY_ROUTE_BLOCKED") {
+    chips.push("Wheelchair blocked");
+    if (Number.isFinite(Number(ev.wheelchairWidthMeters))) {
+      chips.push(`${Number(ev.wheelchairWidthMeters).toFixed(2)} m chair width`);
+    }
+    return chips;
+  }
+
   if (Number.isFinite(Number(ev.distanceMeters))) {
     chips.push(`${Number(ev.distanceMeters).toFixed(1)} m`);
   }
@@ -282,11 +310,13 @@ export function mapFindingToOverlaySpec(finding, context = {}) {
   if (
     type === "EVACUATION_BOTTLENECK" ||
     type === "NO_EVACUATION_PATH" ||
-    type === "NO_PATH"
+    type === "NO_PATH" ||
+    type === "ACCESSIBILITY_ROUTE_BLOCKED" ||
+    type === "ACCESSIBILITY_CLEARANCE_FAIL"
   ) {
     const position = resolvePointFromContext(
       locPos,
-      ev.exitDoorId,
+      ev.exitDoorId || ev.doorId || ev.blockingDoorId,
       roomId,
       context,
     );
@@ -295,10 +325,25 @@ export function mapFindingToOverlaySpec(finding, context = {}) {
       id: finding.id || `overlay-${type}`,
       kind: "bottleneck",
       findingType: type,
-      color: "#c43828",
+      color: type.startsWith("ACCESSIBILITY_") ? "#2d6f96" : "#c43828",
       radius: 0.72,
       position,
-      doorId: ev.exitDoorId || null,
+      doorId: ev.exitDoorId || ev.doorId || null,
+      roomId,
+      relatedAgentIds,
+    };
+  }
+
+  if (type === "ACCESSIBILITY_TURN_RADIUS_FAIL") {
+    const position = resolvePointFromContext(locPos, null, roomId, context);
+    if (!position) return null;
+    return {
+      id: finding.id || `overlay-${type}`,
+      kind: "hotspot",
+      findingType: type,
+      color: "#2d6f96",
+      radius: 0.75, // 1.50 m turning circle diameter visualized at true meter scale!
+      position,
       roomId,
       relatedAgentIds,
     };
@@ -428,12 +473,16 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
   root.add(routesGroup, findingsGroup, patchGroup, avatarsGroup);
   scene.add(root);
 
-  // Shared unit geometries (allocated once, reused for up to 10+ avatars)
+  // Shared unit geometries (allocated once, reused for up to 12+ avatars & wheelchairs)
   const sharedGeometries = {
     torso: new THREE.CylinderGeometry(0.16, 0.19, 0.92, 16),
     shoulders: new THREE.CapsuleGeometry(0.15, 0.14, 6, 12),
     head: new THREE.SphereGeometry(0.145, 16, 12),
     headingPip: new THREE.ConeGeometry(0.055, 0.14, 10),
+    wheelTire: new THREE.TorusGeometry(0.28, 0.032, 10, 24),
+    wheelCaster: new THREE.CylinderGeometry(0.075, 0.075, 0.04, 12),
+    chairSeat: new THREE.BoxGeometry(0.46, 0.06, 0.44),
+    chairBack: new THREE.BoxGeometry(0.44, 0.42, 0.05),
     shadow: new THREE.CircleGeometry(0.24, 20),
     halo: new THREE.RingGeometry(0.27, 0.35, 24),
     hotspotDisc: new THREE.CircleGeometry(1, 32),
@@ -491,31 +540,57 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
     rec.bodyMat.dispose();
     rec.headMat.dispose();
     rec.pipMat.dispose();
+    rec.chairMat?.dispose?.();
     rec.label?.texture?.dispose();
     rec.label?.material?.dispose();
     avatarRecords.delete(agentId);
   }
 
-  function ensureAvatar(agentId, { name, color } = {}) {
+  function ensureAvatar(
+    agentId,
+    { name, color, heightMeters = 1.72, usesWheelchair = false } = {},
+  ) {
     const resolvedName = name || agentId;
     const style = deriveAgentStyle(agentId, color);
+    const resolvedHeight =
+      Number.isFinite(Number(heightMeters)) && Number(heightMeters) > 0.7
+        ? Number(heightMeters)
+        : usesWheelchair
+          ? 1.34
+          : 1.72;
+    const chairFlag = Boolean(usesWheelchair);
+
     const existing = avatarRecords.get(agentId);
-    if (existing && existing.name === resolvedName && existing.color === style.color) {
+    if (
+      existing &&
+      existing.name === resolvedName &&
+      existing.color === style.color &&
+      existing.usesWheelchair === chairFlag &&
+      Math.abs(existing.heightMeters - resolvedHeight) < 0.01
+    ) {
       return existing;
     }
     if (existing) removeAvatar(agentId);
 
     const group = new THREE.Group();
     group.userData.agentId = agentId;
+    group.userData.heightMeters = resolvedHeight;
+    group.userData.usesWheelchair = chairFlag;
 
     const shadow = new THREE.Mesh(sharedGeometries.shadow, shadowMat);
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.012;
+    if (chairFlag) {
+      shadow.scale.setScalar(1.48);
+    }
     group.add(shadow);
 
     const halo = new THREE.Mesh(sharedGeometries.halo, focusHaloMat);
     halo.rotation.x = -Math.PI / 2;
     halo.position.y = 0.022;
+    if (chairFlag) {
+      halo.scale.setScalar(1.36);
+    }
     halo.visible = false;
     group.add(halo);
 
@@ -529,44 +604,95 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
       roughness: 0.58,
     });
     const pipMat = new THREE.MeshBasicMaterial({ color: "#ffffff" });
+    let chairMat = null;
 
+    // Base standing geometry spans ~1.39 m to top of head at scaleY = 1.0 -> normalize to `resolvedHeight`
+    const heightScale = chairFlag ? 0.78 : resolvedHeight / 1.72;
+    const widthScale = chairFlag ? 0.96 : 0.86 + (heightScale - 0.75) * 0.35;
+
+    const figure = new THREE.Group();
     const torso = new THREE.Mesh(sharedGeometries.torso, bodyMat);
     torso.position.y = 0.52;
     torso.castShadow = true;
-    body.add(torso);
+    figure.add(torso);
 
     const shoulders = new THREE.Mesh(sharedGeometries.shoulders, bodyMat);
     shoulders.rotation.z = Math.PI / 2;
     shoulders.position.y = 0.92;
-    body.add(shoulders);
+    figure.add(shoulders);
 
     const head = new THREE.Mesh(sharedGeometries.head, headMat);
     head.position.y = 1.24;
     head.castShadow = true;
-    body.add(head);
+    figure.add(head);
+
+    figure.scale.set(widthScale, heightScale, widthScale);
+    if (chairFlag) {
+      figure.position.y = 0.14;
+    }
+    body.add(figure);
+
+    if (chairFlag) {
+      chairMat = new THREE.MeshStandardMaterial({
+        color: "#33393f",
+        roughness: 0.45,
+        metalness: 0.35,
+      });
+      const seat = new THREE.Mesh(sharedGeometries.chairSeat, chairMat);
+      seat.position.set(0, 0.46, -0.02);
+      body.add(seat);
+
+      const backrest = new THREE.Mesh(sharedGeometries.chairBack, chairMat);
+      backrest.position.set(0, 0.69, -0.22);
+      body.add(backrest);
+
+      for (const side of [-1, 1]) {
+        const wheel = new THREE.Mesh(sharedGeometries.wheelTire, chairMat);
+        wheel.rotation.y = Math.PI / 2;
+        wheel.position.set(side * 0.28, 0.29, -0.06);
+        body.add(wheel);
+
+        const caster = new THREE.Mesh(sharedGeometries.wheelCaster, chairMat);
+        caster.rotation.z = Math.PI / 2;
+        caster.position.set(side * 0.2, 0.08, 0.22);
+        body.add(caster);
+      }
+    }
 
     // Subtle forward direction indicator along +X/+Z yaw
     const pip = new THREE.Mesh(sharedGeometries.headingPip, pipMat);
     pip.rotation.x = Math.PI / 2;
-    pip.position.set(0, 0.94, 0.22);
+    pip.position.set(0, chairFlag ? 0.86 : 0.94 * heightScale, chairFlag ? 0.32 : 0.22);
     body.add(pip);
 
     group.add(body);
 
-    const label = createNameLabelSprite(resolvedName, style.color);
-    if (label) group.add(label.sprite);
+    const labelText = chairFlag ? `♿ ${resolvedName}` : resolvedName;
+    const label = createNameLabelSprite(labelText, style.color);
+    if (label) {
+      label.sprite.position.set(
+        0,
+        chairFlag ? 1.56 : Math.max(1.38, 1.38 * heightScale + 0.44),
+        0,
+      );
+      group.add(label.sprite);
+    }
 
     avatarsGroup.add(group);
     const record = {
       agentId,
       name: resolvedName,
       color: style.color,
+      heightMeters: resolvedHeight,
+      usesWheelchair: chairFlag,
       group,
       body,
+      figure,
       halo,
       bodyMat,
       headMat,
       pipMat,
+      chairMat,
       label,
     };
     avatarRecords.set(agentId, record);
@@ -582,11 +708,22 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
       const rec = ensureAvatar(snap.agentId, {
         name: meta.name || snap.name || snap.agentId,
         color: meta.color || null,
+        heightMeters: snap.heightMeters ?? meta.heightMeters ?? 1.72,
+        usesWheelchair: Boolean(snap.usesWheelchair ?? meta.usesWheelchair),
       });
       rec.group.position.set(Number(snap.position[0]), 0, Number(snap.position[1]));
+      // Subtle natural walking bob when actively walking (skipped for wheelchair users)
+      if (snap.moving && !rec.usesWheelchair) {
+        const phase = (Number(snap.timestamp) || 0) * 6.8 + (snap.agentId.charCodeAt(0) || 0);
+        rec.body.position.y = Math.abs(Math.sin(phase)) * 0.028;
+      } else {
+        rec.body.position.y = 0;
+      }
       if (Number.isFinite(Number(snap.yaw))) {
-        // Simulation yaw = atan2(dz, dx) in X/Z plane -> Three.js +Z forward rotates by PI/2 - yaw
-        rec.body.rotation.y = Math.PI / 2 - Number(snap.yaw);
+        // Simulation yaw = atan2(dx, dz) in X/Z plane -> Three.js +Z forward rotates by yaw or PI/2 - yaw:
+        // Note: samplePointAlongPath computes Math.atan2(dx, dz), where yaw=0 faces +Z and yaw=PI/2 faces +X!
+        // In Three.js, +Z forward rotated around Y by `yaw` faces `[sin(yaw), 0, cos(yaw)] = [dx, 0, dz]`!
+        rec.body.rotation.y = Number(snap.yaw);
       }
       rec.halo.visible = focusedAgentIds.has(snap.agentId);
     }

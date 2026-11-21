@@ -300,6 +300,8 @@ const playbackController = createSimulationPlaybackController({
         startSecond: pb.startSecond,
         endSecond: pb.endSecond,
         currentSecond: pb.currentSecond,
+        checkpoints: pb.checkpoints || ds.checkpoints || [],
+        activeCheckpointId: pb.activeCheckpointId || null,
         showAllRoutes: pb.showAllRoutes,
         hasLayoutToggle: Boolean(
           redesignSession || (ds.beforeItems && ds.afterItems),
@@ -347,6 +349,8 @@ const playbackController = createSimulationPlaybackController({
       startSecond: pb.startSecond,
       endSecond: pb.endSecond,
       currentSecond: pb.currentSecond,
+      checkpoints: pb.checkpoints || ds?.checkpoints || [],
+      activeCheckpointId: pb.activeCheckpointId || null,
       showAllRoutes: pb.showAllRoutes,
       selectedFindingId: pb.selectedFindingId,
       canRedesign: Boolean(ds?.canRedesign && pb.status !== "RUNNING"),
@@ -367,6 +371,7 @@ function startPlaybackFromDataset(dataset, { preserveRedesign = false } = {}) {
   playbackController.setSpeed(demoControls.getState().speed);
   playbackController.load({
     simulation: dataset.simulation,
+    checkpoints: dataset.checkpoints || dataset.simulation?.checkpoints || [],
     getSnapshotAt:
       dataset.getSnapshotAt || getSimulationSnapshotAt || sampleTimelineAt,
     agentRoutes: dataset.agentRoutes || [],
@@ -374,6 +379,8 @@ function startPlaybackFromDataset(dataset, { preserveRedesign = false } = {}) {
     clockMode: dataset.clockMode || "clock",
     completedLabel: dataset.completedLabel || null,
     simSecondsPerRealSecond: dataset.simSecondsPerRealSecond,
+    walkingSimSecondsPerRealSecond: dataset.walkingSimSecondsPerRealSecond,
+    speedRates: dataset.speedRates || null,
   });
   if (dataset.showFindingsImmediately && Array.isArray(dataset.findings)) {
     scene?.setPlaybackFindings?.(dataset.findings, {
@@ -500,11 +507,17 @@ function showApprovedReplay(outcome, scenarioId) {
     household: outcome.household,
     displayPersonas: outcome.displayPersonas,
     simulation: outcome.afterSimulation,
+    checkpoints: outcome.checkpoints || outcome.afterSimulation?.checkpoints || [],
     getSnapshotAt: getSimulationSnapshotAt,
     agentRoutes: [],
     isEvacuation: false,
     clockMode: "clock",
-    simSecondsPerRealSecond: scenarioId === "normal-day" ? 900 : 240,
+    simSecondsPerRealSecond: scenarioId === "normal-day" ? 28 : 14,
+    walkingSimSecondsPerRealSecond: 3.2,
+    speedRates:
+      scenarioId === "normal-day"
+        ? { 1: 28, 5: 180, 20: 27000 }
+        : { 1: 14, 5: 90, 20: 4200 },
     findings: outcome.uiPayload.findings,
     showFindingsImmediately: true,
     scores: outcome.uiPayload.afterScores,
@@ -633,6 +646,9 @@ const demoControls = mountDemoControls({
   },
   onSeekTimeline(second) {
     playbackController.seek(second);
+  },
+  onJumpCheckpoint(idOrType) {
+    playbackController.jumpToCheckpoint(idOrType, { pausePlayback: true });
   },
   onToggleRoutes(showAll) {
     playbackController.setShowAllRoutes(showAll);
@@ -1925,12 +1941,26 @@ window.__livingBlueprint = {
   getScene: () => scene,
   simulationUI: demoControls,
   playbackController,
+  demoHooks: {
+    getCheckpoints: () => playbackController.getCheckpoints(),
+    jumpToCheckpoint: (idOrType, options) =>
+      playbackController.jumpToCheckpoint(idOrType, options),
+    setPauseOnCheckpoints: (flag) =>
+      playbackController.setPauseOnCheckpoints(flag),
+    runScenario: (scenarioId, opts = {}) => {
+      demoControls.selectScenario(scenarioId);
+      if (opts.speed) demoControls.selectSpeed(opts.speed);
+      demoControls.triggerRun();
+      return playbackController.getCheckpoints();
+    },
+  },
   captureStudioLayout: (house = activeHouse(), items = state.items) =>
     captureStudioLayout(house, items),
   runStudioReplay,
   getCandidateProducts: () => getCandidateProducts({ candidateSnapshot: candidateSession.read() }),
   proposeRedesign: (scenarioId = demoControls.getState().scenarioId) =>
     handleProposeRedesign(scenarioId),
+  approveRedesign: () => approveTwinReview(),
   connectSimulationPlayback(payload = {}) {
     simulationAdapter?.dispose?.();
     simulationAdapter = null;
@@ -1967,6 +1997,7 @@ window.__livingBlueprint = {
     return demoControls;
   },
 };
+window.__stillroom = window.__livingBlueprint;
 syncForm();
 if (
   hasProject &&

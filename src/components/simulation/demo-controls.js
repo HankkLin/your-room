@@ -87,6 +87,18 @@ export function renderControlPanelMarkup(
       ? state.errorMessage
       : STATUS_LABELS[state.status] || "Ready";
 
+  const checkpointPillsMarkup =
+    state.hasTimeline && state.checkpoints.length > 0
+      ? `<div class="twin-checkpoints" id="sim-checkpoints" role="group" aria-label="Story checkpoints">
+          ${state.checkpoints
+            .map(
+              (cp) =>
+                `<button type="button" class="twin-checkpoint-pill" data-checkpoint-id="${escapeHtml(cp.id)}" data-checkpoint-type="${escapeHtml(cp.type)}" aria-pressed="${state.activeCheckpointId === cp.id}" title="${escapeHtml(cp.description || cp.label)}">${escapeHtml(cp.label)}</button>`,
+            )
+            .join("")}
+        </div>`
+      : "";
+
   const scrubberMarkup = state.hasTimeline
     ? `<div class="twin-scrubber-bar" id="sim-timeline-wrap">
         <label class="twin-scrubber-label" for="sim-scrubber">
@@ -105,6 +117,7 @@ export function renderControlPanelMarkup(
           step="1"
           value="${Math.round(state.currentSecond)}"
         />
+        ${checkpointPillsMarkup}
       </div>`
     : "";
 
@@ -478,6 +491,7 @@ export function createDemoControlsController({
   onSimulationSpeedChange = () => {},
   onScenarioChange = () => {},
   onSeekTimeline = () => {},
+  onJumpCheckpoint = () => {},
   onToggleRoutes = () => {},
   onSelectFinding = () => {},
   onSelectLayoutView = () => {},
@@ -542,6 +556,11 @@ export function createDemoControlsController({
       onSeekTimeline(numeric);
       return state;
     },
+    jumpCheckpoint(idOrType) {
+      if (!idOrType) return state;
+      onJumpCheckpoint(idOrType);
+      return state;
+    },
     toggleShowAllRoutes(checked) {
       const flag = Boolean(checked);
       state = normalizeSimulationViewState({ ...state, showAllRoutes: flag });
@@ -581,6 +600,7 @@ export function mountDemoControls({
   onSimulationSpeedChange = () => {},
   onScenarioChange = () => {},
   onSeekTimeline = () => {},
+  onJumpCheckpoint = () => {},
   onToggleRoutes = () => {},
   onSelectFinding = () => {},
   onSelectLayoutView = () => {},
@@ -617,6 +637,7 @@ export function mountDemoControls({
     onSimulationSpeedChange,
     onScenarioChange,
     onSeekTimeline,
+    onJumpCheckpoint,
     onToggleRoutes,
     onSelectFinding,
     onSelectLayoutView,
@@ -625,6 +646,11 @@ export function mountDemoControls({
   });
 
   function handleControlClick(event) {
+    const checkpointBtn = event.target.closest("[data-checkpoint-id]");
+    if (checkpointBtn) {
+      controller.jumpCheckpoint(checkpointBtn.dataset.checkpointId);
+      return;
+    }
     const speedBtn = event.target.closest("[data-sim-speed]");
     if (speedBtn) {
       controller.selectSpeed(Number(speedBtn.dataset.simSpeed));

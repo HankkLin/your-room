@@ -13,7 +13,9 @@ import {
 import { getCandidateProducts } from "./shopify/candidate-products.js";
 import {
   MORNING_ROUTINE_SCENARIO,
+  buildDemoCheckpoints,
   createDemoHousehold,
+  createFamilyOfFourSimulationHousehold,
   createWholeHomeDemoPersonas,
   evaluateHouseholdExperience,
   getSimulationSnapshotAt,
@@ -134,6 +136,23 @@ export function resolveValidHouseholdForHouse(state, house) {
   );
 
   if (userPersonas.length > 0 && hasScheduled && !validatePersonas(userPersonas, rooms)) {
+    // When `state.personas` matches the canonical 4-person demo household, use the rich
+    // event-labeled 4-person simulation household so exit routes & story beats stay intact.
+    const isDefaultFamilyOfFour =
+      userPersonas.length === 4 &&
+      userPersonas[0]?.id === "kevin" &&
+      userPersonas[1]?.id === "alice" &&
+      userPersonas[2]?.id === "leo" &&
+      userPersonas[3]?.id === "maya";
+
+    if (isDefaultFamilyOfFour) {
+      return {
+        displayPersonas: userPersonas,
+        simulationHousehold: createFamilyOfFourSimulationHousehold(house),
+        usedFallbackPersonas: false,
+      };
+    }
+
     const resolved = prepareHouseholdReplay(userPersonas, rooms);
     if (resolved.length > 0) {
       return {
@@ -146,20 +165,22 @@ export function resolveValidHouseholdForHouse(state, house) {
 
   return {
     displayPersonas: createWholeHomeDemoPersonas(house),
-    simulationHousehold: createDemoHousehold(house),
+    simulationHousehold: createFamilyOfFourSimulationHousehold(house),
     usedFallbackPersonas: true,
   };
 }
 
 /**
- * Build a deterministic playback dataset for the selected scenario:
+ * Build a deterministic playback dataset for any of the 7 UI scenarios:
  * - `morning-routine`
  * - `normal-day`
+ * - `grandparents-visit`
+ * - `friends-arrival`
  * - `saved-routine`
  * - `dinner-party-8-guests`
  * - `fire-emergency`
  */
-export function runTwinScenario(scenarioId, { house, items, state, comparisonRun }) {
+export function runTwinScenario(scenarioId, { house, items, state, comparisonRun, friendCount } = {}) {
   const capturedHouse = captureStudioLayout(house, items);
   if (!capturedHouse) {
     throw new Error("Load or import a home layout before running simulation.");
@@ -171,6 +192,104 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
   const { displayPersonas, simulationHousehold, usedFallbackPersonas } = comparisonRun
     ? { displayPersonas: comparisonRun.displayPersonas, simulationHousehold: comparisonRun.household }
     : resolveValidHouseholdForHouse(state, capturedHouse);
+
+  if (scenarioId === "grandparents-visit") {
+    const visit = runStressScenario({
+      type: STRESS_SCENARIO_TYPES.GRANDPARENTS_VISIT,
+      house: capturedHouse,
+      household: simulationHousehold,
+    });
+    const evaluation = evaluateHouseholdExperience({
+      house: capturedHouse,
+      sun,
+      household: [...simulationHousehold, ...(visit.simulation.agents || [])],
+      simulation: visit.simulation,
+      forceAccessibilityCheck: true,
+    });
+    const scores = extractCategoryScoreMap(evaluation);
+    const checkpoints = buildDemoCheckpoints({
+      scenarioId,
+      simulation: visit.simulation,
+      findings: evaluation.findings,
+    });
+    visit.simulation.checkpoints = checkpoints;
+
+    return {
+      scenarioId,
+      scenarioConfig: { id: "grandparents-visit", startMinute: 540, endMinute: 660, stepSeconds: 1 },
+      environment,
+      capturedHouse,
+      household: [...simulationHousehold, ...(visit.simulation.agents || [])],
+      displayPersonas,
+      simulation: visit.simulation,
+      checkpoints,
+      getSnapshotAt: getSimulationSnapshotAt,
+      agentRoutes: [],
+      isEvacuation: false,
+      clockMode: "clock",
+      simSecondsPerRealSecond: 14,
+      walkingSimSecondsPerRealSecond: 3.0,
+      speedRates: { 1: 14, 5: 80, 20: 3600 },
+      findings: evaluation.findings,
+      scores,
+      beforeScores: scores,
+      afterScores: null,
+      overallBeforeScore: evaluation.overallScore,
+      overallAfterScore: null,
+      canRedesign: evaluation.findings.length > 0,
+      isMockData: false,
+      evaluation,
+    };
+  }
+
+  if (scenarioId === "friends-arrival") {
+    const crowd = runStressScenario({
+      type: STRESS_SCENARIO_TYPES.FRIENDS_ARRIVAL,
+      house: capturedHouse,
+      household: simulationHousehold,
+      friendCount: Number(friendCount) || 8,
+    });
+    const evaluation = evaluateHouseholdExperience({
+      house: capturedHouse,
+      sun,
+      household: simulationHousehold,
+      simulation: crowd.simulation,
+    });
+    const scores = extractCategoryScoreMap(evaluation);
+    const checkpoints = buildDemoCheckpoints({
+      scenarioId,
+      simulation: crowd.simulation,
+      findings: evaluation.findings,
+    });
+    crowd.simulation.checkpoints = checkpoints;
+
+    return {
+      scenarioId,
+      scenarioConfig: { id: "friends-arrival", startMinute: 1080, endMinute: 1170, stepSeconds: 1 },
+      environment,
+      capturedHouse,
+      household: simulationHousehold,
+      displayPersonas,
+      simulation: crowd.simulation,
+      checkpoints,
+      getSnapshotAt: getSimulationSnapshotAt,
+      agentRoutes: [],
+      isEvacuation: false,
+      clockMode: "clock",
+      simSecondsPerRealSecond: 12,
+      walkingSimSecondsPerRealSecond: 3.2,
+      speedRates: { 1: 12, 5: 75, 20: 3600 },
+      findings: evaluation.findings,
+      scores,
+      beforeScores: scores,
+      afterScores: null,
+      overallBeforeScore: evaluation.overallScore,
+      overallAfterScore: null,
+      canRedesign: evaluation.findings.length > 0,
+      isMockData: false,
+      evaluation,
+    };
+  }
 
   if (scenarioId === "dinner-party-8-guests") {
     const party = runStressScenario({
@@ -185,6 +304,12 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
       simulation: party.simulation,
     });
     const scores = extractCategoryScoreMap(evaluation);
+    const checkpoints = buildDemoCheckpoints({
+      scenarioId,
+      simulation: party.simulation,
+      findings: evaluation.findings,
+    });
+    party.simulation.checkpoints = checkpoints;
 
     return {
       scenarioId,
@@ -193,11 +318,14 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
       household: simulationHousehold,
       displayPersonas,
       simulation: party.simulation,
+      checkpoints,
       getSnapshotAt: getSimulationSnapshotAt,
       agentRoutes: [],
       isEvacuation: false,
       clockMode: "clock",
-      simSecondsPerRealSecond: 180,
+      simSecondsPerRealSecond: 14,
+      walkingSimSecondsPerRealSecond: 3.4,
+      speedRates: { 1: 14, 5: 85, 20: 3600 },
       findings: evaluation.findings,
       scores,
       beforeScores: scores,
@@ -225,6 +353,12 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
     });
     const scores = extractCategoryScoreMap(evaluation);
     const maxSec = evac.summary?.maxEvacuationSeconds;
+    const checkpoints = buildDemoCheckpoints({
+      scenarioId,
+      simulation: evac.simulation,
+      findings: evac.findings,
+    });
+    evac.simulation.checkpoints = checkpoints;
 
     return {
       scenarioId,
@@ -233,6 +367,7 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
       household: simulationHousehold,
       displayPersonas,
       simulation: evac.simulation,
+      checkpoints,
       getSnapshotAt: getSimulationSnapshotAt,
       agentRoutes: evac.agentRoutes || [],
       isEvacuation: true,
@@ -241,7 +376,9 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
       completedLabel: Number.isFinite(maxSec)
         ? `Evacuated in ${maxSec.toFixed(1)}s`
         : "Evacuation complete",
-      simSecondsPerRealSecond: 6,
+      simSecondsPerRealSecond: 2.0,
+      walkingSimSecondsPerRealSecond: 1.5,
+      speedRates: { 1: 2.0, 5: 8, 20: 80 },
       findings: evac.findings,
       scores,
       beforeScores: scores,
@@ -263,9 +400,7 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
     "saved-routine": { id: "saved-routine", timelineSampleSeconds: 60 },
   }[scenarioId];
 
-  const householdForRun = scenarioId === "normal-day" && usedFallbackPersonas
-    ? prepareHouseholdReplay(displayPersonas, capturedHouse.rooms)
-    : simulationHousehold;
+  const householdForRun = simulationHousehold;
 
   const simulation = simulateHouse(
     capturedHouse,
@@ -280,6 +415,12 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
     scenario: scenarioConfig,
   });
   const scores = extractCategoryScoreMap(evaluation);
+  const checkpoints = buildDemoCheckpoints({
+    scenarioId,
+    simulation,
+    findings: evaluation.findings,
+  });
+  simulation.checkpoints = checkpoints;
 
   return {
     scenarioId,
@@ -289,11 +430,17 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
     household: householdForRun,
     displayPersonas,
     simulation,
+    checkpoints,
     getSnapshotAt: getSimulationSnapshotAt,
     agentRoutes: [],
     isEvacuation: false,
     clockMode: "clock",
-    simSecondsPerRealSecond: scenarioId === "normal-day" ? 900 : 180,
+    simSecondsPerRealSecond: scenarioId === "normal-day" ? 28 : 14,
+    walkingSimSecondsPerRealSecond: 3.2,
+    speedRates:
+      scenarioId === "normal-day"
+        ? { 1: 28, 5: 180, 20: 27000 }
+        : { 1: 14, 5: 90, 20: 4200 },
     findings: evaluation.findings,
     scores,
     beforeScores: scores,
@@ -408,6 +555,16 @@ function describeStudioOutcome(replayResult, { beforeItems, beforeHouse, househo
     replayResult.selectedPatch,
   );
 
+  const afterSimulation = replayResult.after.evaluation.simulation;
+  if (afterSimulation) {
+    afterSimulation.checkpoints = buildDemoCheckpoints({
+      scenarioId: scenario?.id || "morning-routine",
+      simulation: afterSimulation,
+      findings: replayResult.after.evaluation.findings,
+      isRedesignReplay: true,
+    });
+  }
+
   return {
     accepted: true,
     candidateProducts,
@@ -423,8 +580,9 @@ function describeStudioOutcome(replayResult, { beforeItems, beforeHouse, househo
     beforeItems,
     afterItems,
     patchChanges,
-    afterSimulation: replayResult.after.evaluation.simulation,
+    afterSimulation,
     beforeSimulation: replayResult.before.evaluation.simulation,
+    checkpoints: afterSimulation?.checkpoints || [],
     redesignMessage: replayResult.selectedPatch?.reasoning || null,
   };
 }

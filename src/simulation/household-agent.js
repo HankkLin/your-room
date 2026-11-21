@@ -23,6 +23,41 @@ import { normalizeSchedule } from "./schedule.js";
  * @param {number} [context.startMinute=0]
  * @param {Map<string, number>} [context.roomSlotCounts]
  */
+const round2 = (n) => Math.round(n * 100) / 100;
+
+function inferDefaultHeightMeters(rawAgent) {
+  if (Number.isFinite(Number(rawAgent.heightMeters)) && Number(rawAgent.heightMeters) > 0.7) {
+    return round2(Number(rawAgent.heightMeters));
+  }
+  const role = String(rawAgent.role || "").toLowerCase();
+  const ageGroup = String(rawAgent.ageGroup || "adult");
+  if (rawAgent.usesWheelchair) return 1.34; // seated wheelchair height
+  if (role === "dad" || role === "father") return 1.83;
+  if (role === "mom" || role === "mother") return 1.66;
+  if (role === "brother") return 1.74;
+  if (role === "sister") return 1.3;
+  if (role === "grandfather") return 1.68;
+  if (role === "grandmother") return 1.58;
+  if (ageGroup === "child") return 1.32;
+  if (ageGroup === "teen") return 1.7;
+  if (ageGroup === "olderAdult") return 1.62;
+  return 1.72;
+}
+
+function inferDefaultSpeedMps(rawAgent) {
+  if (rawAgent.usesWheelchair) return 0.78;
+  const role = String(rawAgent.role || "").toLowerCase();
+  const ageGroup = String(rawAgent.ageGroup || "adult");
+  if (ageGroup === "olderAdult" || (rawAgent.needs?.accessibility ?? 0) >= 0.7) {
+    return 0.96;
+  }
+  if (ageGroup === "child" || role === "sister") return 1.18;
+  if (ageGroup === "teen" || role === "brother") return 1.36;
+  if (role === "dad") return 1.34;
+  if (role === "mom") return 1.28;
+  return DEFAULT_MOVEMENT_SPEED_MPS;
+}
+
 export function createHouseholdAgentState(
   rawAgent,
   {
@@ -39,24 +74,42 @@ export function createHouseholdAgentState(
 
   const id = String(rawAgent.id || `agent-${agentIndex + 1}`).trim();
   const name = String(rawAgent.name || id).trim();
+  const usesWheelchair = Boolean(rawAgent.usesWheelchair);
+  const role = rawAgent.role ? String(rawAgent.role).trim() : null;
+  const heightMeters = inferDefaultHeightMeters(rawAgent);
+  const eyeHeightMeters = Number.isFinite(Number(rawAgent.eyeHeightMeters))
+    ? round2(Number(rawAgent.eyeHeightMeters))
+    : usesWheelchair
+      ? 1.18
+      : round2(heightMeters * 0.91);
 
-  const defaultSpeed =
-    rawAgent.ageGroup === "olderAdult" || (rawAgent.needs?.accessibility ?? 0) >= 0.7
-      ? 1.05
-      : DEFAULT_MOVEMENT_SPEED_MPS;
+  const defaultSpeed = inferDefaultSpeedMps(rawAgent);
   const movementSpeedMps = Math.max(
     0.2,
     Math.min(4.0, Number(rawAgent.movementSpeedMps ?? defaultSpeed) || defaultSpeed),
   );
 
+  const defaultRadius = usesWheelchair
+    ? 0.42
+    : rawAgent.ageGroup === "child"
+      ? 0.2
+      : navigation.agentRadius ?? DEFAULT_AGENT_RADIUS;
   const radiusMeters = Math.max(
     0.05,
-    Number(rawAgent.radiusMeters ?? navigation.agentRadius ?? DEFAULT_AGENT_RADIUS),
+    Number(rawAgent.radiusMeters ?? defaultRadius),
   );
 
   const personalSpaceMeters = Math.max(
     radiusMeters,
-    Number(rawAgent.personalSpaceMeters ?? DEFAULT_PERSONAL_SPACE_RADIUS),
+    Number(
+      rawAgent.personalSpaceMeters ??
+        (usesWheelchair ? 0.52 : DEFAULT_PERSONAL_SPACE_RADIUS),
+    ),
+  );
+
+  const turningRadiusMeters = Math.max(
+    radiusMeters,
+    Number(rawAgent.turningRadiusMeters ?? (usesWheelchair ? 0.75 : 0.35)),
   );
 
   const schedule = normalizeSchedule(rawAgent.schedule ?? []);
@@ -64,6 +117,7 @@ export function createHouseholdAgentState(
   // Determine starting room at `startMinute`
   let initialRoomId = rawAgent.currentRoomId ?? null;
   let initialActivity = rawAgent.currentActivity ?? "idle";
+  let initialEventLabel = rawAgent.currentEventLabel ?? "At home";
 
   if (!initialRoomId) {
     const activeAtStart = [...schedule]
@@ -72,6 +126,7 @@ export function createHouseholdAgentState(
     if (activeAtStart) {
       initialRoomId = activeAtStart.destination.roomId;
       initialActivity = activeAtStart.activity;
+      initialEventLabel = activeAtStart.eventLabel || initialEventLabel;
     } else if (schedule[0]?.destination?.roomId) {
       initialRoomId = schedule[0].destination.roomId;
     } else {
@@ -79,6 +134,13 @@ export function createHouseholdAgentState(
         navigation.rooms.find((r) => r.kind === "bedroom")?.id ||
         navigation.rooms[0]?.id ||
         null;
+    }
+  } else {
+    const activeAtStart = [...schedule]
+      .reverse()
+      .find((item) => item.startMinute <= startMinute);
+    if (activeAtStart?.eventLabel) {
+      initialEventLabel = activeAtStart.eventLabel;
     }
   }
 
@@ -130,7 +192,13 @@ export function createHouseholdAgentState(
   return {
     id,
     name,
+    role,
     ageGroup: rawAgent.ageGroup ?? "adult",
+    color: typeof rawAgent.color === "string" ? rawAgent.color : null,
+    heightMeters,
+    eyeHeightMeters,
+    usesWheelchair,
+    turningRadiusMeters,
     needs: rawAgent.needs ? structuredClone(rawAgent.needs) : null,
     movementSpeedMps,
     radiusMeters,
@@ -138,6 +206,7 @@ export function createHouseholdAgentState(
     currentRoomId: initialRoomId,
     currentPosition: [...initialPosition],
     activity: initialActivity,
+    eventLabel: initialEventLabel,
     moving: false,
     yaw: 0,
     schedule,

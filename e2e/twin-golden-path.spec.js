@@ -88,6 +88,8 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await expect(page.locator("#studio-replay-panel")).toBeVisible();
   await expect(page.locator("#sim-persona-summary")).toContainText("Kevin");
   await expect(page.locator("#sim-persona-summary")).toContainText("Alice");
+  await expect(page.locator("#sim-persona-summary")).toContainText("Leo");
+  await expect(page.locator("#sim-persona-summary")).toContainText("Maya");
 
   const initialFixtureSnapshot = await page.evaluate(() =>
     window.__livingBlueprint
@@ -97,7 +99,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   );
   expect(initialFixtureSnapshot).toHaveLength(7);
 
-  // Step 5 & 6 (E1, E2): Run real Morning Routine -> Kevin + Alice move, no mock badge
+  // Step 5 & 6 (E1, E2): Run real Morning Routine -> Family of Four moves, no mock badge
   await page.locator("#sim-scenario").selectOption("morning-routine");
   await page.locator('[data-sim-speed="20"]').click();
   await page.locator("#sim-run-btn").click();
@@ -108,7 +110,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   const avatarStats = await page.evaluate(() =>
     window.__livingBlueprint.getScene().getPlaybackStats(),
   );
-  expect(avatarStats.avatarCount).toBe(2);
+  expect(avatarStats.avatarCount).toBe(4);
 
   // Step 7 & 8 (E3, E4): Kitchen congestion & Bedroom privacy findings appear + real scorecard values
   await expect(page.locator("#sim-findings-list")).toContainText("Kitchen congestion");

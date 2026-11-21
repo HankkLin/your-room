@@ -69,6 +69,8 @@ export function createDinnerPartyGuests({
       id: `guest-${i + 1}`,
       name: `Guest ${i + 1}`,
       isGuest: true,
+      wave: Math.floor(i / 3) + 1,
+      heightMeters: Number((1.62 + (i % 4) * 0.06).toFixed(2)),
       movementSpeedMps: speed,
       currentRoomId: entryRoomId,
       ...(exitTarget ? { currentPosition: [...exitTarget.position] } : {}),
@@ -77,24 +79,32 @@ export function createDinnerPartyGuests({
           startMinute: arrivalMinute,
           endMinute: diningMinute,
           activity: "socialize",
+          eventType: "friends_visit",
+          eventLabel: `Guest arrival wave ${Math.floor(i / 3) + 1}`,
           destination: { type: "room", roomId: livingRoomId },
         },
         {
           startMinute: diningMinute,
           endMinute: postDinnerMinute,
           activity: "eat",
+          eventType: "sit_to_eat",
+          eventLabel: "Dinner & kitchen gathering",
           destination: { type: "room", roomId: kitchenDiningId },
         },
         {
           startMinute: postDinnerMinute,
           endMinute: exitMinute,
           activity: "socialize",
+          eventType: "friends_hangout",
+          eventLabel: "After-dinner conversation",
           destination: { type: "room", roomId: livingRoomId },
         },
         {
           startMinute: exitMinute,
           endMinute: 1170,
           activity: "other",
+          eventType: "friends_depart",
+          eventLabel: "Depart via entry",
           destination: hasExteriorExit
             ? { type: "exit" }
             : { type: "room", roomId: entryRoomId },
@@ -125,6 +135,7 @@ function buildHostPartySchedules(house, baseHousehold) {
       : createDemoHousehold(house);
 
   return rawHosts.map((host, idx) => ({
+    ...host,
     id: host.id || `host-${idx + 1}`,
     name: host.name || `Host ${idx + 1}`,
     movementSpeedMps: host.movementSpeedMps ?? 1.3,
