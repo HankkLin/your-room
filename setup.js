@@ -20,6 +20,7 @@ import { openFloorplanImporter } from "./floorplan-import-ui.js";
 import { toSceneObject } from "./src/contracts/scene.js";
 import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
 import { confirmImportedHouse, importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
+import { OWNED_KIND_DEFAULTS, createOwnedFurnitureCandidate } from "./src/spatial/owned-furniture.js";
 import { createBlockedRouteDemo } from "./src/simulation/studio-replay-demo.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
@@ -334,9 +335,9 @@ function resizedItems(items, oldRoom, room) {
   return placed;
 }
 
-export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
+export function openSetup({ state, isNew, initialStep = null, onApply, onCancel, readPhoto }) {
   const host = document.getElementById("setup-page");
-  let step = isNew ? 1 : 2;
+  let step = initialStep ?? (isNew ? 1 : 2);
   let source = isNew ? "custom" : state.roomPhoto ? "photo" : "custom";
   const draft = {
     room: roomDefaults(isNew ? {} : structuredClone(state.room ?? {})),
@@ -541,13 +542,34 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       owned
         .map(
           (i) =>
-            '<div class="owned-entry"><span class="owned-icon">' +
+            '<div class="owned-entry" data-owned-card="' +
+            esc(i.id) +
+            '"><span class="owned-icon">' +
             icon(i.kind) +
-            '</span><label class="field">Item name<input value="' +
+            '</span><div class="owned-card-main"><div class="owned-card-head"><span class="bp-owned-badge">Owned</span><span class="bp-kind-label">' +
+            esc(kinds[i.kind] || i.kind) +
+            "</span></div>" +
+            '<label class="field">Item name<input value="' +
             esc(i.name) +
             '" data-kept-name="' +
             esc(i.id) +
-            '" maxlength="65"></label><button class="icon-btn" data-remove-kept="' +
+            '" maxlength="65"></label>' +
+            '<div class="owned-dims-row" aria-label="Edit dimensions">' +
+            '<label class="field">W (m)<input type="number" min="0.05" max="10" step="0.01" value="' +
+            Number(i.width || 0.8).toFixed(2) +
+            '" data-kept-dim="width" data-kept-id="' +
+            esc(i.id) +
+            '"></label>' +
+            '<label class="field">D (m)<input type="number" min="0.05" max="10" step="0.01" value="' +
+            Number(i.depth || 0.8).toFixed(2) +
+            '" data-kept-dim="depth" data-kept-id="' +
+            esc(i.id) +
+            '"></label>' +
+            '<label class="field">H (m)<input type="number" min="0.05" max="10" step="0.01" value="' +
+            Number(i.height || 0.85).toFixed(2) +
+            '" data-kept-dim="height" data-kept-id="' +
+            esc(i.id) +
+            '"></label></div></div><button class="icon-btn" data-remove-kept="' +
             esc(i.id) +
             '" aria-label="Remove ' +
             esc(i.name) +
@@ -557,15 +579,34 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         )
         .join("") +
       draft.additions
-        .map(
-          (i) =>
+        .map((i) => {
+          const def = OWNED_KIND_DEFAULTS[i.kind] || OWNED_KIND_DEFAULTS.chair;
+          const wVal = Number(i.customWidth ?? def.width).toFixed(2);
+          const dVal = Number(i.customDepth ?? def.depth).toFixed(2);
+          const hVal = Number(i.customHeight ?? def.height).toFixed(2);
+          const srcLabel = i.userCorrectedDims ? "Corrected" : "Estimated";
+          return (
             '<div class="review-entry" data-draft="' +
             esc(i.id) +
-            '"><label class="field">Piece<select data-kind>' +
+            '"><div class="owned-card-head"><span class="bp-owned-badge">Owned</span><span class="bp-kind-label">' +
+            esc(i.detected ? "Detected from photo" : "Manual piece") +
+            '</span></div><div class="review-entry-grid"><label class="field">Piece<select data-kind>' +
             selectOptions(i.kind) +
             '</select></label><label class="field">Name<input maxlength="65" value="' +
             esc(i.name) +
-            '" data-name></label><label class="field">Qty<input type="number" min="1" max="8" step="1" value="' +
+            '" data-name></label><label class="field">W (m)<input type="number" min="0.2" max="4.5" step="0.01" value="' +
+            wVal +
+            '" data-dim-w title="' +
+            srcLabel +
+            ' width in meters"></label><label class="field">D (m)<input type="number" min="0.2" max="4.5" step="0.01" value="' +
+            dVal +
+            '" data-dim-d title="' +
+            srcLabel +
+            ' depth in meters"></label><label class="field">H (m)<input type="number" min="0.2" max="4.5" step="0.01" value="' +
+            hVal +
+            '" data-dim-h title="' +
+            srcLabel +
+            ' height in meters"></label><label class="field">Qty<input type="number" min="1" max="8" step="1" value="' +
             i.count +
             '" data-count></label><button class="icon-btn" data-remove-draft="' +
             esc(i.id) +
@@ -573,8 +614,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
             esc(i.name) +
             '">' +
             icon("close") +
-            "</button></div>",
-        )
+            "</button></div></div>"
+          );
+        })
         .join("");
     return (
       '<div class="setup-grid setup-review-grid"><section class="setup-photo-pane">' +
@@ -587,8 +629,12 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       esc(draft.roomName) +
       "</span>" +
       dims() +
-      "</div></section>" +
-      '<section class="setup-controls"><h2>Pieces to keep</h2><p class="setup-help">Confirm each piece you want to place. You can also start with an empty room.</p><p role="status" id="detect-status">' +
+      "</div>" +
+      '<label class="start-option start-option-photo" style="margin-top:12px"><span class="start-symbol">' +
+      icon("image") +
+      '</span><span><strong>Upload existing furniture photo</strong><small>Auto-detect sofa, table, chairs, bed, or plants.</small></span><span class="start-arrow">↗</span><input type="file" id="furniture-photo-upload" accept="image/*"></label>' +
+      "</section>" +
+      '<section class="setup-controls"><p class="eyebrow">Step 3 · Your Furniture</p><h2>Pieces you already own</h2><p class="setup-help">Confirm detected pieces, edit dimensions in meters, or add items you are keeping.</p><p role="status" id="detect-status">' +
       esc(statusText()) +
       '</p><div id="setup-inventory">' +
       (rows || '<p class="empty-pieces">Your furniture list is empty.</p>') +
@@ -763,27 +809,61 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
               ". Enlarge the room or reduce the furniture list.",
           );
         const hint = piece.positions?.[n];
-        let placed = item;
-        if (Number.isFinite(hint?.x) && Number.isFinite(hint?.y)) {
-          placed =
+        const ownedCand = createOwnedFurnitureCandidate({
+          kind: piece.kind,
+          name: piece.name || kinds[piece.kind],
+          color: hint?.color,
+          aspectRatio: hint?.aspectRatio,
+            ...(piece.userCorrectedDims
+              ? {
+                  dimensions: {
+                    width: piece.customWidth ?? item.width,
+                    depth: piece.customDepth ?? item.depth,
+                    height: piece.customHeight ?? item.height,
+                  },
+                  dimensionSource: "user_corrected",
+                }
+              : {}),
+          });
+          const targetWidth = piece.userCorrectedDims
+            ? ownedCand.dimensions.width
+            : Number.isFinite(hint?.aspectRatio) && hint.aspectRatio > 0
+              ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
+              : item.width;
+          const targetDepth = piece.userCorrectedDims
+            ? ownedCand.dimensions.depth
+            : item.depth;
+          const targetHeight = piece.userCorrectedDims
+            ? ownedCand.dimensions.height
+            : item.height;
+
+          let placed =
             fitItem(
               {
                 ...item,
-                // A single view estimates the front silhouette. Keep depth at the furniture-type estimate.
-                width: Number.isFinite(hint.aspectRatio) && hint.aspectRatio > 0
-                  ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
-                  : item.width,
-                x: (clamp(hint.x, 0, 1) - 0.5) * draft.room.width,
-                z: (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth,
-              },
-              draft.room,
-              items,
-            ) ?? item;
-        }
+                width: targetWidth,
+                depth: targetDepth,
+                height: targetHeight,
+              x: Number.isFinite(hint?.x)
+                ? (clamp(hint.x, 0, 1) - 0.5) * draft.room.width
+                : item.x,
+              z: Number.isFinite(hint?.y)
+                ? (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth
+                : item.z,
+            },
+            draft.room,
+            items,
+          ) ?? item;
+
+        const dimSource = piece.userCorrectedDims ? "user_corrected" : "estimated";
         items.push({
           ...placed,
+          owned: true,
+          price: 0,
           color: hint?.color ?? placed.color,
-          ...(piece.detected && hint ? { photoPreview: true, dimensionsSource: "estimated" } : {}),
+          dimensionSource: dimSource,
+          dimensionsSource: dimSource,
+          ...(piece.detected && hint ? { photoPreview: true } : {}),
           name: piece.name || kinds[piece.kind],
           id: uid(),
         });
@@ -988,6 +1068,14 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     if (node.dataset.keptName) {
       draft.items.find((i) => i.id === node.dataset.keptName).name = node.value;
     }
+    if (node.dataset.keptDim && node.dataset.keptId && node.validity.valid && node.value) {
+      const target = draft.items.find((i) => i.id === node.dataset.keptId);
+      if (target) {
+        target[node.dataset.keptDim] = clamp(Number(node.value), 0.2, 4.5);
+        target.dimensionSource = "user_corrected";
+        target.dimensionsSource = "user_corrected";
+      }
+    }
     const row = node.closest("[data-draft]");
     if (!row) return;
     const item = draft.additions.find((i) => i.id === row.dataset.draft);
@@ -995,13 +1083,52 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       item.kind = node.value;
       item.name = kinds[item.kind];
       row.querySelector("[data-name]").value = item.name;
+      const def = OWNED_KIND_DEFAULTS[item.kind] || OWNED_KIND_DEFAULTS.chair;
+      delete item.customWidth;
+      delete item.customDepth;
+      delete item.customHeight;
+      item.userCorrectedDims = false;
+      const wIn = row.querySelector("[data-dim-w]");
+      const dIn = row.querySelector("[data-dim-d]");
+      const hIn = row.querySelector("[data-dim-h]");
+      if (wIn) wIn.value = def.width.toFixed(2);
+      if (dIn) dIn.value = def.depth.toFixed(2);
+      if (hIn) hIn.value = def.height.toFixed(2);
     }
     if (node.matches("[data-name]")) item.name = node.value;
+    if (node.matches("[data-dim-w]") && node.validity.valid && node.value) {
+      item.customWidth = Number(node.value);
+      item.userCorrectedDims = true;
+    }
+    if (node.matches("[data-dim-d]") && node.validity.valid && node.value) {
+      item.customDepth = Number(node.value);
+      item.userCorrectedDims = true;
+    }
+    if (node.matches("[data-dim-h]") && node.validity.valid && node.value) {
+      item.customHeight = Number(node.value);
+      item.userCorrectedDims = true;
+    }
     if (node.matches("[data-count]") && node.validity.valid && node.value)
       item.count = Math.floor(Number(node.value));
   };
   host.onchange = (e) => {
-    if (e.target.id === "room-photo-upload") void photo(e.target.files[0]);
+    if (e.target.id === "room-photo-upload" || e.target.id === "furniture-photo-upload") {
+      const targetStepAfter = e.target.id === "furniture-photo-upload" ? 3 : 2;
+      const file = e.target.files[0];
+      if (targetStepAfter === 3 && file) {
+        const token = ++photoToken;
+        readPhoto(file)
+          .then((res) => {
+            if (!active || token !== photoToken || !res) return;
+            draft.photo = res.url;
+            render();
+            return detect(file, token);
+          })
+          .catch(() => {});
+      } else {
+        void photo(file);
+      }
+    }
     if (e.target.id === "floorplan-upload" && e.target.files?.[0]) {
       launchFloorplanFlow("upload", e.target.files[0]);
     }

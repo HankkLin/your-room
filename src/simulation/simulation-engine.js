@@ -205,6 +205,7 @@ export function runSimulation({
       yaw: round3(agent.yaw),
       roomId: agent.currentRoomId,
       activity: agent.activity,
+      eventLabel: agent.eventLabel || agent.activity,
       moving: agent.moving,
     };
     timeline.push(frame);
@@ -319,6 +320,7 @@ export function runSimulation({
           agent.currentPosition = [goalPt[0], goalPt[1]];
           agent.currentRoomId = active.targetRoomId ?? agent.currentRoomId;
           agent.activity = active.scheduledActivity;
+          agent.eventLabel = active.scheduledEventLabel || active.scheduledActivity;
           agent.moving = false;
           active.routeRecord.endTimestamp = t;
           agent.activeRoute = null;
@@ -368,6 +370,7 @@ export function runSimulation({
           REST_ACTIVITIES.has(entry.activity)
         ) {
           agent.activity = entry.activity;
+          agent.eventLabel = entry.eventLabel || entry.activity;
           recordTimelineFrame(agent, t, true);
           continue;
         }
@@ -465,19 +468,27 @@ export function runSimulation({
           agent.currentPosition = [...resolvedDest.position];
           agent.currentRoomId = resolvedDest.roomId ?? agent.currentRoomId;
           agent.activity = entry.activity;
+          agent.eventLabel = entry.eventLabel || entry.activity;
           agent.moving = false;
           agent.activeRoute = null;
           recordTimelineFrame(agent, t, true);
           continue;
         }
 
+        // If interrupting an earlier unfinished walk, finalize its endTimestamp so polyline interpolation stays exact
+        if (agent.activeRoute?.routeRecord && agent.activeRoute.routeRecord.endTimestamp == null) {
+          agent.activeRoute.routeRecord.endTimestamp = t;
+        }
+
         const routeRecord = {
           agentId: agent.id,
           activity: entry.activity,
+          eventLabel: entry.eventLabel || entry.activity,
           fromRoomId: agent.currentRoomId,
           toRoomId: resolvedDest.roomId,
           startTimestamp: t,
           endTimestamp: null,
+          speedMps: agent.movementSpeedMps,
           distanceMeters: pathResult.distanceMeters,
           doorsTraversed: pathResult.doorsTraversed,
           roomsTraversed: pathResult.roomsTraversed,
@@ -492,6 +503,7 @@ export function runSimulation({
           fromRoomId: agent.currentRoomId,
           toRoomId: resolvedDest.roomId,
           activity: entry.activity,
+          eventLabel: entry.eventLabel || entry.activity,
           distanceMeters: pathResult.distanceMeters,
           doorsTraversed: pathResult.doorsTraversed,
         });
@@ -512,17 +524,21 @@ export function runSimulation({
           );
         }
 
+        const initialSample = samplePointAlongPath(pathResult.path, 0);
+        agent.yaw = initialSample.yaw;
         agent.activeRoute = {
           path: pathResult.path,
           totalDistance: pathResult.distanceMeters,
           traveledDistance: 0,
           targetRoomId: resolvedDest.roomId,
           scheduledActivity: entry.activity,
+          scheduledEventLabel: entry.eventLabel || entry.activity,
           emittedDoors: new Set(),
           routeRecord,
         };
         agent.moving = true;
         agent.activity = `going-to-${resolvedDest.roomId || entry.activity}`;
+        agent.eventLabel = `Walking to ${(resolvedDest.roomId || entry.activity).replace(/[-_]+/g, " ")}`;
         recordTimelineFrame(agent, t, true);
       }
     }
@@ -693,11 +709,19 @@ export function runSimulation({
     agents: agents.map((a) => ({
       id: a.id,
       name: a.name,
+      role: a.role ?? null,
+      ageGroup: a.ageGroup ?? "adult",
+      color: a.color ?? null,
+      heightMeters: a.heightMeters,
+      eyeHeightMeters: a.eyeHeightMeters,
+      usesWheelchair: Boolean(a.usesWheelchair),
+      turningRadiusMeters: a.turningRadiusMeters,
       movementSpeedMps: a.movementSpeedMps,
       radiusMeters: a.radiusMeters,
       finalRoomId: a.currentRoomId,
       finalPosition: [...a.currentPosition],
       finalActivity: a.activity,
+      finalEventLabel: a.eventLabel || a.activity,
     })),
     routes,
     timeline,
@@ -732,19 +756,81 @@ export function simulateHouse(house, household = [], scenario = {}) {
  * at any `timestampSeconds` so the Three.js renderer can animate smoothly at 60 FPS
  * from the compact `simulation.timeline`.
  */
+function normalizeAngleRadians(rad) {
+  let a = Number(rad) || 0;
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+/**
+ * Shortest-arc angular interpolation (radians) so agents rotate smoothly
+ * around hallway turns and doorway thresholds without 360° wrap jumps.
+ */
+export function interpolateHeadingRadians(a, b, alpha) {
+  const start = normalizeAngleRadians(a);
+  const diff = normalizeAngleRadians((Number(b) || 0) - start);
+  const t = Math.max(0, Math.min(1, Number(alpha) || 0));
+  return round3(normalizeAngleRadians(start + diff * t));
+}
+
+function sampleSmoothPathMotion(path, traveledMeters, totalDistance) {
+  const base = samplePointAlongPath(path, traveledMeters);
+  if (!Array.isArray(path) || path.length < 3 || totalDistance <= 0.1) {
+    return base;
+  }
+  // Blend heading across a gentle +/-0.32 m look-ahead/behind window around corners
+  const windowM = 0.32;
+  const behind = samplePointAlongPath(path, Math.max(0, traveledMeters - windowM));
+  const ahead = samplePointAlongPath(
+    path,
+    Math.min(totalDistance, traveledMeters + windowM),
+  );
+  const smoothYaw = interpolateHeadingRadians(behind.yaw, ahead.yaw, 0.5);
+  return {
+    ...base,
+    yaw: smoothYaw,
+  };
+}
+
+/**
+ * Interpolate continuous `[x, z, yaw, roomId, activity, eventLabel, moving]`
+ * for every agent at any `timestampSeconds` (including fractional sub-seconds)
+ * by sampling directly along active `simulation.routes` polylines with smooth
+ * corner-heading blending so agents walk continuously without teleporting.
+ */
 export function getSimulationSnapshotAt(simulation, timestampSeconds) {
   if (!simulation || !Array.isArray(simulation.timeline)) return [];
   const t = Number(timestampSeconds);
 
-  // Group frames per agent lazily on first snapshot call
+  // Group frames, routes, and static agent descriptors lazily on first snapshot call
   if (!simulation._framesByAgent) {
     const grouped = new Map();
     for (const frame of simulation.timeline) {
       if (!grouped.has(frame.agentId)) grouped.set(frame.agentId, []);
       grouped.get(frame.agentId).push(frame);
     }
+    const routesByAgent = new Map();
+    for (const route of Array.isArray(simulation.routes) ? simulation.routes : []) {
+      if (!route?.agentId || !Array.isArray(route.path) || route.path.length < 2) {
+        continue;
+      }
+      if (!routesByAgent.has(route.agentId)) routesByAgent.set(route.agentId, []);
+      routesByAgent.get(route.agentId).push(route);
+    }
+    const agentInfoById = new Map(
+      (Array.isArray(simulation.agents) ? simulation.agents : []).map((a) => [a.id, a]),
+    );
     Object.defineProperty(simulation, "_framesByAgent", {
       value: grouped,
+      enumerable: false,
+    });
+    Object.defineProperty(simulation, "_routesByAgent", {
+      value: routesByAgent,
+      enumerable: false,
+    });
+    Object.defineProperty(simulation, "_agentInfoById", {
+      value: agentInfoById,
       enumerable: false,
     });
   }
@@ -752,13 +838,29 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
   const snapshots = [];
   for (const [agentId, frames] of simulation._framesByAgent.entries()) {
     if (frames.length === 0) continue;
+    const info = simulation._agentInfoById?.get(agentId) || null;
+    const enrich = (snap) => ({
+      ...snap,
+      ...(info
+        ? {
+            name: info.name,
+            role: info.role ?? null,
+            ageGroup: info.ageGroup ?? "adult",
+            heightMeters: info.heightMeters,
+            eyeHeightMeters: info.eyeHeightMeters,
+            usesWheelchair: Boolean(info.usesWheelchair),
+            speedMps: info.movementSpeedMps,
+          }
+        : {}),
+    });
+
     if (t <= frames[0].timestamp) {
-      snapshots.push({ ...frames[0], position: [...frames[0].position] });
+      snapshots.push(enrich({ ...frames[0], position: [...frames[0].position] }));
       continue;
     }
     const last = frames.at(-1);
     if (t >= last.timestamp) {
-      snapshots.push({ ...last, position: [...last.position] });
+      snapshots.push(enrich({ ...last, position: [...last.position] }));
       continue;
     }
 
@@ -773,22 +875,80 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
 
     const f0 = frames[lo];
     const f1 = frames[hi];
+
+    // Prefer exact polyline route sampling whenever `t` falls inside an active route
+    const agentRoutes = simulation._routesByAgent?.get(agentId) || [];
+    const activeRoute = agentRoutes.find((r) => {
+      const start = Number(r.startTimestamp);
+      const speed = Number(r.speedMps ?? info?.movementSpeedMps ?? 1.3) || 1.3;
+      const fallbackEnd = start + (Number(r.distanceMeters) || 0) / speed;
+      const end = r.endTimestamp != null ? Number(r.endTimestamp) : fallbackEnd;
+      return t >= start && t < end - 1e-4;
+    });
+
+    if (activeRoute) {
+      const start = Number(activeRoute.startTimestamp);
+      const speed = Number(activeRoute.speedMps ?? info?.movementSpeedMps ?? 1.3) || 1.3;
+      const totalDist = Math.max(0.001, Number(activeRoute.distanceMeters) || 0.001);
+      const end =
+        activeRoute.endTimestamp != null
+          ? Number(activeRoute.endTimestamp)
+          : start + totalDist / speed;
+      const routeSpan = Math.max(1e-4, end - start);
+      const progressDist = Math.min(
+        totalDist,
+        Math.max(0, Math.min((t - start) * speed, ((t - start) / routeSpan) * totalDist)),
+      );
+      // Use continuous time-proportional travel along the exact polyline so arrival at `end` aligns seamlessly
+      const exactTraveled = Math.min(
+        totalDist,
+        Math.max(progressDist, ((t - start) / routeSpan) * totalDist),
+      );
+      const sampled = sampleSmoothPathMotion(
+        activeRoute.path,
+        exactTraveled,
+        totalDist,
+      );
+
+      snapshots.push(
+        enrich({
+          timestamp: t,
+          minute: round2(t / 60),
+          agentId,
+          position: sampled.position,
+          yaw: sampled.yaw,
+          roomId: f0.roomId,
+          activity: f0.activity,
+          eventLabel: f0.eventLabel || activeRoute.eventLabel || f0.activity,
+          moving: true,
+        }),
+      );
+      continue;
+    }
+
     const span = f1.timestamp - f0.timestamp;
     const alpha = span > 1e-6 && f0.moving ? (t - f0.timestamp) / span : 0;
+    const turnAlpha =
+      span > 1e-6 ? Math.min(1, (t - f0.timestamp) / Math.min(span, 0.75)) : 0;
 
-    snapshots.push({
-      timestamp: t,
-      minute: round2(t / 60),
-      agentId,
-      position: [
-        round3(f0.position[0] + (f1.position[0] - f0.position[0]) * alpha),
-        round3(f0.position[1] + (f1.position[1] - f0.position[1]) * alpha),
-      ],
-      yaw: f0.yaw,
-      roomId: f0.roomId,
-      activity: f0.activity,
-      moving: f0.moving,
-    });
+    snapshots.push(
+      enrich({
+        timestamp: t,
+        minute: round2(t / 60),
+        agentId,
+        position: [
+          round3(f0.position[0] + (f1.position[0] - f0.position[0]) * alpha),
+          round3(f0.position[1] + (f1.position[1] - f0.position[1]) * alpha),
+        ],
+        yaw: f0.moving
+          ? interpolateHeadingRadians(f0.yaw, f1.yaw, turnAlpha)
+          : f0.yaw,
+        roomId: f0.roomId,
+        activity: f0.activity,
+        eventLabel: f0.eventLabel || f0.activity,
+        moving: f0.moving,
+      }),
+    );
   }
   return snapshots;
 }

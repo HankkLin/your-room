@@ -58,6 +58,32 @@ function normalizeDestinationSpec(entry) {
  *   destination: { type: "room" | "position" | "exit", roomId?: string | null, position?: [number, number] }
  * }>}
  */
+const DEFAULT_EVENT_LABELS = Object.freeze({
+  sleep: "Sleep",
+  wake: "Wake up",
+  bathroom: "Use bathroom",
+  cook: "Prepare meal",
+  breakfast: "Eat breakfast",
+  eat: "Sit to eat",
+  work: "WFH focus / call",
+  study: "Homework at desk",
+  watchTv: "Watch TV",
+  socialize: "Visit & chat",
+  relax: "Relax in room",
+  exercise: "Stretch / exercise",
+  other: "Household routine",
+});
+
+function resolveEventLabel(entry, activity) {
+  if (typeof entry?.eventLabel === "string" && entry.eventLabel.trim()) {
+    return entry.eventLabel.trim();
+  }
+  if (typeof entry?.label === "string" && entry.label.trim()) {
+    return entry.label.trim();
+  }
+  return DEFAULT_EVENT_LABELS[activity] || activity;
+}
+
 export function normalizeSchedule(rawSchedule = []) {
   if (!Array.isArray(rawSchedule) || rawSchedule.length === 0) return [];
 
@@ -68,6 +94,11 @@ export function normalizeSchedule(rawSchedule = []) {
     if (!entry || typeof entry !== "object") return;
     const activity = String(entry.activity || "other").trim();
     const destination = normalizeDestinationSpec(entry);
+    const eventLabel = resolveEventLabel(entry, activity);
+    const eventType =
+      typeof entry.eventType === "string" && entry.eventType.trim()
+        ? entry.eventType.trim()
+        : null;
 
     if (isFlexibleEntry(entry)) {
       const winStart = Number(entry.windowStartMinute ?? 0);
@@ -77,6 +108,8 @@ export function normalizeSchedule(rawSchedule = []) {
         flexible.push({
           rawIdx,
           activity,
+          eventLabel,
+          eventType,
           destination,
           windowStartMinute: winStart,
           windowEndMinute: winEnd,
@@ -96,6 +129,8 @@ export function normalizeSchedule(rawSchedule = []) {
     fixed.push({
       rawIdx,
       activity,
+      eventLabel,
+      eventType,
       startMinute,
       endMinute,
       destination,
@@ -135,6 +170,8 @@ export function normalizeSchedule(rawSchedule = []) {
       resolvedFlexible.push({
         rawIdx: flex.rawIdx,
         activity: flex.activity,
+        eventLabel: flex.eventLabel,
+        eventType: flex.eventType,
         startMinute,
         endMinute,
         destination: flex.destination,
@@ -155,6 +192,8 @@ export function normalizeSchedule(rawSchedule = []) {
     return {
       index: idx,
       activity: entry.activity,
+      eventLabel: entry.eventLabel,
+      eventType: entry.eventType ?? null,
       startMinute: entry.startMinute,
       endMinute,
       startSecond: Math.round(entry.startMinute * 60),

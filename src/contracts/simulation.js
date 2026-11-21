@@ -52,6 +52,11 @@ export const FINDING_TYPES = Object.freeze({
   LONG_EVACUATION_ROUTE: "LONG_EVACUATION_ROUTE",
   EVACUATION_BOTTLENECK: "EVACUATION_BOTTLENECK",
 
+  // Accessibility & Wheelchair Mobility
+  ACCESSIBILITY_CLEARANCE_FAIL: "ACCESSIBILITY_CLEARANCE_FAIL",
+  ACCESSIBILITY_TURN_RADIUS_FAIL: "ACCESSIBILITY_TURN_RADIUS_FAIL",
+  ACCESSIBILITY_ROUTE_BLOCKED: "ACCESSIBILITY_ROUTE_BLOCKED",
+
   // Optional Environmental Glare
   SUN_GLARE: "SUN_GLARE",
 });
@@ -59,6 +64,21 @@ export const FINDING_TYPES = Object.freeze({
 export const STRESS_SCENARIO_TYPES = Object.freeze({
   FIRE_EVACUATION: "fire-evacuation",
   DINNER_PARTY: "dinner-party",
+  GRANDPARENTS_VISIT: "grandparents-visit",
+  FRIENDS_ARRIVAL: "friends-arrival",
+});
+
+export const DEMO_CHECKPOINT_TYPES = Object.freeze({
+  MORNING_START: "MORNING_START",
+  BATHROOM_CONFLICT: "BATHROOM_CONFLICT",
+  BREAKFAST_CONGESTION: "BREAKFAST_CONGESTION",
+  TV_NOISE_CONFLICT: "TV_NOISE_CONFLICT",
+  GRANDPARENTS_ARRIVE: "GRANDPARENTS_ARRIVE",
+  WHEELCHAIR_ACCESS_CHECK: "WHEELCHAIR_ACCESS_CHECK",
+  FRIENDS_ARRIVE: "FRIENDS_ARRIVE",
+  FIRE_START: "FIRE_START",
+  REDESIGN_APPLIED: "REDESIGN_APPLIED",
+  REPLAY_START: "REPLAY_START",
 });
 
 export const EXPERIENCE_CATEGORIES = Object.freeze([
@@ -106,12 +126,22 @@ export const DEMO_SCENARIOS = Object.freeze([
   {
     id: "morning-routine",
     name: "Morning Routine",
-    description: "Household members move through their normal morning schedule.",
+    description: "Family of four moves through wake-up, bathroom overlap, breakfast prep, and WFH start.",
   },
   {
     id: "normal-day",
     name: "Normal Day",
-    description: "Full-day routine across work, meals, leisure, and rest.",
+    description: "Full-day family rhythm across WFH calls, homework, TV overlap, meals, and bedtime.",
+  },
+  {
+    id: "grandparents-visit",
+    name: "Grandparents Visit — Accessibility",
+    description: "Grandpa (wheelchair) & Grandma visit the family, testing doorway width, turning circles, and route reachability.",
+  },
+  {
+    id: "friends-arrival",
+    name: "Friends Arrive — Staged Crowd",
+    description: "Friends arrive in distinct waves at the entry, clustering from hallway into living room and kitchen.",
   },
   {
     id: "saved-routine",
@@ -130,6 +160,7 @@ export const DEMO_SCENARIOS = Object.freeze([
   },
 ]);
 
+export const SUPPORTED_FRIEND_COUNTS = Object.freeze([4, 6, 8, 12, 16]);
 export const SIMULATION_SPEEDS = Object.freeze([1, 5, 20]);
 
 export const SIMULATION_STATUSES = Object.freeze([
@@ -167,6 +198,9 @@ const FINDING_TITLES = Object.freeze({
   NO_EVACUATION_PATH: "Blocked emergency exit route",
   LONG_EVACUATION_ROUTE: "Long emergency exit route",
   EVACUATION_BOTTLENECK: "Exit doorway bottleneck",
+  ACCESSIBILITY_CLEARANCE_FAIL: "Wheelchair doorway / path clearance fail",
+  ACCESSIBILITY_TURN_RADIUS_FAIL: "Insufficient wheelchair turning circle",
+  ACCESSIBILITY_ROUTE_BLOCKED: "Wheelchair route blocked",
   SUN_GLARE: "Direct window glare",
 });
 
@@ -231,7 +265,49 @@ export function formatFindingHeadline(finding = {}) {
     const to = formatLocationLabel(null, finding.toRoomId);
     return `Blocked route: ${from} → ${to}`;
   }
+  if (type === "ACCESSIBILITY_CLEARANCE_FAIL" && roomLabel) {
+    return `${roomLabel} wheelchair clearance fail`;
+  }
+  if (type === "ACCESSIBILITY_TURN_RADIUS_FAIL" && roomLabel) {
+    return `${roomLabel} turning circle fail`;
+  }
+  if (type === "ACCESSIBILITY_ROUTE_BLOCKED") {
+    const to = formatLocationLabel(null, finding.toRoomId || finding.roomId);
+    return to ? `Wheelchair route blocked: ${to}` : "Wheelchair route blocked";
+  }
   return FINDING_TITLES[type] || String(finding.type || "Simulation finding");
+}
+
+export function formatFindingWhyItMatters(finding = {}) {
+  if (typeof finding.whyItMatters === "string" && finding.whyItMatters.trim()) {
+    return finding.whyItMatters.trim();
+  }
+  const type = String(finding.type || "").toUpperCase();
+  if (type.startsWith("ACCESSIBILITY_") || finding.evidence?.wheelchair) {
+    return "Wheelchair and mobility-aid users need comfortable doorway clearance and a 1.50 m turning circle.";
+  }
+  switch (type) {
+    case "CONGESTION":
+      return "Family members squeeze past each other during peak routines, slowing meals and prep.";
+    case "NO_PATH":
+      return "Furniture or narrow gaps completely block reaching a scheduled room.";
+    case "PRIVACY_SIGHTLINE":
+      return "Open doors expose private fixtures or beds directly to shared social areas.";
+    case "NOISE_CONFLICT":
+      return "TV or social sound carries into a quiet work call or study zone.";
+    case "TV_OCCLUDED":
+    case "TV_BAD_ANGLE":
+    case "TV_TOO_FAR":
+      return "Seated family members strain to see the screen comfortably.";
+    case "EVACUATION_BOTTLENECK":
+    case "NO_EVACUATION_PATH":
+    case "LONG_EVACUATION_ROUTE":
+      return "Delays safe whole-family egress during an emergency drill.";
+    case "SUN_GLARE":
+      return "Direct sun washes out screens and causes eye strain.";
+    default:
+      return "Affects daily comfort and circulation.";
+  }
 }
 
 export function formatFindingSummaryText(finding = {}) {
@@ -284,6 +360,28 @@ export function formatFindingSummaryText(finding = {}) {
       return `Occupant in ${roomLabel} has no unobstructed escape route to an exterior exit.`;
     case "LONG_EVACUATION_ROUTE":
       return `Escape path from ${roomLabel} exceeds recommended distance or travel time.`;
+    case "ACCESSIBILITY_CLEARANCE_FAIL": {
+      const measured = Number.isFinite(Number(ev.measuredWidthMeters))
+        ? `${Number(ev.measuredWidthMeters).toFixed(2)} m`
+        : "narrow opening";
+      const required = Number.isFinite(Number(ev.requiredWidthMeters))
+        ? `${Number(ev.requiredWidthMeters).toFixed(2)} m`
+        : "0.82 m";
+      return `Measured clearance (${measured}) in ${roomLabel} is narrower than wheelchair requirement (${required}).`;
+    }
+    case "ACCESSIBILITY_TURN_RADIUS_FAIL": {
+      const diam = Number.isFinite(Number(ev.measuredTurnDiameterMeters))
+        ? `${Number(ev.measuredTurnDiameterMeters).toFixed(2)} m`
+        : "tight";
+      const req = Number.isFinite(Number(ev.requiredTurnDiameterMeters))
+        ? `${Number(ev.requiredTurnDiameterMeters).toFixed(2)} m`
+        : "1.50 m";
+      return `${roomLabel} provides only ${diam} unobstructed turning space (${req} wheelchair turn diameter needed).`;
+    }
+    case "ACCESSIBILITY_ROUTE_BLOCKED": {
+      const to = formatLocationLabel(null, finding.toRoomId || finding.roomId) || roomLabel;
+      return `Wheelchair occupant cannot reach ${to} with safe side clearance.`;
+    }
     case "SUN_GLARE":
       return `Direct window sunlight intersects workspace or screen in ${roomLabel}.`;
     default:
@@ -322,6 +420,11 @@ export function normalizeSimulationViewState(raw = {}) {
   const speed = SIMULATION_SPEEDS.includes(Number(raw?.speed))
     ? Number(raw.speed)
     : 1;
+  const friendCount = SUPPORTED_FRIEND_COUNTS.includes(Number(raw?.friendCount))
+    ? Number(raw.friendCount)
+    : Number.isFinite(Number(raw?.friendCount)) && Number(raw?.friendCount) >= 1
+      ? Math.min(24, Math.round(Number(raw.friendCount)))
+      : 8;
   const currentTime =
     typeof raw?.currentTime === "string" && raw.currentTime.trim()
       ? raw.currentTime.trim()
@@ -338,6 +441,10 @@ export function normalizeSimulationViewState(raw = {}) {
         level: resolveFindingLevel(f),
         title: formatFindingHeadline(f),
         summary: formatFindingSummaryText(f),
+        whyItMatters: formatFindingWhyItMatters(f),
+        isAccessibility:
+          String(f.type || "").toUpperCase().startsWith("ACCESSIBILITY_") ||
+          Boolean(f.evidence?.wheelchair),
         location: formatLocationLabel(f.location, f.roomId),
         rawLocation:
           f.rawLocation ?? (typeof f.location === "object" ? f.location : null),
@@ -409,15 +516,37 @@ export function normalizeSimulationViewState(raw = {}) {
     ? Number(raw.currentSecond)
     : startSecond;
 
+  const checkpoints = Array.isArray(raw?.checkpoints)
+    ? raw.checkpoints
+        .filter((cp) => cp && typeof cp === "object" && (cp.id || cp.type))
+        .map((cp, idx) => ({
+          id: String(cp.id || `cp-${idx + 1}`),
+          type: String(cp.type || cp.id),
+          label: String(cp.label || cp.type || `Checkpoint ${idx + 1}`),
+          timestampSeconds: Number.isFinite(Number(cp.timestampSeconds))
+            ? Number(cp.timestampSeconds)
+            : startSecond,
+          minute: Number.isFinite(Number(cp.minute))
+            ? Number(cp.minute)
+            : Math.round((Number(cp.timestampSeconds) || startSecond) / 60),
+          roomId: cp.roomId || null,
+          description: typeof cp.description === "string" ? cp.description : "",
+        }))
+    : [];
+
   return {
     status,
     scenarioId,
+    friendCount,
     speed,
     currentTime,
     hasTimeline: Boolean(raw?.hasTimeline && endSecond > startSecond),
     startSecond,
     endSecond,
     currentSecond,
+    checkpoints,
+    activeCheckpointId:
+      typeof raw?.activeCheckpointId === "string" ? raw.activeCheckpointId : null,
     showAllRoutes: Boolean(raw?.showAllRoutes),
     selectedFindingId:
       typeof raw?.selectedFindingId === "string" ? raw.selectedFindingId : null,

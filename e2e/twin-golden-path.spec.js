@@ -96,6 +96,8 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await expect(page.locator("#studio-replay-panel")).toBeVisible();
   await expect(page.locator("#sim-persona-summary")).toContainText("Kevin");
   await expect(page.locator("#sim-persona-summary")).toContainText("Alice");
+  await expect(page.locator("#sim-persona-summary")).toContainText("Leo");
+  await expect(page.locator("#sim-persona-summary")).toContainText("Maya");
 
   const initialFixtureSnapshot = await page.evaluate(() =>
     window.__livingBlueprint
@@ -105,7 +107,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   );
   expect(initialFixtureSnapshot).toHaveLength(7);
 
-  // Step 5 & 6 (E1, E2): Run real Morning Routine -> Kevin + Alice move, no mock badge
+  // Step 5 & 6 (E1, E2): Run real Morning Routine -> Family of Four moves, no mock badge
   await page.locator("#sim-scenario").selectOption("morning-routine");
   await page.locator('[data-sim-speed="20"]').click();
   await page.locator("#sim-run-btn").click();
@@ -116,7 +118,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   const avatarStats = await page.evaluate(() =>
     window.__livingBlueprint.getScene().getPlaybackStats(),
   );
-  expect(avatarStats.avatarCount).toBe(2);
+  expect(avatarStats.avatarCount).toBe(4);
 
   // Step 7 & 8 (E3, E4): Kitchen congestion & Bedroom privacy findings appear + real scorecard values
   await expect(page.locator("#sim-findings-list")).toContainText("Kitchen congestion");
@@ -205,6 +207,93 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await expect(
     walnutCard.getByRole("link", { name: /View product at Sundays/i }),
   ).toHaveAttribute("href", /sundays-company\.com.*variant=41588406419527/);
+
+  expect(errors).toEqual([]);
+});
+
+test("Blueprint 8-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 8-step header nav, StyleBrief priority chips, Family of Four + Grandparents, Friends count control, region selection shortcut, Before/After redesign stepper, and Owned vs Merchant Shopify handoff", async ({
+  page,
+}) => {
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/");
+
+  // U1: 8-step Blueprint header navigation renders all 8 canonical steps
+  const nav = page.locator("nav.bp-eight-nav");
+  await expect(nav).toBeVisible();
+  await expect(nav.locator("[data-bp-step]")).toHaveCount(8);
+  await expect(nav.locator('[data-bp-step="1"]')).toHaveAttribute("aria-current", "step");
+
+  // Step 1: Import sample whole-home floorplan -> Confirm
+  await page.locator("#try-sample-floorplan").click();
+  await expect(page.locator("#fp-status-card")).toContainText("Floorplan analyzed");
+  await page.locator("#fp-confirm-import").click();
+
+  // Step 6: Load canonical Family of Four + Grandparents (♿ Wheelchair)
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "household");
+  await expect(nav.locator('[data-bp-step="6"]')).toHaveAttribute("aria-current", "step");
+  await page.locator("#load-family-of-four").click();
+  await page.locator("#add-grandparents-wheelchair").click();
+  await expect(page.locator("#household-members .household-member")).toHaveCount(6);
+  await page.locator("#save-household").click();
+
+  // Step 2: StyleBrief priority chips update #brief cleanly
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+  await expect(nav.locator('[data-bp-step="2"]')).toHaveAttribute("aria-current", "step");
+  await page.locator('[data-brief-chip="wide step-free walkways"]').click();
+  await expect(page.locator("#brief")).toHaveValue(/wide step-free walkways/);
+
+  // Step 3: Jump directly to Your Furniture via Step 3 nav button, add an Owned piece & edit W (m)
+  await page.locator("#furniture-step").click();
+  await expect(nav.locator('[data-bp-step="3"]')).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("#furniture-photo-upload")).toBeAttached();
+  await page.locator("#owned-kind").selectOption("chair");
+  await page.locator("#add-owned").click();
+  await page.locator("[data-name]").last().fill("Family heirloom armchair");
+  await page.locator("#setup-next").click();
+
+  // Step 5: Explore room + Select area / Draw region opens floorplan region editor immediately
+  await page.locator("#tour-step").click();
+  await expect(nav.locator('[data-bp-step="5"]')).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("#select-area-shortcut")).toBeVisible();
+  await page.locator("#select-area-shortcut").click();
+  await expect(page.locator("#studio-region-editor .region-map")).toBeVisible();
+
+  // Step 7: Stress Test nav button -> Friends Are Coming card + friend count preset 12 (4 family + 12 friends -> crowd run)
+  await page.locator("#stress-test-step").click();
+  await expect(nav.locator('[data-bp-step="7"]')).toHaveAttribute("aria-current", "step");
+  await page.locator('[data-scenario-card="friends-arrival"]').click();
+  await expect(page.locator("#sim-friends-control")).toBeVisible();
+  await page.locator('[data-friend-preset="12"]').click();
+  await expect(page.locator("#sim-friends-count")).toHaveText("12");
+  await page.locator('[data-sim-speed="20"]').click();
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", {
+    timeout: 20000,
+  });
+  await expect(
+    page.locator('#sim-checkpoints [data-checkpoint-type="FRIENDS_ARRIVE"]'),
+  ).toBeVisible();
+
+  // U8: Switch via visual card to Grandparents Staying Over -> accessibility banner + 5-step Gemini stepper
+  await page.locator('[data-scenario-card="grandparents-visit"]').click();
+  await page.locator('[data-sim-speed="20"]').click();
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", {
+    timeout: 20000,
+  });
+  await expect(page.locator(".twin-accessibility-banner")).toBeVisible();
+  await expect(page.locator("#sim-findings-list")).toContainText("0.76 m width");
+  await expect(page.locator("#sim-redesign-stepper li")).toHaveCount(5);
+
+  // U10: Step 8 Furnish & Buy separates Already owned ($0) from New products grouped by merchant
+  await page.locator("#tray-review-products").click();
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "shop");
+  await expect(nav.locator('[data-bp-step="8"]')).toHaveAttribute("aria-current", "step");
+  await expect(page.locator(".shop-owned-section")).toContainText("Already owned");
+  await expect(page.locator(".shop-owned-section")).toContainText("Family heirloom armchair");
+  await expect(page.locator("#shop-honesty-banner")).toBeVisible();
 
   expect(errors).toEqual([]);
 });

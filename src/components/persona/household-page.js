@@ -1,6 +1,7 @@
 import { personaActivities, validatePersonas } from "../../contracts/persona.js";
 import { maxPersonaImportBytes, parsePersonaImport } from "../../persona/import-personas.js";
 import { createSampleHousehold } from "../../persona/sample-household.js";
+import { createFamilyOfFourPersonas } from "../../simulation/family-of-four.js";
 
 function formatTime(minute) {
   if (!Number.isInteger(minute)) return "";
@@ -382,6 +383,57 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
     announce(importStatus);
     replaceDraft(createSampleHousehold(rooms));
     announce(generationStatus, "Sample household loaded. Review it before saving.");
+  });
+
+  const familyBtn = container.querySelector("#load-family-of-four");
+  familyBtn?.addEventListener("click", () => {
+    close();
+    announce(importStatus);
+    replaceDraft(createFamilyOfFourPersonas({ rooms }));
+    announce(generationStatus, "Canonical Family of Four loaded (Dad, Mom, Older Brother, Younger Sister).");
+  });
+
+  const addGrandparentsBtn = container.querySelector("#add-grandparents-wheelchair");
+  addGrandparentsBtn?.addEventListener("click", () => {
+    const primaryRoom = rooms[0]?.id ?? "";
+    const bathRoom = rooms.find((r) => /bath/i.test(r.id || r.name))?.id ?? primaryRoom;
+    const grandpa = {
+      id: "grandpa-arthur",
+      name: "Grandpa Arthur (Wheelchair)",
+      ageGroup: "olderAdult",
+      wheelchair: true,
+      heightMeters: 1.38,
+      preferences: ["Wheelchair 0.90 m clearance", "Step-free routes"],
+      dislikes: ["Narrow doorways"],
+      needs: { privacy: 0.75, quiet: 0.75, accessibility: 0.98, daylight: 0.7, social: 0.8 },
+      schedule: primaryRoom
+        ? [{ activity: "bathroom", roomId: bathRoom, startMinute: 560, endMinute: 585 }]
+        : [],
+    };
+    const grandma = {
+      id: "grandma-evelyn",
+      name: "Grandma Evelyn",
+      ageGroup: "olderAdult",
+      heightMeters: 1.61,
+      preferences: ["Morning tea", "Sunny seating"],
+      dislikes: ["Cluttered walkways"],
+      needs: { privacy: 0.7, quiet: 0.7, accessibility: 0.65, daylight: 0.85, social: 0.85 },
+      schedule: primaryRoom
+        ? [{ activity: "socialize", roomId: primaryRoom, startMinute: 560, endMinute: 620 }]
+        : [],
+    };
+    for (const gp of [grandpa, grandma]) {
+      if (draft.some((m) => m.id === gp.id)) continue;
+      const card = memberCard(gp, rooms, () => {
+        draft.splice(draft.indexOf(gp), 1);
+        card.remove();
+        updateDraft();
+      });
+      draft.push(gp);
+      members.append(card);
+    }
+    updateDraft();
+    announce(generationStatus, "Added Grandpa Arthur (♿ Wheelchair) & Grandma Evelyn.");
   });
 
   addGuest.addEventListener("click", () => {

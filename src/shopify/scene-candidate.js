@@ -1,17 +1,38 @@
 import { createShopifyPreview } from "../../model.js";
 import { canAdoptCandidate, offerSignature, productCandidateId, validCandidateRow } from "../contracts/product.js";
+import { glbUrl } from "./product-assets.js";
 import { shopifyRequest } from "./shopify-client.js";
 import { catalogCheckoutRow } from "./catalog-checkout.js";
+
+const REPRESENTATIVE_MODEL_KINDS = new Set([
+  "sofa",
+  "chair",
+  "table",
+  "desk",
+  "bed",
+  "lamp",
+  "plant",
+  "bookcase",
+  "console",
+  "rug",
+]);
 
 export function createCandidatePlacement(candidate, kind, placement) {
   if (!validCandidateRow(candidate) || !canAdoptCandidate(candidate)) return null;
   const ref = { sellerDomain: candidate.sellerDomain, variantId: candidate.variantId };
   const item = createShopifyPreview(kind, ref, placement, candidate);
   if (!item) return null;
+  const verifiedUrl = glbUrl(item.modelUrl);
+  const assetRepresentation = verifiedUrl
+    ? "verified_3d_asset"
+    : REPRESENTATIVE_MODEL_KINDS.has(kind)
+      ? "representative_3d_asset"
+      : "procedural_approximation";
   return {
     ...item, variantId: ref.variantId, variant: candidate.variantTitle, merchant: candidate.merchant || ref.sellerDomain,
     url: candidate.productUrl ?? null, photo: candidate.imageUrl ?? null, deliveryEstimate: candidate.deliveryEstimate ?? null,
     savedPrice: { priceMinor: candidate.priceMinor, currency: candidate.currency },
+    assetRepresentation,
   };
 }
 

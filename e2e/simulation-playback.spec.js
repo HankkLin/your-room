@@ -42,7 +42,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   await page.locator('[data-sim-speed="1"]').click();
   await page.locator("#sim-run-btn").click();
 
-  // 2. Verify Kevin & Alice real avatars spawn in 3D scene and clock advances (no mock badge)
+  // 2. Verify Family of Four real avatars spawn in 3D scene and clock advances (no mock badge)
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "RUNNING",
@@ -51,7 +51,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   const initialStats = await page.evaluate(() =>
     window.__livingBlueprint.getScene().getPlaybackStats(),
   );
-  expect(initialStats.avatarCount).toBe(2);
+  expect(initialStats.avatarCount).toBe(4);
   await expect(page.locator("#sim-clock")).not.toHaveText("");
 
   // 3. Click Pause -> verify PAUSED and Resume button label -> click Resume at 20x
@@ -132,7 +132,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
     page.locator('#sim-scorecard [data-score-category="movement"] .twin-score-value'),
   ).toHaveText(String(afterMovScoreText));
 
-  // 8. Dinner Party — 8 Guests renders 10 concurrent avatars smoothly
+  // 8. Dinner Party — 8 Guests renders 12 concurrent avatars (4 family + 8 guests) smoothly
   await page.locator("#sim-scenario").selectOption("dinner-party-8-guests");
   await page.locator('[data-sim-speed="20"]').click();
   await page.locator("#sim-run-btn").click();
@@ -144,10 +144,40 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   const partyStats = await page.evaluate(() =>
     window.__livingBlueprint.getScene().getPlaybackStats(),
   );
-  expect(partyStats.avatarCount).toBe(10);
+  expect(partyStats.avatarCount).toBe(12);
+
+  // 8b. Friends Arrive — Staged Crowd & Grandparents Visit — Accessibility run cleanly
+  await page.locator("#sim-scenario").selectOption("friends-arrival");
+  await page.locator('[data-sim-speed="20"]').click();
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute(
+    "data-status",
+    "COMPLETE",
+  );
+  const friendsStats = await page.evaluate(() =>
+    window.__stillroom.getScene().getPlaybackStats(),
+  );
+  expect(friendsStats.avatarCount).toBe(12);
+  await expect(page.locator("#sim-checkpoints")).toBeVisible();
+  await page
+    .locator('#sim-checkpoints [data-checkpoint-type="FRIENDS_ARRIVE"]')
+    .click();
+
+  await page.locator("#sim-scenario").selectOption("grandparents-visit");
+  await page.locator('[data-sim-speed="20"]').click();
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute(
+    "data-status",
+    "COMPLETE",
+  );
+  const gpStats = await page.evaluate(() =>
+    window.__stillroom.getScene().getPlaybackStats(),
+  );
+  expect(gpStats.avatarCount).toBe(6);
 
   // 9. Fire Emergency renders evacuation paths and exit bottleneck evidence
   await page.locator("#sim-scenario").selectOption("fire-emergency");
+  await page.locator('[data-sim-speed="20"]').click();
   await page.locator("#sim-run-btn").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
@@ -155,7 +185,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
     { timeout: 20000 },
   );
   await expect(page.locator("#sim-findings-list")).toContainText(
-    "2 converging",
+    "4 converging",
   );
   await expect(page.locator("#sim-findings-list")).toContainText(
     "0.96 m exit width",

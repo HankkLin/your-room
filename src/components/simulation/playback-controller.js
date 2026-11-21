@@ -73,10 +73,11 @@ export function sampleTimelineAt(simulation, timestampSeconds) {
  * - Contains ZERO pathfinding, schedule generation, or spatial validation math.
  */
 export function createSimulationPlaybackController({
-  baseSimSecondsPerRealSecond = 45,
+  baseSimSecondsPerRealSecond = 12,
   onFrame = () => {},
   onTick = () => {},
   onStatusChange = () => {},
+  onCheckpoint = () => {},
 } = {}) {
   let payload = null;
   let status = "READY";
@@ -86,6 +87,10 @@ export function createSimulationPlaybackController({
   let endSecond = 0;
   let showAllRoutes = false;
   let selectedFindingId = null;
+  let checkpoints = [];
+  let activeCheckpointId = null;
+  let pauseOnCheckpoints = false;
+  let triggeredCheckpointIds = new Set();
   let rafId = 0;
   let lastWallMs = 0;
   let agentMeta = new Map();
@@ -181,6 +186,8 @@ export function createSimulationPlaybackController({
       startSecond,
       endSecond,
       hasTimeline: Boolean(payload?.simulation && endSecond > startSecond),
+      checkpoints,
+      activeCheckpointId,
       showAllRoutes,
       selectedFindingId,
       currentTime,
@@ -219,6 +226,13 @@ export function createSimulationPlaybackController({
     if (endSecond < startSecond) endSecond = startSecond;
     currentSecond = startSecond;
     selectedFindingId = null;
+    checkpoints = Array.isArray(payload?.checkpoints)
+      ? [...payload.checkpoints]
+      : Array.isArray(sim?.checkpoints)
+        ? [...sim.checkpoints]
+        : [];
+    activeCheckpointId = null;
+    triggeredCheckpointIds = new Set();
 
     agentMeta = new Map();
     for (const agent of sim?.agents || []) {
@@ -227,6 +241,10 @@ export function createSimulationPlaybackController({
         id: agent.id,
         name: agent.name || agent.id,
         color: agent.color || null,
+        heightMeters: agent.heightMeters ?? null,
+        eyeHeightMeters: agent.eyeHeightMeters ?? null,
+        usesWheelchair: Boolean(agent.usesWheelchair),
+        role: agent.role || null,
       });
     }
     status = "READY";
@@ -238,6 +256,7 @@ export function createSimulationPlaybackController({
     if (!payload?.simulation) return getState();
     if (currentSecond >= endSecond) {
       currentSecond = startSecond;
+      triggeredCheckpointIds = new Set();
     }
     status = "RUNNING";
     lastWallMs = 0;
@@ -260,6 +279,11 @@ export function createSimulationPlaybackController({
     const numeric = Number(nextSecond);
     if (!Number.isFinite(numeric)) return getState();
     currentSecond = Math.max(startSecond, Math.min(endSecond, numeric));
+    triggeredCheckpointIds = new Set(
+      checkpoints
+        .filter((cp) => cp.timestampSeconds <= currentSecond)
+        .map((cp) => cp.id),
+    );
     if (status === "COMPLETE" && currentSecond < endSecond) {
       status = "PAUSED";
       emitCurrentFrame({ notifyTick: true });
@@ -270,12 +294,61 @@ export function createSimulationPlaybackController({
     return getState();
   }
 
+  function hasActiveWalkAt(sec) {
+    const routes = payload?.simulation?.routes;
+    if (!Array.isArray(routes) || routes.length === 0) return false;
+    return routes.some((r) => {
+      const s = Number(r.startTimestamp);
+      const e =
+        r.endTimestamp != null
+          ? Number(r.endTimestamp)
+          : s + (Number(r.distanceMeters) || 0) / (Number(r.speedMps) || 1.3);
+      return sec >= s - 0.5 && sec <= e + 0.5;
+    });
+  }
+
+  function resolveEffectiveSimRate(sec) {
+    // Allow scenario-specific explicit speed rates when configured
+    if (payload?.speedRates && Number.isFinite(Number(payload.speedRates[speed]))) {
+      const baseRate = Number(payload.speedRates[speed]);
+      if (speed === 1 && payload.adaptiveWalkPacing !== false) {
+        const walkingRate = Number(payload.walkingSimSecondsPerRealSecond) || 3.2;
+        return hasActiveWalkAt(sec) ? Math.min(baseRate, walkingRate) : baseRate;
+      }
+      return baseRate;
+    }
+    const rate =
+      Number(payload?.simSecondsPerRealSecond) || baseSimSecondsPerRealSecond;
+    return rate * speed;
+  }
+
   function step(deltaRealMs) {
     if (!payload?.simulation || status !== "RUNNING") return getState();
     const dtSec = Math.max(0, Number(deltaRealMs) || 0) / 1000;
-    const rate =
-      Number(payload.simSecondsPerRealSecond) || baseSimSecondsPerRealSecond;
-    currentSecond += dtSec * rate * speed;
+    const prevSecond = currentSecond;
+    const effectiveRate = resolveEffectiveSimRate(currentSecond);
+    currentSecond += dtSec * effectiveRate;
+
+    // Emit checkpoint notifications when crossing checkpoint timestamps
+    for (const cp of checkpoints) {
+      if (
+        !triggeredCheckpointIds.has(cp.id) &&
+        cp.timestampSeconds > prevSecond &&
+        cp.timestampSeconds <= currentSecond
+      ) {
+        triggeredCheckpointIds.add(cp.id);
+        activeCheckpointId = cp.id;
+        onCheckpoint(cp);
+        if (pauseOnCheckpoints) {
+          currentSecond = cp.timestampSeconds;
+          stopLoop();
+          status = "PAUSED";
+          emitCurrentFrame({ notifyTick: true });
+          emitStatus({ checkpoint: cp });
+          return getState();
+        }
+      }
+    }
 
     if (currentSecond >= endSecond) {
       currentSecond = endSecond;
@@ -288,6 +361,32 @@ export function createSimulationPlaybackController({
 
     emitCurrentFrame({ notifyTick: true });
     return getState();
+  }
+
+  function jumpToCheckpoint(idOrType, { pausePlayback = true } = {}) {
+    if (!payload?.simulation || checkpoints.length === 0) return null;
+    const query = String(idOrType || "").trim();
+    const matched =
+      checkpoints.find((cp) => cp.id === query || cp.type === query) ||
+      checkpoints.find(
+        (cp) => cp.label?.toLowerCase() === query.toLowerCase(),
+      ) ||
+      null;
+    if (!matched) return null;
+    activeCheckpointId = matched.id;
+    seek(matched.timestampSeconds);
+    if (pausePlayback && status === "RUNNING") {
+      pause();
+    } else {
+      emitStatus({ checkpoint: matched });
+    }
+    onCheckpoint(matched);
+    return matched;
+  }
+
+  function setPauseOnCheckpoints(flag) {
+    pauseOnCheckpoints = Boolean(flag);
+    return pauseOnCheckpoints;
   }
 
   function setSpeed(multiplier) {
@@ -324,6 +423,9 @@ export function createSimulationPlaybackController({
     startSecond = 0;
     endSecond = 0;
     selectedFindingId = null;
+    checkpoints = [];
+    activeCheckpointId = null;
+    triggeredCheckpointIds = new Set();
     agentMeta = new Map();
     onFrame({
       snapshots: [],
@@ -345,6 +447,9 @@ export function createSimulationPlaybackController({
       currentSecond,
       startSecond,
       endSecond,
+      checkpoints: [...checkpoints],
+      activeCheckpointId,
+      pauseOnCheckpoints,
       showAllRoutes,
       selectedFindingId,
       hasSimulation: Boolean(payload?.simulation),
@@ -360,6 +465,9 @@ export function createSimulationPlaybackController({
     setSpeed,
     setShowAllRoutes,
     selectFinding,
+    getCheckpoints: () => [...checkpoints],
+    jumpToCheckpoint,
+    setPauseOnCheckpoints,
     reset,
     dispose: stopLoop,
     getState,

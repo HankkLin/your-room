@@ -1,4 +1,5 @@
 import { validateScenePatch } from "../../redesign/validate-scene-patch.js";
+import { createRegionSelection, summarizeArchitecturalAccessibilityLimits, validateScopedRegionPatch } from "../../spatial/region-selection.js";
 import { createRegionEditor } from "./region-editor.js";
 import {
   buildRegionSuggestionInput, buildReplaySuggestionInput, previewRegionPatch, previewReplaySuggestion, requestReplaySuggestion,
@@ -60,8 +61,15 @@ function describePosition(item, roomNames) {
   return room + " (" + item.position.map((value) => Number(value.toFixed(2))).join(", ") + " m)";
 }
 
-function verifySpatialPatch(patch, { house, items }) {
-  const validation = validateScenePatch(captureStudioLayout(house, items), patch);
+function verifySpatialPatch(patch, { house, items }, region = null) {
+  const captured = captureStudioLayout(house, items);
+  if (region) {
+    const selection = createRegionSelection(region, captured);
+    const scoped = validateScopedRegionPatch(captured, patch, selection);
+    if (!scoped.valid) throw new Error(scoped.errors.map(error => error.message).join(" "));
+    return;
+  }
+  const validation = validateScenePatch(captured, patch);
   if (!validation.valid) throw new Error(validation.errors.map(error => error.message).join(" "));
 }
 
@@ -139,12 +147,19 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
       const sharedTime = formatLocalTime(before.environment);
       messages.push((after ? "Both layouts used " : "Baseline conditions used ") + before.environment.location.label + " · " + sharedTime + ".");
     }
-    for (const [label, type] of [["Sun glare", "SUN_GLARE"], ["Privacy sightlines", "PRIVACY_SIGHTLINE"], ["Noise conflicts", "NOISE_CONFLICT"]]) {
-      const count = run => run?.evaluation?.findings.filter(finding => finding.type === type).length ?? 0;
-      if (count(before) || count(after)) {
-        messages.push(label + ": " + count(before) + (after ? " → " + count(after) : "") + ".");
+      for (const [label, type] of [["Sun glare", "SUN_GLARE"], ["Privacy sightlines", "PRIVACY_SIGHTLINE"], ["Noise conflicts", "NOISE_CONFLICT"]]) {
+        const count = run => run?.evaluation?.findings.filter(finding => finding.type === type).length ?? 0;
+        if (count(before) || count(after)) {
+          messages.push(label + ": " + count(before) + (after ? " → " + count(after) : "") + ".");
+        }
       }
-    }
+      const archLimits = summarizeArchitecturalAccessibilityLimits(
+        (after || before)?.evaluation?.findings || [],
+        (after || before)?.scene || baseline.scene,
+      );
+      for (const lim of archLimits) {
+        messages.push("Architectural limit: " + lim.explanation);
+      }
     if (after) {
       messages.push(blockedRoute(firstBlocked(after), "Current layout", roomNames));
       if (baseline.finding && after.summary.pathFailures === 0) {
@@ -297,9 +312,9 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
       update(latest);
       if (pending !== request) return;
 
-      verifySpatialPatch(selection ? suggested : suggested.scenePatch, latest);
       const moves = selection ? previewRegionPatch(suggested, input, latest.house, latest.items).moves
         : [previewReplaySuggestion(suggested, latest.house, latest.items)];
+      verifySpatialPatch(selection ? suggested : suggested.scenePatch, latest, selection ? input.region : null);
       const roomNames = new Map(latest.rooms.map(({ id, name }) => [id, name]));
       explanation.textContent = selection ? suggested.reasoning : suggested.explanation;
       container.querySelector("#studio-replay-proposal-title").textContent = selection ? "Proposed regional changes" : "Proposed move";
@@ -325,9 +340,9 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
     if (!proposal || activeRun) return;
     try {
       const { input, suggested } = proposal;
-      verifySpatialPatch(input.region ? suggested : suggested.scenePatch, context);
       const { items } = input.region ? previewRegionPatch(suggested, input, context.house, context.items)
         : previewReplaySuggestion(suggested, context.house, context.items);
+      verifySpatialPatch(input.region ? suggested : suggested.scenePatch, context, input.region || null);
       const finding = input.region ? null : baseline.finding;
       clearSuggestion();
       commitItems(items);
