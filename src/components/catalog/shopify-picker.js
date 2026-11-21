@@ -29,6 +29,16 @@ function createResult(product, label, onSelect) {
   const stock = product.available == null ? "Stock unknown" : product.available ? "In stock" : "Unavailable";
   offer.textContent = [price ?? "Price unavailable", stock, product.deliveryEstimate ? "Delivery " + product.deliveryEstimate : "Delivery unknown"].join(" · ");
 
+  const size = document.createElement("p");
+  size.className = "muted";
+  const dimensions = product.dimensions;
+  if (dimensions && product.dimensionsSource === "merchant") {
+    const meters = (value) => Number(value.toPrecision(6)).toString();
+    size.textContent = `Merchant dimensions (W × D × H) · ${meters(dimensions.width)} × ${meters(dimensions.depth)} × ${meters(dimensions.height)} m`;
+  } else {
+    size.textContent = "Estimated preview size";
+  }
+
   const actions = document.createElement("div");
   actions.className = "shopify-picker-actions";
   const place = document.createElement("button");
@@ -49,7 +59,7 @@ function createResult(product, label, onSelect) {
     actions.append(link);
   }
 
-  content.append(title, details, offer, actions);
+  content.append(title, details, offer, size, actions);
   card.append(content);
   return [card, place];
 }
@@ -69,7 +79,7 @@ export function mountShopifyPicker(root, {
     '<label class="field">Search Shopify<input type="search" placeholder="Compact walnut side table" required></label>' +
     '<button class="primary" type="submit">Search</button>' +
     '<label class="field shopify-picker-kind">Preview type<select></select></label>' +
-    '</form><p class="muted">Preview sizes are estimated when the merchant provides no dimensions.</p>' +
+    '</form>' +
     '<button type="button" class="secondary" data-recommend hidden>Ask Gemini to choose</button>' +
     '<p class="shopify-picker-status muted" role="status"></p><div data-shopify-warnings hidden></div>' +
     '<ul class="shopify-picker-results"></ul></div>';

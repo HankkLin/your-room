@@ -79,6 +79,27 @@ for (const mode of ["replace", "add"]) {
     expect((await readProject(page)).savedProducts).toEqual(after.savedProducts);
   });
 }
+test("changed merchant dimensions remain a preview until the updated size is approved", async ({ page }) => {
+  const dimensions = { width: 0.42, height: 1.1, depth: 0.38 };
+  await setup(page, { refresh: { dimensions } });
+  const before = await readProject(page);
+  const dialog = await search(page, "replace");
+  await expect(dialog.getByText("Estimated preview size")).toBeVisible();
+  const candidate = dialog.locator(".shopify-picker-card").filter({ hasText: "Walnut" });
+  await expect(candidate).toContainText("Merchant dimensions (W × D × H) · 0.25 × 0.25 × 1 m");
+  await dialog.getByRole("button", { name: "Ask Gemini to choose" }).click();
+  const approve = candidate.getByRole("button", { name: "Approve replacement" });
+  await approve.click();
+  await expect(dialog.getByRole("status")).toContainText("This offer changed");
+  await expect(candidate).toContainText("Merchant dimensions (W × D × H) · 0.42 × 0.38 × 1.1 m");
+  const awaitingApproval = await readProject(page);
+  expect(awaitingApproval.items).toEqual(before.items);
+  expect(awaitingApproval.savedProducts).toEqual(before.savedProducts);
+  await approve.click();
+  await expect(dialog).toBeHidden();
+  expect((await readProject(page)).house.objects).toContainEqual(expect.objectContaining({ shopify: ref, dimensions }));
+});
+
 test("unavailable recommendation cannot commit, and upstream failure leaves alternatives accessible", async ({ page }) => {
   await setup(page, { refresh: { available: false } });
   const before = await readProject(page);
