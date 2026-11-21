@@ -349,7 +349,7 @@ function housePreview(house, items) {
     ${rooms.join("")}${pieces.join("")}${labels.join("")}</svg>`;
 }
 
-export function openSetup({ state, isNew, initialStep = null, onFurnitureDraft, onBackToStyle, onApply, onCancel, onEditCurrent, readPhoto }) {
+export function openSetup({ state, isNew, initialStep = null, onFurnitureDraft, onBackToHousehold, onApply, onCancel, onEditCurrent, readPhoto }) {
   const host = document.getElementById("setup-page");
   let step = initialStep ?? (isNew ? 1 : 2);
   let source = isNew ? "custom" : state.roomPhoto ? "photo" : "custom";
@@ -724,7 +724,7 @@ export function openSetup({ state, isNew, initialStep = null, onFurnitureDraft, 
             ? source === "photo"
               ? "Use this footprint"
               : "Review furniture"
-            : editingInventory ? "Continue to Explore room"
+            : editingInventory ? "Continue to Your Style"
             : detection === "loading"
               ? "Use current list"
               : "Continue to styling") +
@@ -1076,7 +1076,7 @@ export function openSetup({ state, isNew, initialStep = null, onFurnitureDraft, 
     if (b.id === "setup-back") {
       if (editingInventory) {
         onExit();
-        onBackToStyle();
+        onBackToHousehold();
         return;
       }
       stepTo(step - 1);

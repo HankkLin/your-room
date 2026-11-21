@@ -783,10 +783,12 @@ const demoControls = mountDemoControls({
 const householdPage = createHouseholdPage($("#household-page"), {
   onSave(personas) {
     state = { ...state, personas };
-    navigate("design");
+    delete state.householdDraft;
+    beginSetup(false, 3);
   },
   onSkip() {
-    navigate("design");
+    delete state.householdDraft;
+    beginSetup(false, 3);
   },
 });
 document.querySelectorAll("[data-icon]").forEach((node) => {
@@ -1612,38 +1614,43 @@ $("#styles").onclick = (e) => {
 $("#style-form").onsubmit = async (e) => {
   e.preventDefault();
   const budget = Number($("#budget").value);
+  const brief = $("#brief").value.trim();
+  const explore = e.submitter?.id === "continue-explore";
+  if (explore && state.hasLayout && !pickedStyle && brief === (state.brief || "") &&
+      budget === state.budget && reference === (state.reference || null)) {
+    navigate("tour");
+    return;
+  }
   const overrides = {};
   if (pickedStyle) overrides.style = draftStyle;
   if (editedDesignBudget || budget !== state.budget) overrides.budget = budget;
-  await applyRestyle({ ...state, style: draftStyle, budget, brief: $("#brief").value.trim(), reference }, overrides, true);
+  const applied = await applyRestyle({ ...state, style: draftStyle, budget, brief, reference }, overrides, true);
+  if (explore && applied) navigate("tour");
 };
 
-async function applyRestyle(project, overrides, openTour) {
+async function applyRestyle(project, overrides, fromStyle) {
   const progress = $("#restyle-progress");
-  if (progress.open) return;
-  const result = openTour ? $("#restyle-design-result") : $("#edit-result");
+  if (progress.open) return false;
+  const result = fromStyle ? $("#restyle-design-result") : $("#edit-result");
   result.textContent = "";
   try {
     await runRestyle(progress, { project, overrides, snapshot: candidateSession.read() }, next => {
       const summary = describeRestyle(state, next);
       commit({ ...state, ...next, reference: project.reference, brief: project.brief, hasLayout: true, notes: summary });
       syncForm();
-      if (openTour) {
-        navigate("tour");
-        changeView($("#view-interior").disabled ? "plan" : "interior");
-        jumpTo("entry");
-      }
       $("#restyle-tour-result").textContent = summary;
-      if (openTour) result.textContent = summary;
+      result.textContent = summary;
       toast(summary);
     });
+    return true;
   } catch (error) {
     result.textContent = error.name === "AbortError" ? "Re-style canceled." : "Re-style could not finish. Try again.";
+    return false;
   }
 }
 $("#undo").onclick = () => {
   if (history.length) {
-    state = { ...history.pop(), personas: state.personas, screen: stage, blueprintStep: activeBpStep, flowVersion: 3 };
+    state = { ...history.pop(), personas: state.personas, screen: stage, blueprintStep: activeBpStep, flowVersion: 4 };
     selection = null;
     $("#restyle-tour-result").textContent = "";
     $("#restyle-design-result").textContent = "";
@@ -1802,7 +1809,7 @@ function defaultBpStepForStage(nextStage) {
     case "setup":
       return "1";
     case "design":
-      return "3";
+      return "4";
     case "tour":
       return "5";
     case "household":
@@ -1818,10 +1825,10 @@ function updateBpNavHighlight(bpStep) {
   activeBpStep = String(bpStep);
   document.querySelectorAll("[data-bp-step]").forEach((btn) => {
     const stepNum = btn.dataset.bpStep;
-    const isSetup = stage === "setup" && activeBpStep !== "4";
+    const isSetup = stage === "setup" && activeBpStep !== "3";
     const requiresLayout = stepNum === "5" || stepNum === "6" || stepNum === "7";
     btn.disabled =
-      (isSetup && stepNum !== activeBpStep && stepNum !== "1" && !(stepNum === "4" && hasProject)) ||
+      (isSetup && stepNum !== activeBpStep && stepNum !== "1" && !(stepNum === "3" && hasProject)) ||
       (requiresLayout && !state.hasLayout);
     if (stepNum === activeBpStep) btn.setAttribute("aria-current", "step");
     else btn.removeAttribute("aria-current");
@@ -1845,7 +1852,6 @@ function markStage(next, bpStep = null) {
   stage = next;
   document.body.dataset.stage = next;
   updateBpNavHighlight(bpStep || defaultBpStepForStage(next));
-  $("#continue-furniture").hidden = next !== "design";
   $("#studio").hidden = !["design", "tour"].includes(next);
   $("#shop-page").hidden = next !== "shop";
   $("#setup-page").hidden = next !== "setup";
@@ -1892,7 +1898,7 @@ function navigate(next, { householdDraft, bpStep = null } = {}) {
   if (next !== "household") delete state.householdDraft;
   else if (householdDraft) state = { ...state, householdDraft };
   markStage(next, bpStep);
-  state = { ...state, flowVersion: 3, screen: next, blueprintStep: activeBpStep };
+  state = { ...state, flowVersion: 4, screen: next, blueprintStep: activeBpStep };
   if (next === "shop") shoppingList.render(state);
   else if (next === "household") {
     householdPage.open({ personas: state.householdDraft ?? state.personas, rooms: listPersonaRooms(state) });
@@ -1930,7 +1936,7 @@ function loadWholeHomeDemo() {
 $("#whole-home-btn").onclick = loadWholeHomeDemo;
 function beginSetup(fresh = false, initialStep = null) {
   const editFurniture = initialStep === 3 && !fresh;
-  if (editFurniture && stage === "setup" && activeBpStep === "4" && closeSetup) return;
+  if (editFurniture && stage === "setup" && activeBpStep === "3" && closeSetup) return;
   if (editFurniture && stage === "design") {
     if (!$("#style-form").reportValidity()) return;
     state = { ...state, style: draftStyle, budget: Number($("#budget").value), brief: $("#brief").value.trim(), reference };
@@ -1938,10 +1944,10 @@ function beginSetup(fresh = false, initialStep = null) {
   const previous = stage === "setup" ? state.screen || "design" : stage;
   const previousStep = stage === "setup" ? state.returnStep : activeBpStep;
   if (editFurniture) {
-    state = { ...state, blueprintStep: "4", returnStep: previousStep, flowVersion: 3 };
+    state = { ...state, blueprintStep: "3", returnStep: previousStep, flowVersion: 4 };
     persist();
   }
-  markStage("setup", initialStep === 3 ? "4" : "1");
+  markStage("setup", initialStep === 3 ? "3" : "1");
   window.scrollTo(0, 0);
   closeSetup = openSetup({
     onEditCurrent: fresh && hasProject ? () => beginSetup(false) : null,
@@ -1952,7 +1958,7 @@ function beginSetup(fresh = false, initialStep = null) {
       state = { ...state, furnitureDraft: draft };
       persist();
     } : null,
-    onBackToStyle: editFurniture ? () => navigate("design") : null,
+    onBackToHousehold: editFurniture ? () => navigate("household") : null,
     onCancel: hasProject ? () => {
       if (editFurniture) delete state.furnitureDraft;
       navigate(previous, { bpStep: previousStep });
@@ -1962,7 +1968,7 @@ function beginSetup(fresh = false, initialStep = null) {
       if (editFurniture) {
         delete state.furnitureDraft;
         commit({ ...state, roomPhoto: next.roomPhoto, items: next.items, hasLayout: true });
-        navigate("tour");
+        navigate("design");
         return;
       }
       if (wholeHome) {
@@ -1992,7 +1998,7 @@ function beginSetup(fresh = false, initialStep = null) {
         importedHouse,
         items,
         personas: newProject ? [] : state.personas,
-        flowVersion: 3,
+        flowVersion: 4,
         hasLayout:
           sample || Boolean(importedHouse) || (!newProject && Boolean(next.hasLayout)),
       });
@@ -2207,11 +2213,11 @@ window.addEventListener("keydown", (event) => {
   }
 });
 $("#room-settings").onclick = () => beginSetup(true);
-$("#continue-furniture").onclick = $("#furniture-step").onclick = () => beginSetup(false, 3);
+$("#furniture-step").onclick = () => beginSetup(false, 3);
 $("#new-project").onclick = () => beginSetup(true);
 $("#household-step").onclick = () => navigate("household", { bpStep: "2" });
 $("#style-step").onclick = $("#revise-brief").onclick = () =>
-  navigate("design", { bpStep: "3" });
+  navigate("design");
 $("#tour-step").onclick = $("#back-to-tour").onclick = () =>
   navigate("tour", { bpStep: "5" });
 $("#continue-stress").onclick = $("#stress-test-step").onclick = () => {
@@ -2573,9 +2579,14 @@ window.__livingBlueprint = {
 };
 window.__stillroom = window.__livingBlueprint;
 syncForm();
-if (hasProject && state.flowVersion === 3 && state.blueprintStep === "4") {
+if (state.flowVersion === 3 && state.blueprintStep === "4") {
+  state.blueprintStep = "3";
+  if (state.screen === "design") state.returnStep = "4";
+  state.flowVersion = 4;
+}
+if (hasProject && state.flowVersion === 4 && state.blueprintStep === "3") {
   beginSetup(false, 3);
-} else if (hasProject && [2, 3].includes(state.flowVersion) &&
+} else if (hasProject && [2, 3, 4].includes(state.flowVersion) &&
     ["household", "tour", "design", "shop"].includes(state.screen)) {
   const stressStep = state.flowVersion === 2 ? "7" : "6";
   navigate(state.screen, { bpStep: state.screen === "tour" && state.blueprintStep === stressStep ? "6" : null });

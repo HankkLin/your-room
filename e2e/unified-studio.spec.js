@@ -53,6 +53,7 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
   await expect(destinations.nth(0)).toHaveValue("bedroom");
   await expect(destinations.nth(1)).toHaveValue("kitchen");
   await household.getByRole("button", { name: "Save and continue" }).click();
+  await page.locator("#setup-next").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   const approved = await project(page);
   expect(approved.personas).toEqual([alex]);

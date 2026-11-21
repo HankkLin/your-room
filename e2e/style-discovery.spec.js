@@ -34,6 +34,7 @@ test("an empty whole home browses room-specific variants and recovers from an in
   await page.locator("#floorplan-upload").setInputFiles("public/assets/sample-capture.jpg");
   await page.locator("#fp-confirm-import").click();
   await page.locator("#skip-household").click();
+  await page.locator("#setup-next").click();
   const project = () => page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
   const before = await project();
   expect(before.personas).toEqual([]);

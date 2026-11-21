@@ -7,6 +7,7 @@ const project = (page) =>
 async function skipHousehold(page) {
   await expect(household(page)).toBeVisible();
   await household(page).getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#setup-next").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
 }
 
@@ -270,6 +271,7 @@ test("a household uses imported room IDs and keeps destinations after room setti
   await expect(destination).toHaveValue("living-room");
   await destination.selectOption("kitchen");
   await household(page).getByRole("button", { name: "Save and continue" }).click();
+  await page.locator("#setup-next").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   const approved = await project(page);
   expect(approved.personas).toEqual([

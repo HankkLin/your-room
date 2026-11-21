@@ -147,7 +147,7 @@ test("layout, schedule and floorplan changes discard a proposed or in-flight mov
   releaseReply();
   await replyFinished;
   delayReply = false;
-  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+  await expect(page.locator("#furniture-step")).toHaveAttribute("aria-current", "step");
   await page.locator("#tour-step").click();
   await expect(page.locator("#studio-replay-panel")).toBeVisible();
   expect((await project(page)).personas[0].schedule[1].windowEndMinute).toBe(515);

@@ -46,6 +46,7 @@ test("custom room flows through the brief, furnished tour and saved Shopify vari
   await page.locator("[data-name]").fill("My green sofa");
   await page.locator("#setup-next").click();
   await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#setup-next").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   const before = await project(page);
   expect(before.room).toMatchObject({
@@ -63,6 +64,7 @@ test("custom room flows through the brief, furnished tour and saved Shopify vari
     .fill("A reading corner with a lamp and no rug under $550");
   await page.getByRole("button", { name: "Soft modern", exact: true }).click();
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await expect(page.locator("#restyle-tour-result")).toContainText("Layout updated");
   await expect(page.locator("#view-label")).toHaveText("Interior view");
   const styled = await project(page);
@@ -102,6 +104,7 @@ test("a real room photo produces reviewable owned furniture on mobile", async ({
   expect(kinds).toContain("sofa");
   await page.locator("#setup-next").click();
   await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#setup-next").click();
   const initial = await project(page);
   expect(initial.roomPhoto).toMatch(/^data:image/);
   const sofa = owned(initial).find((item) => item.kind === "sofa");
@@ -111,6 +114,7 @@ test("a real room photo produces reviewable owned furniture on mobile", async ({
   await expect(page.locator(".reference-preview")).toBeVisible();
   await page.locator("#budget").fill("0");
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
   expect(owned(await project(page))).toEqual(owned(initial));
   await expect(page.locator("[data-item]").filter({ hasText: "Photo-derived 3D preview" }).first()).toContainText("Estimated dimensions");

@@ -204,8 +204,10 @@ test("a Shopify swap that has no clear placement preserves the layout", async ({
   await page.locator("#add-owned").click();
   await page.locator("#setup-next").click();
   await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#setup-next").click();
   await page.locator("#budget").fill("0");
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await page.getByRole("button", { name: "Add furniture" }).click();
   await page.locator('[data-product="brass-lamp"]').click();
   await expect(page.getByRole("dialog")).toBeHidden();

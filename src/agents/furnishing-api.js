@@ -44,7 +44,7 @@ export function createFurnishingMiddleware({ apiKey, fetchImpl } = {}) {
       return send(200, payload);
     } catch (error) {
       if (error instanceof GeminiJsonError) return send(error.status, { error: path === styleBriefPath
-        ? "Gemini could not read this brief. You can search Shopify by item." : "Gemini could not prepare a proposal. Try again or use Auto-style room." });
+        ? "Gemini could not read this brief. You can search Shopify by item." : "Gemini could not prepare a proposal. Try again or use Apply vision." });
       return send(422, { error: error.message || "The furnishing proposal could not be validated." });
     }
   };

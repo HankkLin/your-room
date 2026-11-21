@@ -22,8 +22,8 @@ test("U1 — Seven-step Blueprint navigation defines all 7 canonical steps in in
   const expected = [
     ["1", "Your Home"],
     ["2", "Your Household"],
-    ["3", "Your Style"],
-    ["4", "Your Furniture"],
+    ["3", "Your Furniture"],
+    ["4", "Your Style"],
     ["5", "Explore room"],
     ["6", "Stress Test"],
     ["7", "Furnish &amp; Buy"],
@@ -37,7 +37,7 @@ test("U1 — Seven-step Blueprint navigation defines all 7 canonical steps in in
   }
 });
 
-test("U2 — Step 3 StyleBrief handoff prepares validated furnishing input with prompt, photo reference, budget, and existing owned furniture", () => {
+test("U2 — Step 4 StyleBrief handoff prepares validated furnishing input with prompt, photo reference, budget, and existing owned furniture", () => {
   const demo = createWholeHomeDemoState();
   const personas = createFamilyOfFourPersonas(demo.house);
   const ownedSofa = {
@@ -68,7 +68,7 @@ test("U2 — Step 3 StyleBrief handoff prepares validated furnishing input with 
   );
 });
 
-test("U3 — Step 4 owned-furniture intake produces zero-cost owned SceneObjects with editable meter dimensions", () => {
+test("U3 — Step 3 owned-furniture intake produces zero-cost owned SceneObjects with editable meter dimensions", () => {
   const [item] = createOwnedItems("Chair", [], ROOM);
   assert.equal(item.owned, true);
   assert.equal(item.price, 0);
@@ -82,7 +82,7 @@ test("U3 — Step 4 owned-furniture intake produces zero-cost owned SceneObjects
   assert.match(setupSource, /bp-owned-badge">Owned</);
 });
 
-test("U4 — Step 3 AI Design loading stages render honest 7-step progression, completion, and failure states", () => {
+test("U4 — Step 4 AI Design loading stages render honest 7-step progression, completion, and failure states", () => {
   const activeHtml = renderAiDesignStagesMarkup(3);
   assert.equal((activeHtml.match(/class="bp-ai-stage"/g) || []).length, 7);
   assert.match(activeHtml, /data-ai-stage="0" data-stage-state="done"/);

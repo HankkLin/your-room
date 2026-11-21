@@ -28,11 +28,11 @@
         <button id="household-step" data-step="household" data-bp-step="2">
           <span aria-hidden="true">2</span>Your Household
         </button>
-        <button id="style-step" data-step="design" data-bp-step="3">
-          <span aria-hidden="true">3</span>Your Style
+        <button id="furniture-step" data-bp-step="3" type="button">
+          <span aria-hidden="true">3</span>Your Furniture
         </button>
-        <button id="furniture-step" data-bp-step="4" type="button">
-          <span aria-hidden="true">4</span>Your Furniture
+        <button id="style-step" data-step="design" data-bp-step="4">
+          <span aria-hidden="true">4</span>Your Style
         </button>
         <button id="tour-step" data-step="tour" data-bp-step="5">
           <span aria-hidden="true">5</span>Explore room
@@ -230,7 +230,7 @@
           </div>
           <section class="panel" id="design-panel">
             <div class="panel-head">
-              <span class="eyebrow" id="design-step-label">Step 3 · Your Style</span>
+              <span class="eyebrow" id="design-step-label">Step 4 · Your Style</span>
               <h2>How should this home feel?</h2>
             </div>
             <form id="style-form">
@@ -277,11 +277,11 @@
                     id="budget"
                     required /></span
               ></label>
-              <button type="button" class="primary" id="continue-furniture" hidden>Continue to Your Furniture →</button>
-              <button type="submit" class="secondary" id="generate">
-                <span data-icon="sparkles"></span> Auto-style room
+              <button type="submit" class="primary" id="generate">
+                <span data-icon="sparkles"></span> Apply vision
               </button>
               <p class="restyle-result" id="restyle-design-result" role="status"></p>
+              <button type="submit" class="secondary" id="continue-explore">Continue to Explore room →</button>
               <section id="household-furnishing" hidden aria-label="Household furnishing">
                 <div class="bp-furnishing-actions">
                   <button id="furnishing-shopify" type="button" class="secondary">Browse Shopify alternatives</button>

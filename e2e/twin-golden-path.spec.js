@@ -87,6 +87,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   // Skip custom persona authoring to exercise valid whole-home persona fallback (Kevin & Alice)
   await expect(page.locator("body")).toHaveAttribute("data-stage", "household");
   await page.locator("#skip-household").click();
+  await page.locator("#setup-next").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
@@ -241,20 +242,18 @@ test("Blueprint 7-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 7-step hea
   await expect(page.locator("#household-members .household-member")).toHaveCount(6);
   await page.locator("#save-household").click();
 
-  // Step 3: StyleBrief priority chips update #brief cleanly
-  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   await expect(nav.locator('[data-bp-step="3"]')).toHaveAttribute("aria-current", "step");
-  await page.locator('[data-brief-chip="wide step-free walkways"]').click();
-  await expect(page.locator("#brief")).toHaveValue(/wide step-free walkways/);
-
-  // Step 4: Jump directly to Your Furniture via Step 4 nav button, add an Owned piece & edit W (m)
-  await page.locator("#furniture-step").click();
-  await expect(nav.locator('[data-bp-step="4"]')).toHaveAttribute("aria-current", "step");
   await expect(page.locator("#furniture-photo-upload")).toBeAttached();
   await page.locator("#owned-kind").selectOption("chair");
   await page.locator("#add-owned").click();
   await page.locator("[data-name]").last().fill("Family heirloom armchair");
   await page.locator("#setup-next").click();
+
+  // Step 4: StyleBrief priority chips update #brief cleanly
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+  await expect(nav.locator('[data-bp-step="4"]')).toHaveAttribute("aria-current", "step");
+  await page.locator('[data-brief-chip="wide step-free walkways"]').click();
+  await expect(page.locator("#brief")).toHaveValue(/wide step-free walkways/);
 
   // Step 5: Explore room + Select area / Draw region opens floorplan region editor immediately
   await page.locator("#tour-step").click();

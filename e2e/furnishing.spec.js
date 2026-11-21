@@ -17,6 +17,7 @@ async function design(page, household = true) {
   } else {
     await page.getByRole("button", { name: "Skip", exact: true }).click();
   }
+  await page.locator("#setup-next").click();
 }
 
 test("review a photo-informed household proposal, apply once, and undo", async ({ page }) => {
@@ -65,6 +66,7 @@ test("over-budget preview and failed Gemini call preserve the scene and leave au
   await page.locator("[data-propose]").click();
   await expect(page.locator("#household-furnishing [role=status]")).toContainText("unavailable");
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 });
 
@@ -72,5 +74,6 @@ test("a skipped household keeps the original design flow", async ({ page }) => {
   await design(page, false);
   await expect(page.locator("[data-propose]")).toBeHidden();
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 });
