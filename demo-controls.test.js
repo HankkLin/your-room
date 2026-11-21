@@ -39,7 +39,7 @@ test("unified finding text names only households linked by measured evidence", (
   assert.doesNotMatch(renderResultsDeckMarkup({ findings, isMockData: true }, personas), /twin-household-impact/);
 });
 
-test("Test 1 — Scenario selector renders all four required demo scenarios", () => {
+test("Test 1 — Scenario selector renders the four demo scenarios and the approved household routine", () => {
   const html = renderControlPanelMarkup({});
   for (const scenario of DEMO_SCENARIOS) {
     assert(
@@ -53,6 +53,7 @@ test("Test 1 — Scenario selector renders all four required demo scenarios", ()
     [
       "Morning Routine",
       "Normal Day",
+      "Saved Household Routine",
       "Dinner Party — 8 Guests",
       "Fire Emergency",
     ],

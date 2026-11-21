@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
+import { createWholeHomeDemoState } from "./house-demo.js";
+import { createEnvironmentSnapshot } from "./src/environment/environment-context.js";
+import { runTwinScenario } from "./src/twin-integration.js";
 import { canModifyObject, isObjectLocked } from "./src/contracts/scene.js";
 import {
   PATCH_ERROR_CODES,
@@ -665,4 +668,30 @@ test("Self-Correction Retry Loop — Rejects locked & doorway-blocking proposals
   assert.equal(alwaysBadReplay.status, "FAILED");
   assert.equal(alwaysBadReplay.attempts.length, 2);
   assert.equal(alwaysBadReplay.selectedPatch, null);
+});
+
+test("Replay freezes the measured sun, routine, and household when a later environment is saved", () => {
+  const state = createWholeHomeDemoState();
+  const conditions = {
+    location: { label: "New York", latitude: 40.74785, longitude: -73.98507 },
+    orientationDegrees: 170, timeZone: "America/New_York", weather: null,
+  };
+  const sceneAt = (instant) => ({
+    ...state.house,
+    environment: { snapshot: createEnvironmentSnapshot({ ...conditions, instant }) },
+  });
+  const morning = runTwinScenario("morning-routine", {
+    state, items: state.items, house: sceneAt("2026-11-01T13:00:00Z"),
+  });
+  const afternoon = { state, items: state.items, house: sceneAt("2026-11-01T19:00:00Z") };
+  const independentlyMeasured = runTwinScenario("morning-routine", afternoon);
+  const compared = runTwinScenario("morning-routine", { ...afternoon, comparisonRun: morning });
+  const glare = (run) => run.findings.filter(finding => finding.type === "SUN_GLARE");
+  assert(glare(morning).some(finding => finding.evidence.targetObjectId === "home-desk" &&
+    finding.evidence.windowId === "win-bedroom-north"));
+  assert.equal(glare(independentlyMeasured).length, 0);
+  assert.deepEqual(glare(compared), glare(morning));
+  assert.equal(compared.environment, morning.environment);
+  assert.equal(compared.household, morning.household);
+  assert.equal(compared.scenarioConfig, morning.scenarioConfig);
 });

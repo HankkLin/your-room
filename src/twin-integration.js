@@ -1,8 +1,11 @@
+import { environmentInputs } from "./environment/environment-context.js";
 import { mergeHouseFixturesIntoItems, toSceneObject } from "../house-model.js";
 import { prepareHouseholdReplay, validatePersonas } from "./contracts/persona.js";
 import { STRESS_SCENARIO_TYPES } from "./contracts/simulation.js";
 import { listPersonaRooms } from "./persona/rooms.js";
 import {
+  compareEvaluations,
+  evaluateCandidatePatch,
   extractCategoryScoreMap,
   runRedesignReplay,
   toRedesignUiPayload,
@@ -65,7 +68,7 @@ export function formatAttemptSummaries(attempts = [], { isFallback = false } = {
     }
   }
   if (isFallback && !attempts.some((a) => a.accepted)) {
-    lines.push("Verified deterministic fallback patch applied");
+    lines.push("Deterministic fallback patch validated");
   }
   return lines;
 }
@@ -149,22 +152,25 @@ export function resolveValidHouseholdForHouse(state, house) {
 }
 
 /**
- * Build a real, non-mock playback dataset for any of the 4 UI scenarios:
+ * Build a deterministic playback dataset for the selected scenario:
  * - `morning-routine`
  * - `normal-day`
+ * - `saved-routine`
  * - `dinner-party-8-guests`
  * - `fire-emergency`
  */
-export function runTwinScenario(scenarioId, { house, items, state }) {
+export function runTwinScenario(scenarioId, { house, items, state, comparisonRun }) {
   const capturedHouse = captureStudioLayout(house, items);
   if (!capturedHouse) {
     throw new Error("Load or import a home layout before running simulation.");
   }
 
-  const { displayPersonas, simulationHousehold } = resolveValidHouseholdForHouse(
-    state,
-    capturedHouse,
-  );
+  const environment = comparisonRun ? comparisonRun.environment : capturedHouse.environment?.snapshot ?? null;
+  const { sun } = environmentInputs(environment);
+  capturedHouse.environment = { ...capturedHouse.environment, snapshot: environment };
+  const { displayPersonas, simulationHousehold, usedFallbackPersonas } = comparisonRun
+    ? { displayPersonas: comparisonRun.displayPersonas, simulationHousehold: comparisonRun.household }
+    : resolveValidHouseholdForHouse(state, capturedHouse);
 
   if (scenarioId === "dinner-party-8-guests") {
     const party = runStressScenario({
@@ -174,6 +180,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     });
     const evaluation = evaluateHouseholdExperience({
       house: capturedHouse,
+      sun,
       household: simulationHousehold,
       simulation: party.simulation,
     });
@@ -181,6 +188,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
 
     return {
       scenarioId,
+      environment,
       capturedHouse,
       household: simulationHousehold,
       displayPersonas,
@@ -196,7 +204,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
       afterScores: null,
       overallBeforeScore: evaluation.overallScore,
       overallAfterScore: null,
-      canRedesign: evaluation.findings.length > 0,
+      canRedesign: false,
       isMockData: false,
       evaluation,
     };
@@ -210,6 +218,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     });
     const evaluation = evaluateHouseholdExperience({
       house: capturedHouse,
+      sun,
       household: simulationHousehold,
       simulation: evac.simulation,
       includeEvacuation: true,
@@ -219,6 +228,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
 
     return {
       scenarioId,
+      environment,
       capturedHouse,
       household: simulationHousehold,
       displayPersonas,
@@ -244,16 +254,18 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     };
   }
 
-  // `morning-routine` or `normal-day`
-  const scenarioConfig =
-    scenarioId === "normal-day"
-      ? NORMAL_DAY_SCENARIO
-      : MORNING_ROUTINE_SCENARIO;
+  if (scenarioId === "saved-routine" && usedFallbackPersonas) {
+    throw new Error("Save a household with a scheduled activity to replay its routine.");
+  }
+  const scenarioConfig = comparisonRun?.scenarioConfig ?? {
+    "morning-routine": MORNING_ROUTINE_SCENARIO,
+    "normal-day": NORMAL_DAY_SCENARIO,
+    "saved-routine": { id: "saved-routine", timelineSampleSeconds: 60 },
+  }[scenarioId];
 
-  const householdForRun =
-    scenarioId === "normal-day" && displayPersonas.length > 0
-      ? displayPersonas
-      : simulationHousehold;
+  const householdForRun = scenarioId === "normal-day" && usedFallbackPersonas
+    ? prepareHouseholdReplay(displayPersonas, capturedHouse.rooms)
+    : simulationHousehold;
 
   const simulation = simulateHouse(
     capturedHouse,
@@ -262,6 +274,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
   );
   const evaluation = evaluateHouseholdExperience({
     house: capturedHouse,
+    sun,
     household: householdForRun,
     simulation,
     scenario: scenarioConfig,
@@ -271,6 +284,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
   return {
     scenarioId,
     scenarioConfig,
+    environment,
     capturedHouse,
     household: householdForRun,
     displayPersonas,
@@ -301,46 +315,70 @@ export async function executeStudioRedesign({
   house,
   items,
   state,
+  baseline = null,
+  candidateProducts = getCandidateProducts({ sceneItems: items }),
   maxAttempts = 3,
   useFallbackOnFailure = true,
 }) {
-  const beforeItems = structuredClone(items || []);
-  const beforeHouse = captureStudioLayout(house, beforeItems);
-  if (!beforeHouse) {
-    throw new Error("No active whole-home layout to redesign.");
+  const run = baseline ?? runTwinScenario(scenarioId, { house, items, state });
+  if (!run.scenarioConfig || run.scenarioId !== scenarioId) {
+    throw new Error("Choose a household routine to compare a redesign.");
   }
-
-  const { displayPersonas, simulationHousehold } = resolveValidHouseholdForHouse(
-    state,
-    beforeHouse,
-  );
-
-  const scenario =
-    scenarioId === "normal-day"
-      ? NORMAL_DAY_SCENARIO
-      : MORNING_ROUTINE_SCENARIO;
-  const household =
-    scenarioId === "normal-day" && displayPersonas.length > 0
-      ? displayPersonas
-      : simulationHousehold;
-
-  const candidateProducts = getCandidateProducts({ sceneItems: beforeItems });
+  const { capturedHouse: beforeHouse, household, displayPersonas, scenarioConfig: scenario, environment } = run;
+  const beforeItems = structuredClone(items);
+  const { sun } = environmentInputs(environment);
 
   const replayResult = await runRedesignReplay({
     house: beforeHouse,
     household,
     scenario,
+    sun,
     candidateProducts,
     maxAttempts,
     useFallbackOnFailure,
   });
 
+  return describeStudioOutcome(replayResult, { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, candidateProducts });
+}
+
+// Approval uses the exact reviewed operations and the captured conditions. It never asks for a second proposal.
+export function recheckStudioRedesign(outcome, candidateProducts) {
+  const { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, replayResult } = outcome;
+  const { sun } = environmentInputs(environment);
+  const evaluated = evaluateCandidatePatch({
+    house: beforeHouse, patch: replayResult.selectedPatch, beforeEvaluation: replayResult.before.evaluation,
+    household, scenario, sun, candidateProducts,
+  });
+  if (!evaluated.accepted) throw new Error(evaluated.rejectedBecause.join(" ") || "The approved patch failed validation.");
+  const verified = { ...replayResult, comparison: evaluated.comparison, delta: evaluated.comparison.delta,
+    after: { house: evaluated.afterHouse, evaluation: evaluated.afterEvaluation } };
+  return describeStudioOutcome(verified, { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, candidateProducts });
+}
+
+export function describeApprovedHouseholdReplay({ baseline, result, afterHouse, afterItems, displayPersonas, patch }) {
+  const comparison = compareEvaluations(baseline.result.evaluation, result.evaluation);
+  const better = comparison.improvedCategories.length || comparison.resolvedFindings.length;
+  const worse = comparison.regressedCategories.length || comparison.introducedFindings.length;
+  const status = better && worse ? "MIXED" : worse ? "REGRESSION" : better ? "IMPROVED" : "NO_CHANGE";
+  const replayResult = {
+    status, attempts: [], selectedPatch: patch, comparison, delta: comparison.delta,
+    before: { house: baseline.scene, evaluation: baseline.result.evaluation },
+    after: { house: afterHouse, evaluation: result.evaluation },
+  };
+  const outcome = describeStudioOutcome(replayResult, {
+    beforeItems: baseline.items, beforeHouse: baseline.scene, household: baseline.household, displayPersonas,
+    scenario: { id: "saved-routine", timelineSampleSeconds: 60 }, environment: baseline.environment, candidateProducts: [],
+  });
+  return { ...outcome, afterItems };
+}
+
+function describeStudioOutcome(replayResult, { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, candidateProducts }) {
   const uiPayload = toRedesignUiPayload(replayResult, { candidateProducts });
   const attemptSummaries = formatAttemptSummaries(replayResult.attempts, {
     isFallback: uiPayload.isFallback,
   });
 
-  if (replayResult.status !== "IMPROVED" || !replayResult.after?.house) {
+  if (!replayResult.after?.house) {
     return {
       accepted: false,
       replayResult,
@@ -367,6 +405,8 @@ export async function executeStudioRedesign({
 
   return {
     accepted: true,
+    candidateProducts,
+    environment,
     replayResult,
     uiPayload,
     attemptSummaries,

@@ -38,8 +38,8 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await page.locator("#whole-home-demo").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
-  // Single simulation UI check: legacy #studio-replay-panel is not rendered
-  await expect(page.locator("#studio-replay-panel")).toHaveCount(0);
+  // The saved-household comparison and scenario controls share the live tour.
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
 
   // Control panel is visible in sidebar and does NOT overlap the 3D scene canvas
   const controlCard = page.locator("#demo-controls-panel .twin-control-card");
@@ -96,7 +96,11 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   );
 
   // Click Propose Gemini Redesign -> applies ScenePatch, replays, and shows Before -> After improvement
+  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
   await page.locator("#sim-propose-redesign-btn").click();
+  await expect(page.locator("#sim-approve-redesign")).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  await page.locator("#sim-approve-redesign").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",

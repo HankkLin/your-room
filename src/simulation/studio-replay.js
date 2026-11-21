@@ -47,10 +47,15 @@ export async function runStudioReplay({ beforeScene, afterScene, personas, rooms
 }
 
 export async function simulateStudioLayout(scene, resolvedHousehold, snapshot = scene.environment?.snapshot ?? null) {
-  const { simulateHouse } = await import('./simulation-engine.js');
+  const [{ simulateHouse }, { evaluateHouseholdExperience }] = await Promise.all([
+    import('./simulation-engine.js'), import('./validators/household-evaluation.js'),
+  ]);
   // Keep the approved schedule available for replays after the layout changes.
   const inputs = environmentInputs(snapshot);
   const house = { ...scene, environment: { ...scene.environment, snapshot: inputs.environment } };
   const result = simulateHouse(house, structuredClone(resolvedHousehold), { timelineSampleSeconds: 60, ...inputs });
-  return { ...result, environment: inputs.environment };
+  const evaluation = evaluateHouseholdExperience({
+    house, household: resolvedHousehold, simulation: result, sun: inputs.sun,
+  });
+  return { ...result, evaluation, environment: inputs.environment };
 }

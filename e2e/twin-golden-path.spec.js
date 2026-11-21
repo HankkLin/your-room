@@ -82,10 +82,10 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
-  // Step 3 & 4: Whole-home 3D appears + Household personas available + no legacy replay panel
+  // Step 3 & 4: Whole-home 3D appears + Household personas and saved-routine controls available
   await page.locator("#view-3d").click();
   await expect(page.locator("#scene canvas")).toHaveAttribute("data-engine", /three/i);
-  await expect(page.locator("#studio-replay-panel")).toHaveCount(0);
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
   await expect(page.locator("#sim-persona-summary")).toContainText("Kevin");
   await expect(page.locator("#sim-persona-summary")).toContainText("Alice");
 
@@ -124,7 +124,11 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   expect(beforeMovementScore).toBeLessThan(95);
 
   // Step 9–12 (E5, E6, E9): Click "Propose Gemini Redesign" -> Attempt 1 (locked toilet) rejected -> Attempt 2 accepted & applied
+  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
   await page.locator("#sim-propose-redesign-btn").click();
+  await expect(page.locator("#sim-approve-redesign")).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  await page.locator("#sim-approve-redesign").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
   expect(redesignCallCount).toBe(2);
 

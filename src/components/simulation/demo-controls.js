@@ -386,7 +386,7 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
   }
 
   const fallbackBadge = state.isFallbackRedesign
-    ? '<span class="twin-fallback-pill" title="Verified deterministic ScenePatch applied while Gemini API was offline or unavailable">Deterministic fallback</span>'
+    ? '<span class="twin-fallback-pill" title="Deterministic ScenePatch generated when Gemini was unavailable">Deterministic fallback</span>'
     : "";
 
   return `<div class="twin-redesign-box" id="sim-redesign-panel">
@@ -404,6 +404,10 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
         .join("")}
     </ul>
     ${renderAttemptTrailMarkup(state.attemptSummaries)}
+    ${state.redesignStatus === "REVIEW" ? `<div class="studio-replay-actions">
+      <button type="button" class="primary" id="sim-approve-redesign">Approve layout changes</button>
+      <button type="button" class="secondary" id="sim-dismiss-redesign">Dismiss layout changes</button>
+    </div>` : ""}
   </div>`;
 }
 
@@ -574,6 +578,8 @@ export function mountDemoControls({
   onSelectFinding = () => {},
   onSelectLayoutView = () => {},
   onProposeRedesign = () => {},
+  onApproveRedesign = () => {},
+  onDismissRedesign = () => {},
 } = {}) {
   let visible = false;
 
@@ -640,6 +646,8 @@ export function mountDemoControls({
   }
 
   function handleResultsClick(event) {
+    if (event.target.closest("#sim-approve-redesign")) return onApproveRedesign();
+    if (event.target.closest("#sim-dismiss-redesign")) return onDismissRedesign();
     const redesignBtn = event.target.closest(
       "#sim-propose-redesign-deck, #sim-propose-redesign-inline",
     );

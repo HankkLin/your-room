@@ -114,6 +114,11 @@ export const DEMO_SCENARIOS = Object.freeze([
     description: "Full-day routine across work, meals, leisure, and rest.",
   },
   {
+    id: "saved-routine",
+    name: "Saved Household Routine",
+    description: "Replay the activities and times approved in your household.",
+  },
+  {
     id: "dinner-party-8-guests",
     name: "Dinner Party — 8 Guests",
     description: "High-occupancy gathering stressing kitchen and hallway clearance.",
@@ -352,10 +357,10 @@ export function normalizeSimulationViewState(raw = {}) {
   const afterScores = normalizeScoreMap(raw?.afterScores);
   const scores = normalizeScoreMap(raw?.scores) ?? beforeScores;
 
-  const overallBeforeScore = Number.isFinite(Number(raw?.overallBeforeScore))
+  const overallBeforeScore = raw?.overallBeforeScore != null && Number.isFinite(Number(raw.overallBeforeScore))
     ? Math.round(Number(raw.overallBeforeScore))
     : null;
-  const overallAfterScore = Number.isFinite(Number(raw?.overallAfterScore))
+  const overallAfterScore = raw?.overallAfterScore != null && Number.isFinite(Number(raw.overallAfterScore))
     ? Math.round(Number(raw.overallAfterScore))
     : null;
 

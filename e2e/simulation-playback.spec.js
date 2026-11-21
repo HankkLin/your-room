@@ -102,7 +102,11 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   const beforeMovScoreText = await page
     .locator('#sim-scorecard [data-score-category="movement"] .twin-score-value')
     .textContent();
+  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
   await page.locator("#sim-propose-redesign-btn").click();
+  await expect(page.locator("#sim-approve-redesign")).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  await page.locator("#sim-approve-redesign").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",

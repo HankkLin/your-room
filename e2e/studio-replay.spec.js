@@ -199,12 +199,14 @@ test("drag an area, review the scoped proposal, approve once and replay the same
   expect(payload.instruction).toEqual(await instruction.inputValue());
   expect(payload.region[0]).toBeCloseTo(1.9, 1);
   expect(payload.region[3]).toBeCloseTo(7.65, 1);
-  expect(payload.findings).toEqual([expect.objectContaining({
+  expect(payload.findings).toEqual(expect.arrayContaining([expect.objectContaining({
     type: "NO_PATH", evidence: expect.objectContaining({ timestampSeconds: 29100 }),
-  })]);
+  })]));
   expect(await project(page)).toEqual(before);
   await approve.click();
   await expect(failures).toHaveText(["1", "0"]);
+  await expect(page.locator("#sim-scenario")).toHaveValue("saved-routine");
+  await expect(page.locator("#sim-scorecard")).toBeVisible();
   await expect(page.locator("#studio-replay-status")).toContainText("improved");
   const after = await project(page);
   expect(after.personas).toEqual(before.personas);

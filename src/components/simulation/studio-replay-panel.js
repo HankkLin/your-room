@@ -1,3 +1,4 @@
+import { validateScenePatch } from "../../redesign/validate-scene-patch.js";
 import { createRegionEditor } from "./region-editor.js";
 import {
   buildRegionSuggestionInput, buildReplaySuggestionInput, previewRegionPatch, previewReplaySuggestion, requestReplaySuggestion,
@@ -59,7 +60,12 @@ function describePosition(item, roomNames) {
   return room + " (" + item.position.map((value) => Number(value.toFixed(2))).join(", ") + " m)";
 }
 
-export function createStudioReplayPanel(container, { getContext, commitItems, commitEnvironment }) {
+function verifySpatialPatch(patch, { house, items }) {
+  const validation = validateScenePatch(captureStudioLayout(house, items), patch);
+  if (!validation.valid) throw new Error(validation.errors.map(error => error.message).join(" "));
+}
+
+export function createStudioReplayPanel(container, { getContext, commitItems, commitEnvironment, onApprovedReplay }) {
   const environment = mountEnvironmentPanel(container.querySelector("#studio-environment"), commitEnvironment);
   const capture = container.querySelector("#studio-replay-capture");
   const compare = container.querySelector("#studio-replay-compare");
@@ -132,6 +138,12 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
     if (before.environment) {
       const sharedTime = formatLocalTime(before.environment);
       messages.push((after ? "Both layouts used " : "Baseline conditions used ") + before.environment.location.label + " · " + sharedTime + ".");
+    }
+    for (const [label, type] of [["Sun glare", "SUN_GLARE"], ["Privacy sightlines", "PRIVACY_SIGHTLINE"], ["Noise conflicts", "NOISE_CONFLICT"]]) {
+      const count = run => run?.evaluation?.findings.filter(finding => finding.type === type).length ?? 0;
+      if (count(before) || count(after)) {
+        messages.push(label + ": " + count(before) + (after ? " → " + count(after) : "") + ".");
+      }
     }
     if (after) {
       messages.push(blockedRoute(firstBlocked(after), "Current layout", roomNames));
@@ -211,7 +223,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
     try {
       const household = prepareHouseholdReplay(context.personas, context.rooms);
       const scene = captureStudioLayout(context.house, context.items);
-      baseline = { items: context.items, signature: replaySignature(context), household, environment: scene.environment?.snapshot ?? null };
+      baseline = { scene, items: context.items, signature: replaySignature(context), household, environment: scene.environment?.snapshot ?? null };
       announce("Running baseline…");
       update(context);
       const result = await simulateStudioLayout(scene, household, baseline.environment);
@@ -233,7 +245,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
     }
   });
 
-  async function compareCurrent(context, selectedFinding) {
+  async function compareCurrent(context, selectedFinding, patch) {
     const run = { items: context.items };
     activeRun = run;
     comparison = null;
@@ -250,6 +262,9 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
         comparison = { ...run, result, selectedFinding };
         renderResults(latest.rooms);
         announce(comparisonMessage(baseline.result, result));
+        if (patch) onApprovedReplay?.({
+          baseline, result, afterHouse: scene, afterItems: context.items, displayPersonas: context.personas, patch,
+        });
       }
     } catch (error) {
       if (activeRun === run) announce(error.message || "The replay could not be completed.", true);
@@ -275,13 +290,14 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
     update(context);
     try {
       const input = selection
-        ? buildRegionSuggestionInput(selection.region, selection.instruction, baseline.result.findings, context.house, context.items)
+        ? buildRegionSuggestionInput(selection.region, selection.instruction, baseline.result.evaluation.findings, context.house, context.items)
         : buildReplaySuggestionInput(baseline.finding, context.house, context.items);
       const suggested = await requestReplaySuggestion(input, request.signal);
       const latest = getContext();
       update(latest);
       if (pending !== request) return;
 
+      verifySpatialPatch(selection ? suggested : suggested.scenePatch, latest);
       const moves = selection ? previewRegionPatch(suggested, input, latest.house, latest.items).moves
         : [previewReplaySuggestion(suggested, latest.house, latest.items)];
       const roomNames = new Map(latest.rooms.map(({ id, name }) => [id, name]));
@@ -309,12 +325,14 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
     if (!proposal || activeRun) return;
     try {
       const { input, suggested } = proposal;
+      verifySpatialPatch(input.region ? suggested : suggested.scenePatch, context);
       const { items } = input.region ? previewRegionPatch(suggested, input, context.house, context.items)
         : previewReplaySuggestion(suggested, context.house, context.items);
       const finding = input.region ? null : baseline.finding;
       clearSuggestion();
       commitItems(items);
-      void compareCurrent(getContext(), finding);
+      const patch = input.region ? suggested : { ...suggested.scenePatch, reasoning: suggested.explanation };
+      void compareCurrent(getContext(), finding, patch);
     } catch (error) {
       clearSuggestion();
       announce(error.message || "The proposed move could not be applied.", true);
