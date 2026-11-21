@@ -217,7 +217,7 @@ test("B5 — Slow human-readable 1× adaptive pacing vs fast 20× completion & C
   const house = createWholeHomeDemoHouse();
   const state = createWholeHomeDemoState();
 
-  assert.equal(DEMO_SCENARIOS.length, 6);
+  assert.equal(DEMO_SCENARIOS.length, 7);
   const dataset = runTwinScenario("morning-routine", {
     house,
     items: house.objects,

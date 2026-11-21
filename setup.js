@@ -334,9 +334,9 @@ function resizedItems(items, oldRoom, room) {
   return placed;
 }
 
-export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
+export function openSetup({ state, isNew, initialStep = null, onApply, onCancel, readPhoto }) {
   const host = document.getElementById("setup-page");
-  let step = isNew ? 1 : 2;
+  let step = initialStep ?? (isNew ? 1 : 2);
   let source = isNew ? "custom" : state.roomPhoto ? "photo" : "custom";
   const draft = {
     room: roomDefaults(isNew ? {} : structuredClone(state.room ?? {})),
@@ -541,13 +541,34 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       owned
         .map(
           (i) =>
-            '<div class="owned-entry"><span class="owned-icon">' +
+            '<div class="owned-entry" data-owned-card="' +
+            esc(i.id) +
+            '"><span class="owned-icon">' +
             icon(i.kind) +
-            '</span><label class="field">Item name<input value="' +
+            '</span><div class="owned-card-main"><div class="owned-card-head"><span class="bp-owned-badge">Owned</span><span class="bp-kind-label">' +
+            esc(kinds[i.kind] || i.kind) +
+            "</span></div>" +
+            '<label class="field">Item name<input value="' +
             esc(i.name) +
             '" data-kept-name="' +
             esc(i.id) +
-            '" maxlength="65"></label><button class="icon-btn" data-remove-kept="' +
+            '" maxlength="65"></label>' +
+            '<div class="owned-dims-row" aria-label="Edit dimensions">' +
+            '<label class="field">W (m)<input type="number" min="0.05" max="10" step="any" value="' +
+            Number(i.width || 0.8).toFixed(2) +
+            '" data-kept-dim="width" data-kept-id="' +
+            esc(i.id) +
+            '"></label>' +
+            '<label class="field">D (m)<input type="number" min="0.05" max="10" step="any" value="' +
+            Number(i.depth || 0.8).toFixed(2) +
+            '" data-kept-dim="depth" data-kept-id="' +
+            esc(i.id) +
+            '"></label>' +
+            '<label class="field">H (m)<input type="number" min="0.05" max="10" step="any" value="' +
+            Number(i.height || 0.85).toFixed(2) +
+            '" data-kept-dim="height" data-kept-id="' +
+            esc(i.id) +
+            '"></label></div></div><button class="icon-btn" data-remove-kept="' + +
             esc(i.id) +
             '" aria-label="Remove ' +
             esc(i.name) +
@@ -561,7 +582,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
           (i) =>
             '<div class="review-entry" data-draft="' +
             esc(i.id) +
-            '"><label class="field">Piece<select data-kind>' +
+            '"><div class="owned-card-head"><span class="bp-owned-badge">Owned</span><span class="bp-kind-label">' +
+            esc(i.detected ? "Detected from photo" : "Manual piece") +
+            '</span></div><div class="review-entry-grid"><label class="field">Piece<select data-kind>' +
             selectOptions(i.kind) +
             '</select></label><label class="field">Name<input maxlength="65" value="' +
             esc(i.name) +
@@ -573,7 +596,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
             esc(i.name) +
             '">' +
             icon("close") +
-            "</button></div>",
+            "</button></div></div>",
         )
         .join("");
     return (
@@ -587,8 +610,12 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       esc(draft.roomName) +
       "</span>" +
       dims() +
-      "</div></section>" +
-      '<section class="setup-controls"><h2>Pieces to keep</h2><p class="setup-help">Confirm each piece you want to place. You can also start with an empty room.</p><p role="status" id="detect-status">' +
+      "</div>" +
+      '<label class="start-option start-option-photo" style="margin-top:12px"><span class="start-symbol">' +
+      icon("image") +
+      '</span><span><strong>Upload existing furniture photo</strong><small>Auto-detect sofa, table, chairs, bed, or plants.</small></span><span class="start-arrow">↗</span><input type="file" id="furniture-photo-upload" accept="image/*"></label>' +
+      "</section>" +
+      '<section class="setup-controls"><p class="eyebrow">Step 3 · Your Furniture</p><h2>Pieces you already own</h2><p class="setup-help">Confirm detected pieces, edit dimensions in meters, or add items you are keeping.</p><p role="status" id="detect-status">' +
       esc(statusText()) +
       '</p><div id="setup-inventory">' +
       (rows || '<p class="empty-pieces">Your furniture list is empty.</p>') +
@@ -988,6 +1015,10 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     if (node.dataset.keptName) {
       draft.items.find((i) => i.id === node.dataset.keptName).name = node.value;
     }
+    if (node.dataset.keptDim && node.dataset.keptId && node.validity.valid && node.value) {
+      const target = draft.items.find((i) => i.id === node.dataset.keptId);
+      if (target) target[node.dataset.keptDim] = clamp(Number(node.value), 0.2, 4.5);
+    }
     const row = node.closest("[data-draft]");
     if (!row) return;
     const item = draft.additions.find((i) => i.id === row.dataset.draft);
@@ -1001,7 +1032,23 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       item.count = Math.floor(Number(node.value));
   };
   host.onchange = (e) => {
-    if (e.target.id === "room-photo-upload") void photo(e.target.files[0]);
+    if (e.target.id === "room-photo-upload" || e.target.id === "furniture-photo-upload") {
+      const targetStepAfter = e.target.id === "furniture-photo-upload" ? 3 : 2;
+      const file = e.target.files[0];
+      if (targetStepAfter === 3 && file) {
+        const token = ++photoToken;
+        readPhoto(file)
+          .then((res) => {
+            if (!active || token !== photoToken || !res) return;
+            draft.photo = res.url;
+            render();
+            return detect(file, token);
+          })
+          .catch(() => {});
+      } else {
+        void photo(file);
+      }
+    }
     if (e.target.id === "floorplan-upload" && e.target.files?.[0]) {
       launchFloorplanFlow("upload", e.target.files[0]);
     }

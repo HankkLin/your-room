@@ -134,6 +134,7 @@ let reference = state.reference || null;
 let history = [];
 let view = "interior";
 let stage = "setup";
+let activeBpStep = "1";
 let toastTimer;
 let scene;
 let clearCatalog;
@@ -563,12 +564,13 @@ function showApprovedReplay(outcome, scenarioId) {
 const demoControls = mountDemoControls({
   controlHost: $("#demo-controls-panel"),
   resultsHost: $("#twin-results-section"),
-  onRunSimulation(scenarioId) {
+  onRunSimulation(scenarioId, opts = {}) {
     if (simulationAdapter) {
       simulationAdapter.run?.(scenarioId, {
         house: activeHouse(),
         items: state.items,
         personas: state.personas || [],
+        friendCount: opts.friendCount ?? demoControls.getState().friendCount,
       });
       return;
     }
@@ -584,7 +586,11 @@ const demoControls = mountDemoControls({
           scenarioId === (activePlaybackDataset?.scenarioId || "morning-routine"),
       );
       const dataset = runTwinScenario(scenarioId, {
-        house, items: state.items, state, comparisonRun: preserveRedesign ? activePlaybackDataset : null,
+        house,
+        items: state.items,
+        state,
+        friendCount: opts.friendCount ?? demoControls.getState().friendCount,
+        comparisonRun: preserveRedesign ? activePlaybackDataset : null,
       });
       dataset.sourceItems = state.items;
       dataset.routineSignature = routineSignature();
@@ -635,6 +641,20 @@ const demoControls = mountDemoControls({
     playbackController.setSpeed(multiplier);
   },
   onScenarioChange() {
+    cancelTwinReview();
+    if (!simulationAdapter && (playbackController.getState().hasSimulation || redesignSession)) {
+      redesignSession = null;
+      activePlaybackDataset = null;
+      previewLayoutItems = null;
+      previewLayoutHouse = null;
+      playbackController.reset();
+    }
+    const house = activeHouse();
+    if (house) {
+      demoControls.setPersonas(resolveValidHouseholdForHouse(state, house).displayPersonas);
+    }
+  },
+  onFriendCountChange() {
     cancelTwinReview();
     if (!simulationAdapter && (playbackController.getState().hasSimulation || redesignSession)) {
       redesignSession = null;
@@ -852,6 +872,10 @@ function render() {
   $("#undo").disabled = !history.length;
   $("#compare-photo").hidden = !state.roomPhoto;
   $("#view-house-json").hidden = !state.importedHouse;
+  const selectAreaBtn = $("#select-area-shortcut");
+  if (selectAreaBtn) {
+    selectAreaBtn.hidden = stage !== "tour" || !house;
+  }
   const item = state.items.find((i) => i.id === selection);
   const locked = item && isObjectLocked(item);
   $("#objectbar").innerHTML = item
@@ -1335,7 +1359,38 @@ function updateWalkControls() {
       ? "Orbit around the whole home, or switch to Interior above to walk between rooms with W, A, S, D."
       : "Select furniture in the room to move, rotate, replace, or save it.";
 }
-function markStage(next) {
+function defaultBpStepForStage(nextStage) {
+  switch (nextStage) {
+    case "setup":
+      return "1";
+    case "design":
+      return "2";
+    case "tour":
+      return "5";
+    case "household":
+      return "6";
+    case "shop":
+      return "8";
+    default:
+      return "1";
+  }
+}
+
+function updateBpNavHighlight(bpStep) {
+  activeBpStep = String(bpStep);
+  document.querySelectorAll("[data-bp-step]").forEach((btn) => {
+    const stepNum = btn.dataset.bpStep;
+    const isSetup = stage === "setup";
+    const requiresLayout = stepNum === "5" || stepNum === "7" || stepNum === "8";
+    btn.disabled =
+      (isSetup && stepNum !== activeBpStep && stepNum !== "1" && stepNum !== "3") ||
+      (requiresLayout && !state.hasLayout);
+    if (stepNum === activeBpStep) btn.setAttribute("aria-current", "step");
+    else btn.removeAttribute("aria-current");
+  });
+}
+
+function markStage(next, bpStep = null) {
   if (next !== stage) cancelTwinReview();
   $("#studio-replay-panel").hidden = next !== "tour" || !(state.importedHouse || state.house);
   resetFurnishing();
@@ -1346,14 +1401,7 @@ function markStage(next) {
   if (document.body.classList.contains("room-expanded")) toggleExpanded(false);
   stage = next;
   document.body.dataset.stage = next;
-  document.querySelectorAll("[data-step]").forEach((b) => {
-    b.disabled =
-      next === "setup" ||
-      ((b.dataset.step === "tour" || b.dataset.step === "shop") &&
-        !state.hasLayout);
-    if (b.dataset.step === next) b.setAttribute("aria-current", "step");
-    else b.removeAttribute("aria-current");
-  });
+  updateBpNavHighlight(bpStep || defaultBpStepForStage(next));
   $("#studio").hidden = !["design", "tour"].includes(next);
   $("#shop-page").hidden = next !== "shop";
   $("#setup-page").hidden = next !== "setup";
@@ -1361,6 +1409,8 @@ function markStage(next) {
   $("#design-panel").hidden = next !== "design";
   $("#tour-panel").hidden = next !== "tour";
   $(".inventory").hidden = next !== "tour";
+  const overlayLegend = $("#studio-overlay-legend");
+  if (overlayLegend) overlayLegend.hidden = !Boolean(activeHouse());
   demoControls.setVisible(Boolean(activeHouse()) && ["design", "tour"].includes(next));
   updateWalkControls();
 }
@@ -1386,8 +1436,8 @@ window.addEventListener("keydown", (event) => {
   )
     toggleExpanded(false);
 });
-function navigate(next, { householdDraft } = {}) {
-  markStage(next);
+function navigate(next, { householdDraft, bpStep = null } = {}) {
+  markStage(next, bpStep);
   state = { ...state, flowVersion: 2, screen: next };
   if (next === "shop") shoppingList.render(state);
   else if (next === "household") {
@@ -1423,13 +1473,14 @@ function loadWholeHomeDemo() {
   toast("Whole-home demo loaded · Orbit or switch to Interior to walk between rooms");
 }
 $("#whole-home-btn").onclick = loadWholeHomeDemo;
-function beginSetup(fresh = false) {
+function beginSetup(fresh = false, initialStep = null) {
   const previous = stage === "setup" ? state.screen || "design" : stage;
-  markStage("setup");
+  markStage("setup", initialStep === 3 ? "3" : "1");
   window.scrollTo(0, 0);
   openSetup({
     state: fresh ? initialState() : state,
     isNew: fresh,
+    initialStep,
     onCancel: hasProject ? () => navigate(previous) : null,
     readPhoto,
     onApply(next, { demo: sample = false, wholeHome = false, householdDraft } = {}) {
@@ -1673,16 +1724,76 @@ window.addEventListener("keydown", (event) => {
     walk(direction);
   }
 });
-$("#room-settings").onclick = () => beginSetup();
+$("#room-settings").onclick = () => beginSetup(false);
+$("#furniture-step").onclick = () => beginSetup(false, 3);
 $("#new-project").onclick = () => beginSetup(true);
-$("#household-step").onclick = () => navigate("household");
+$("#household-step").onclick = () => navigate("household", { bpStep: "6" });
 $("#style-step").onclick = $("#revise-brief").onclick = () =>
-  navigate("design");
-$("#tour-step").onclick = $("#back-to-tour").onclick = () => navigate("tour");
-$("#shop").onclick = () => navigate("shop");
+  navigate("design", { bpStep: "2" });
+$("#ai-design-step").onclick = () => {
+  navigate("design", { bpStep: "4" });
+  const target = !furnishingPanel.hidden
+    ? furnishingPanel.querySelector("[data-propose]") || $("#generate")
+    : $("#generate");
+  target?.focus({ preventScroll: false });
+};
+$("#tour-step").onclick = $("#back-to-tour").onclick = () =>
+  navigate("tour", { bpStep: "5" });
+$("#stress-test-step").onclick = () => {
+  navigate("tour", { bpStep: "7" });
+  if (activeHouse() && !$("#view-3d").disabled) {
+    changeView("3d");
+  }
+  const host = $("#demo-controls-panel");
+  if (host && !host.hidden) {
+    host.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+};
+$("#shop").onclick = () => navigate("shop", { bpStep: "8" });
+$("#select-area-shortcut").onclick = () => {
+  if (stage !== "tour") navigate("tour", { bpStep: "5" });
+  const house = activeHouse();
+  if (house && (!state.personas || state.personas.length === 0)) {
+    const resolved = resolveValidHouseholdForHouse(state, house);
+    state = { ...state, personas: resolved.displayPersonas };
+    persist();
+    render();
+  }
+  const captureBtn = $("#studio-replay-capture");
+  const regionHost = $("#studio-region-editor");
+  if (regionHost?.hidden && captureBtn && !captureBtn.disabled) {
+    captureBtn.click();
+  }
+  const details = regionHost?.querySelector("details");
+  if (details) details.open = true;
+  (regionHost && !regionHost.hidden ? regionHost : $("#studio-replay-panel"))?.scrollIntoView({
+    behavior: "smooth",
+    block: "start",
+  });
+};
+$("#style-priority-chips").onclick = (e) => {
+  const chip = e.target.closest("[data-brief-chip]");
+  if (!chip) return;
+  const phrase = chip.dataset.briefChip;
+  const briefEl = $("#brief");
+  const current = briefEl.value.trim();
+  const active = chip.getAttribute("aria-pressed") === "true";
+  if (active) {
+    chip.setAttribute("aria-pressed", "false");
+    briefEl.value = current
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s && s.toLowerCase() !== phrase.toLowerCase())
+      .join(", ");
+  } else {
+    chip.setAttribute("aria-pressed", "true");
+    briefEl.value = current ? `${current}, ${phrase}` : phrase;
+  }
+  briefEl.dispatchEvent(new Event("input", { bubbles: true }));
+};
 $(".brand").onclick = (e) => {
   e.preventDefault();
-  if (stage !== "setup") beginSetup();
+  if (stage !== "setup") beginSetup(false);
 };
 function savePieces(items, { replaceExisting = false } = {}) {
   const previous = new Map((state.savedProducts ?? []).map(row => [row.id, row]));
@@ -1725,13 +1836,15 @@ function savePieces(items, { replaceExisting = false } = {}) {
       : "Room saved to your shopping list",
   );
 }
-$("#save-room").onclick = () => {
+function saveRoomAndOpenShop() {
   savePieces(
     state.items.filter((i) => !i.owned && !isObjectLocked(i)),
     { replaceExisting: true },
   );
-  navigate("shop");
-};
+  navigate("shop", { bpStep: "8" });
+}
+$("#save-room").onclick = saveRoomAndOpenShop;
+$("#tray-review-products").onclick = saveRoomAndOpenShop;
 async function refreshShopifyQuotes() {
   quoteRefresh?.abort();
   const shopping = stage === "shop";

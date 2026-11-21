@@ -34,11 +34,52 @@ const STATUS_LABELS = Object.freeze({
   ERROR: "Simulation error",
 });
 
+const DEFAULT_PERSONA_COLORS = Object.freeze([
+  "#3d6b82",
+  "#b55d3f",
+  "#5a7d5a",
+  "#8a638e",
+  "#2f6b8a",
+  "#b4823e",
+]);
+
+const PRIMARY_SCENARIO_CARDS = Object.freeze([
+  {
+    id: "morning-routine",
+    title: "Morning Routine",
+    subtitle: "Everyday family life",
+    badge: "4 family",
+  },
+  {
+    id: "friends-arrival",
+    title: "Friends Are Coming",
+    subtitle: "Staged crowd waves",
+    badge: "Crowd test",
+  },
+  {
+    id: "grandparents-visit",
+    title: "Grandparents Staying Over",
+    subtitle: "♿ Accessibility test",
+    badge: "♿ 0.90 m",
+  },
+  {
+    id: "fire-emergency",
+    title: "Fire Emergency",
+    subtitle: "Secondary safety test",
+    badge: "Safety",
+  },
+]);
+
+const FRIEND_PRESETS = Object.freeze([4, 8, 12, 16]);
+
 function summarizePersona(persona) {
   if (Array.isArray(persona?.preferences) && persona.preferences.length > 0) {
     return persona.preferences.slice(0, 2).join(" • ");
   }
   const traits = [];
+  if (persona?.wheelchair || Number(persona?.needs?.accessibility) >= 0.75) {
+    traits.push("Wheelchair • 0.90 m route");
+  }
   if (Number(persona?.needs?.quiet) >= 0.75) traits.push("Quiet preferred");
   if (Number(persona?.needs?.privacy) >= 0.75) traits.push("High privacy");
   if (Number(persona?.needs?.daylight) >= 0.7) traits.push("Likes daylight");
@@ -46,17 +87,111 @@ function summarizePersona(persona) {
   return traits.join(" • ") || "Household member";
 }
 
+function summarizeScheduleSpan(persona) {
+  const sched = Array.isArray(persona?.schedule) ? persona.schedule : [];
+  if (sched.length === 0) return "Flexible guest";
+  return `${sched.length} ${sched.length === 1 ? "activity" : "activities"}`;
+}
+
+function resolvePersonaHeightBadge(persona) {
+  if (Number.isFinite(Number(persona?.heightMeters))) {
+    return `${Number(persona.heightMeters).toFixed(2)} m`;
+  }
+  if (persona?.heightLabel) return String(persona.heightLabel);
+  if (persona?.wheelchair) return "♿ Wheelchair";
+  switch (persona?.ageGroup) {
+    case "child":
+      return "1.30 m";
+    case "teen":
+      return "1.74 m";
+    case "olderAdult":
+      return "1.65 m";
+    default:
+      return null;
+  }
+}
+
+function resolvePersonaRoleBadge(persona) {
+  if (persona?.role) {
+    const r = String(persona.role).toLowerCase();
+    if (r === "brother") return "Older Brother";
+    if (r === "sister") return "Younger Sister";
+    return r[0].toUpperCase() + r.slice(1);
+  }
+  if (persona?.wheelchair) return "Wheelchair";
+  return null;
+}
+
 export function renderPersonaQuickViewMarkup(personas = []) {
   if (!Array.isArray(personas) || personas.length === 0) {
-    return `<div class="twin-personas" id="sim-persona-summary"><span class="section-label">Household</span><p class="muted" style="margin-top:5px">No household personas set yet. Use step 2 (Household) to add members.</p></div>`;
+    return `<div class="twin-personas" id="sim-persona-summary"><span class="section-label">Step 6 · Your Household</span><p class="muted" style="margin-top:5px">No household personas set yet. Open Step 6 (Your Household) to customize members.</p></div>`;
   }
   const items = personas
-    .map(
-      (p) =>
-        `<div class="twin-persona-item"><strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(summarizePersona(p))}</span></div>`,
-    )
+    .map((p, idx) => {
+      const color = p.color || DEFAULT_PERSONA_COLORS[idx % DEFAULT_PERSONA_COLORS.length];
+      const heightText = resolvePersonaHeightBadge(p);
+      const roleText = resolvePersonaRoleBadge(p);
+      const schedSummary = summarizeScheduleSpan(p);
+      const isWheelchair =
+        Boolean(p?.wheelchair) || Number(p?.needs?.accessibility) >= 0.8;
+      return `<div class="twin-persona-item"${isWheelchair ? ' data-wheelchair="true"' : ""}>
+        <div class="twin-persona-top">
+          <span class="twin-persona-ident">
+            <span class="twin-persona-dot" style="background:${escapeHtml(color)}" aria-hidden="true">${isWheelchair ? "♿" : ""}</span>
+            <strong>${escapeHtml(p.name)}</strong>
+            ${roleText && !String(p.name || "").toLowerCase().includes(roleText.toLowerCase()) ? `<em class="twin-persona-role">${escapeHtml(roleText)}</em>` : ""}
+          </span>
+          <span class="twin-persona-metrics">
+            ${heightText ? `<span class="twin-persona-height">${escapeHtml(heightText)}</span>` : ""}
+            <small class="twin-persona-sched">${escapeHtml(schedSummary)}</small>
+          </span>
+        </div>
+        <span>${escapeHtml(summarizePersona(p))}</span>
+      </div>`;
+    })
     .join("");
-  return `<div class="twin-personas" id="sim-persona-summary"><span class="section-label">Household</span><div class="twin-persona-list">${items}</div></div>`;
+  return `<div class="twin-personas" id="sim-persona-summary">
+    <div class="twin-personas-head">
+      <span class="section-label">Step 6 · Your Household (${personas.length})</span>
+      <span class="bp-dim-tag">SCALE 1:1 m</span>
+    </div>
+    <div class="twin-persona-list">${items}</div>
+  </div>`;
+}
+
+function renderScenarioCardsMarkup(state, disabled) {
+  const cards = PRIMARY_SCENARIO_CARDS.map((card) => {
+    const active = state.scenarioId === card.id;
+    return `<button type="button" class="twin-scenario-card" data-scenario-card="${escapeHtml(card.id)}" aria-pressed="${active}" ${disabled ? "disabled" : ""}>
+      <span class="twin-sc-top">
+        <strong>${escapeHtml(card.title)}</strong>
+        <span class="twin-sc-badge">${escapeHtml(card.badge)}</span>
+      </span>
+      <small>${escapeHtml(card.subtitle)}</small>
+    </button>`;
+  }).join("");
+
+  const friendControl =
+    state.scenarioId === "friends-arrival"
+      ? `<div class="twin-friends-control" id="sim-friends-control" aria-label="Friends count control">
+          <div class="twin-friends-stepper">
+            <span class="section-label">Friends</span>
+            <div class="twin-stepper-box">
+              <button type="button" id="sim-friends-dec" aria-label="Decrease friends" ${disabled || state.friendCount <= 1 ? "disabled" : ""}>−</button>
+              <output id="sim-friends-count" aria-live="polite">${state.friendCount}</output>
+              <button type="button" id="sim-friends-inc" aria-label="Increase friends" ${disabled || state.friendCount >= 20 ? "disabled" : ""}>+</button>
+            </div>
+          </div>
+          <div class="twin-friends-presets" role="group" aria-label="Friend count presets">
+            ${FRIEND_PRESETS.map(
+              (n) =>
+                `<button type="button" data-friend-preset="${n}" aria-pressed="${state.friendCount === n}" ${disabled ? "disabled" : ""}>${n}</button>`,
+            ).join("")}
+          </div>
+        </div>`
+      : "";
+
+  return `<div class="twin-scenario-grid" role="group" aria-label="Stress test scenarios">${cards}</div>${friendControl}`;
 }
 
 export function renderControlPanelMarkup(
@@ -68,6 +203,7 @@ export function renderControlPanelMarkup(
     scenarios.find((s) => s.id === state.scenarioId) ?? scenarios[0];
   const isRunning = state.status === "RUNNING";
   const isPaused = state.status === "PAUSED";
+  const isBusy = isRunning || state.redesignPending;
   const hasOutput =
     state.status !== "READY" ||
     state.findings.length > 0 ||
@@ -102,7 +238,7 @@ export function renderControlPanelMarkup(
   const scrubberMarkup = state.hasTimeline
     ? `<div class="twin-scrubber-bar" id="sim-timeline-wrap">
         <label class="twin-scrubber-label" for="sim-scrubber">
-          <span class="section-label">Timeline</span>
+          <span class="section-label">Timeline &amp; Checkpoints</span>
           <span class="twin-route-toggle-wrap">
             <input type="checkbox" id="sim-toggle-routes" ${state.showAllRoutes ? "checked" : ""} />
             <span>Show all paths</span>
@@ -133,14 +269,15 @@ export function renderControlPanelMarkup(
   return `<div class="twin-control-card" aria-label="Household Digital Twin controls">
     <div class="twin-card-head">
       <div>
-        <p class="eyebrow">Household Digital Twin</p>
+        <p class="eyebrow">Step 7 · Living Blueprint Stress Test</p>
         <h2>Simulate life</h2>
       </div>
-      ${state.isMockData ? '<span class="twin-mock-badge" title="Placeholder mock output while simulation engine is external">Demo mock</span>' : ""}
+      ${state.isMockData ? '<span class="twin-mock-badge" title="Placeholder mock output while simulation engine is external">Demo mock</span>' : '<span class="bp-spec-tag">DWG · LIVE TWIN</span>'}
     </div>
+    ${renderScenarioCardsMarkup(state, isBusy)}
     <label class="twin-field" for="sim-scenario">
-      <span class="section-label">Scenario</span>
-      <select id="sim-scenario" aria-label="Simulation scenario" ${isRunning || state.redesignPending ? "disabled" : ""}>
+      <span class="section-label">All scenarios</span>
+      <select id="sim-scenario" aria-label="Simulation scenario" ${isBusy ? "disabled" : ""}>
         ${scenarios
           .map(
             (s) =>
@@ -150,8 +287,12 @@ export function renderControlPanelMarkup(
       </select>
     </label>
     <p class="twin-scenario-desc" id="sim-scenario-desc">${escapeHtml(activeScenario?.description || "")}</p>
+    <div class="twin-status-row" id="sim-status" data-status="${escapeHtml(state.status)}" role="status" aria-live="polite">
+      <span class="twin-status-indicator"><span class="twin-dot" aria-hidden="true"></span><span>${escapeHtml(statusText)}</span></span>
+      <span class="twin-clock" id="sim-clock">${state.currentTime ? escapeHtml(state.currentTime) : ""}</span>
+    </div>
     <div class="twin-actions">
-      <button type="button" class="primary" id="sim-run-btn" ${isRunning || state.redesignPending ? "disabled" : ""}>${escapeHtml(runLabel)}</button>
+      <button type="button" class="primary" id="sim-run-btn" ${isBusy ? "disabled" : ""}>${escapeHtml(runLabel)}</button>
       <button type="button" class="secondary" id="sim-pause-btn" ${isRunning ? "" : "disabled"}>Pause</button>
       <button type="button" class="secondary" id="sim-reset-btn" ${hasOutput && !state.redesignPending ? "" : "disabled"}>Reset</button>
     </div>
@@ -166,10 +307,6 @@ export function renderControlPanelMarkup(
       </div>
     </div>
     ${scrubberMarkup}
-    <div class="twin-status-row" id="sim-status" data-status="${escapeHtml(state.status)}" role="status" aria-live="polite">
-      <span class="twin-status-indicator"><span class="twin-dot" aria-hidden="true"></span><span>${escapeHtml(statusText)}</span></span>
-      <span class="twin-clock" id="sim-clock">${state.currentTime ? escapeHtml(state.currentTime) : ""}</span>
-    </div>
     ${renderPersonaQuickViewMarkup(personas)}
   </div>`;
 }
@@ -196,40 +333,73 @@ function householdImpact(finding, personas) {
   return "";
 }
 
+function findingCategoryBadge(finding) {
+  const t = String(finding?.type || "").toUpperCase();
+  if (t.startsWith("ACCESSIBILITY_")) return "Accessibility";
+  if (t === "PRIVACY_SIGHTLINE") return "Privacy";
+  if (t === "NOISE_CONFLICT") return "Noise";
+  if (t.startsWith("TV_") || t === "SUN_GLARE") return "Visibility";
+  if (t.includes("EVACUATION")) return "Safety";
+  return "Movement";
+}
+
 export function renderFindingsMarkup(viewState, personas = []) {
   const state = normalizeSimulationViewState(viewState);
   if (state.status === "RUNNING" && state.findings.length === 0) {
-    return `<div class="twin-empty" id="sim-findings-empty">Running scenario simulation… evaluating walkways, sightlines, and room schedules.</div>`;
+    return `<div class="twin-empty" id="sim-findings-empty">Running scenario simulation… evaluating walkways, wheelchair clearances, sightlines, and room schedules.</div>`;
   }
   if (state.status === "ERROR") {
     return `<div class="twin-finding" data-level="critical"><span class="twin-finding-icon" aria-hidden="true">⛔</span><div><strong>Simulation failed</strong><p>${escapeHtml(state.errorMessage || "Unable to complete simulation run.")}</p></div></div>`;
   }
   if (state.findings.length === 0) {
     if (state.status === "COMPLETE") {
-      return `<div class="twin-finding" id="sim-findings-clear" data-level="success"><span class="twin-finding-icon" aria-hidden="true">✓</span><div><strong>All measured spatial checks clear</strong><p>No congestion, blocked paths, sightline, noise, or evacuation bottlenecks detected in this scenario.</p></div></div>`;
+      return `<div class="twin-finding" id="sim-findings-clear" data-level="success"><span class="twin-finding-icon" aria-hidden="true">✓</span><div><strong>All measured spatial checks clear</strong><p>No congestion, blocked paths, sightline, noise, accessibility, or evacuation bottlenecks detected in this scenario.</p></div></div>`;
     }
     return `<div class="twin-empty" id="sim-findings-empty">No findings yet. Choose a scenario and click <strong>Run Simulation</strong> to inspect spatial issues.</div>`;
   }
-  return `<div class="twin-findings-list" id="sim-findings-list">${state.findings
+
+  const accessCount = state.findings.filter((f) => f.isAccessibility).length;
+  const accessBanner =
+    accessCount > 0
+      ? `<div class="twin-accessibility-banner" role="region" aria-label="Wheelchair accessibility summary">
+          <span class="twin-access-icon" aria-hidden="true">♿</span>
+          <div>
+            <strong>Accessibility check · ${accessCount} mobility ${accessCount === 1 ? "issue" : "issues"} measured</strong>
+            <p>Checked doorway widths (≥ 0.82 m), 1.50 m turning circles, and wheelchair route reachability.</p>
+          </div>
+        </div>`
+      : "";
+
+  return `${accessBanner}<div class="twin-findings-list" id="sim-findings-list">${state.findings
     .map((finding) => {
-      const glyph = LEVEL_GLYPHS[finding.level] || LEVEL_GLYPHS.info;
+      const glyph = finding.isAccessibility
+        ? "♿"
+        : LEVEL_GLYPHS[finding.level] || LEVEL_GLYPHS.info;
       const isSelected = state.selectedFindingId === finding.id;
       const chips = formatFindingEvidenceChips(finding);
       const impact = state.isMockData ? "" : householdImpact(finding, personas);
+      const category = findingCategoryBadge(finding);
       const chipsMarkup =
         chips.length > 0
           ? `<div class="twin-evidence-chips">${chips
               .map((c) => `<span class="twin-evidence-chip">${escapeHtml(c)}</span>`)
               .join("")}</div>`
           : "";
-      return `<article class="twin-finding twin-finding-interactive" tabindex="0" role="button" aria-pressed="${isSelected}" data-finding-id="${escapeHtml(finding.id)}" data-level="${escapeHtml(finding.level)}" data-finding-type="${escapeHtml(finding.type)}">
+      return `<article class="twin-finding twin-finding-interactive" tabindex="0" role="button" aria-pressed="${isSelected}" data-finding-id="${escapeHtml(finding.id)}" data-level="${escapeHtml(finding.level)}" data-finding-type="${escapeHtml(finding.type)}"${finding.isAccessibility ? ' data-accessibility="true"' : ""}>
         <span class="twin-finding-icon" aria-label="${escapeHtml(finding.level)}">${glyph}</span>
         <div>
           <div class="twin-finding-head">
-            <strong>${escapeHtml(finding.title)}</strong>
-            ${finding.location ? `<span class="twin-finding-loc">${escapeHtml(finding.location)}</span>` : ""}
+            <span class="twin-finding-title-wrap">
+              <em class="twin-finding-cat">${escapeHtml(category)}</em>
+              <strong>${escapeHtml(finding.title)}</strong>
+            </span>
+            <span class="twin-finding-badges">
+              ${finding.location ? `<span class="twin-finding-loc">${escapeHtml(finding.location)}</span>` : ""}
+              <span class="twin-finding-focus">${isSelected ? "Focused in 3D" : "Focus in 3D"}</span>
+            </span>
           </div>
           ${finding.summary ? `<p>${escapeHtml(finding.summary)}</p>` : ""}
+          ${finding.whyItMatters ? `<p class="twin-finding-why"><strong>Why it matters:</strong> ${escapeHtml(finding.whyItMatters)}</p>` : ""}
           ${impact ? `<p class="twin-household-impact">${escapeHtml(impact)}</p>` : ""}
           ${chipsMarkup}
         </div>
@@ -340,7 +510,11 @@ export function renderFindingsDiffMarkup(viewState) {
     .join("");
 
   return `<div class="twin-findings-diff" id="sim-findings-diff" aria-label="Findings comparison">
-    <span class="section-label">Findings comparison</span>
+    <div class="twin-diff-summary-pills">
+      <span class="diff-pill diff-resolved">Resolved: ${resolvedFindings.length}</span>
+      <span class="diff-pill diff-remaining">Remaining: ${remainingFindings.length}</span>
+      <span class="diff-pill diff-new">New: ${introducedFindings.length}</span>
+    </div>
     <ul class="twin-diff-list">
       ${resolvedList || '<li class="twin-diff-item" data-diff="info"><span>•</span><span>No findings eliminated yet</span></li>'}
       ${introducedList}
@@ -354,13 +528,54 @@ export function renderAttemptTrailMarkup(attemptSummaries = []) {
     return "";
   }
   return `<div class="twin-attempt-trail" id="sim-attempt-trail" aria-label="Validator self-correction log">
-    <span class="section-label">Validator verification</span>
+    <span class="section-label">Validator result</span>
     <ol class="twin-attempt-list">
       ${attemptSummaries
         .map((line) => `<li>${escapeHtml(line)}</li>`)
         .join("")}
     </ol>
   </div>`;
+}
+
+const REDESIGN_PIPELINE_STEPS = Object.freeze([
+  { step: 1, label: "Gemini proposes" },
+  { step: 2, label: "Validator checks" },
+  { step: 3, label: "Retry if needed" },
+  { step: 4, label: "Patch accepted" },
+  { step: 5, label: "Replay result" },
+]);
+
+export function renderRedesignStepperMarkup(state) {
+  const isPending = Boolean(state.redesignPending);
+  const isReview = state.redesignStatus === "REVIEW";
+  const isAccepted =
+    Boolean(state.afterScores) ||
+    state.redesignStatus === "IMPROVED" ||
+    (Array.isArray(state.redesignActions) && state.redesignActions.length > 0 && !isReview);
+  const isFailed =
+    state.redesignStatus === "FAILED" || state.redesignStatus === "NO_IMPROVEMENT";
+  const hadRetry = (state.attemptSummaries || []).some((s) =>
+    /rejected|corrected|fallback/i.test(s),
+  );
+
+  const items = REDESIGN_PIPELINE_STEPS.map(({ step, label }) => {
+    let stepState = "idle";
+    if (isPending) {
+      stepState = step === 1 ? "active" : step === 2 ? "next" : "idle";
+    } else if (isReview) {
+      stepState = step <= 3 ? "done" : step === 4 ? "active" : "idle";
+    } else if (isAccepted) {
+      stepState = step === 3 && !hadRetry ? "skipped" : "done";
+    } else if (isFailed) {
+      stepState = step <= 3 ? "failed" : "idle";
+    }
+    return `<li class="twin-pipe-step" data-pipe-state="${stepState}">
+      <span class="twin-pipe-num" aria-hidden="true">${stepState === "done" ? "✓" : step}</span>
+      <span class="twin-pipe-label">${escapeHtml(label)}</span>
+    </li>`;
+  }).join("");
+
+  return `<ol class="twin-redesign-stepper" id="sim-redesign-stepper" aria-label="Gemini redesign verification pipeline">${items}</ol>`;
 }
 
 export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
@@ -371,8 +586,12 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
 
   if (state.redesignPending) {
     return `<div class="twin-redesign-box" id="sim-redesign-panel" role="status" aria-live="polite">
-      <span class="section-label">Gemini redesign</span>
-      <p class="twin-redesign-working" id="sim-redesign-working">Gemini is redesigning… validating candidate ScenePatch and replaying household life.</p>
+      <div class="twin-redesign-head">
+        <span class="section-label">Gemini spatial redesign</span>
+        <span class="twin-working-pill">Validating…</span>
+      </div>
+      ${renderRedesignStepperMarkup(state)}
+      <p class="twin-redesign-working" id="sim-redesign-working">Gemini is redesigning… checking locked fixtures, doorway clearances, and replaying household life.</p>
     </div>`;
   }
 
@@ -381,7 +600,8 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
     (state.redesignStatus === "FAILED" || state.redesignStatus === "NO_IMPROVEMENT")
   ) {
     return `<div class="twin-redesign-box" id="sim-redesign-panel">
-      <span class="section-label">Gemini redesign</span>
+      <span class="section-label">Gemini spatial redesign</span>
+      ${renderRedesignStepperMarkup(state)}
       <p class="twin-redesign-rejected" id="sim-redesign-rejected">${escapeHtml(state.redesignMessage)}</p>
       ${renderAttemptTrailMarkup(state.attemptSummaries)}
     </div>`;
@@ -392,7 +612,8 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
       ? `<button type="button" class="primary twin-propose-inline-btn" id="sim-propose-redesign-inline">Propose Gemini Redesign</button>`
       : "";
     return `<div class="twin-redesign-box" id="sim-redesign-panel">
-      <span class="section-label">Gemini redesign</span>
+      <span class="section-label">Gemini spatial redesign</span>
+      ${renderRedesignStepperMarkup(state)}
       <p class="muted" style="margin-top:6px">Proposed ScenePatch improvements will appear here after simulation analysis.</p>
       ${cta}
     </div>`;
@@ -406,15 +627,16 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
   }[state.redesignStatus];
   const fallbackBadge = state.isFallbackRedesign
     ? '<span class="twin-fallback-pill" title="Deterministic ScenePatch generated when Gemini was unavailable">Deterministic fallback</span>'
-    : "";
+    : '<span class="twin-verified-pill">Validator verified</span>';
 
   return `<div class="twin-redesign-box" id="sim-redesign-panel">
     <div class="twin-redesign-head">
-      <span class="section-label">Gemini redesign</span>
+      <span class="section-label">Gemini spatial redesign</span>
       ${fallbackBadge}
     </div>
-    ${measuredOutcome ? `<p id="sim-redesign-outcome">${measuredOutcome}</p>` : ""}
-    ${state.redesignMessage ? `<p class="twin-redesign-note">${escapeHtml(state.redesignMessage)}</p>` : ""}
+    ${renderRedesignStepperMarkup(state)}
+    ${measuredOutcome ? `<p class="twin-outcome-banner" id="sim-redesign-outcome">${measuredOutcome}</p>` : ""}
+    ${state.redesignMessage ? `<p class="twin-redesign-note"><strong>Why Gemini changed this:</strong> ${escapeHtml(state.redesignMessage)}</p>` : ""}
     <ul class="twin-redesign-list" id="sim-redesign-list">
       ${redesignActions
         .map(
@@ -424,7 +646,7 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
         .join("")}
     </ul>
     ${renderAttemptTrailMarkup(state.attemptSummaries)}
-    ${state.redesignStatus === "REVIEW" ? `<div class="studio-replay-actions">
+    ${state.redesignStatus === "REVIEW" ? `<div class="studio-replay-actions twin-review-actions">
       <button type="button" class="primary" id="sim-approve-redesign">Approve layout changes</button>
       <button type="button" class="secondary" id="sim-dismiss-redesign">Dismiss layout changes</button>
     </div>` : ""}
@@ -441,7 +663,7 @@ export function renderResultsDeckMarkup(viewState, personas = []) {
     : "";
 
   const headerRedesignBtn =
-    state.canRedesign && !state.afterScores
+    state.canRedesign && !state.afterScores && state.redesignStatus !== "REVIEW"
       ? `<button type="button" class="primary twin-propose-deck-btn" id="sim-propose-redesign-deck" ${state.redesignPending ? "disabled" : ""}>${state.redesignPending ? "Gemini is redesigning…" : "Propose Gemini Redesign"}</button>`
       : "";
 
@@ -449,10 +671,10 @@ export function renderResultsDeckMarkup(viewState, personas = []) {
     <section class="twin-deck-card" id="sim-findings-panel" aria-labelledby="sim-findings-heading">
       <div class="twin-deck-head">
         <div>
-          <p class="eyebrow">Spatial validation</p>
+          <p class="eyebrow">Measured product insights</p>
           <h3 id="sim-findings-heading">Findings &amp; scorecard</h3>
         </div>
-        ${state.isMockData ? '<span class="twin-mock-badge">Mock preview</span>' : ""}
+        ${state.isMockData ? '<span class="twin-mock-badge">Mock preview</span>' : `<span class="bp-spec-tag">${state.findings.length} ${state.findings.length === 1 ? "FINDING" : "FINDINGS"}</span>`}
       </div>
       ${renderFindingsMarkup(state, personas)}
       ${renderScorecardMarkup(state.scores)}
@@ -490,6 +712,7 @@ export function createDemoControlsController({
   onResetSimulation = () => {},
   onSimulationSpeedChange = () => {},
   onScenarioChange = () => {},
+  onFriendCountChange = () => {},
   onSeekTimeline = () => {},
   onJumpCheckpoint = () => {},
   onToggleRoutes = () => {},
@@ -525,9 +748,16 @@ export function createDemoControlsController({
       emit();
       return state;
     },
+    setFriendCount(count) {
+      const next = Math.max(1, Math.min(20, Math.round(Number(count) || 8)));
+      state = normalizeSimulationViewState({ ...state, friendCount: next });
+      onFriendCountChange(state.friendCount);
+      emit();
+      return state;
+    },
     triggerRun() {
       if (state.status === "RUNNING" || state.redesignPending) return;
-      onRunSimulation(state.scenarioId);
+      onRunSimulation(state.scenarioId, { friendCount: state.friendCount });
     },
     triggerPause() {
       if (state.status !== "RUNNING") return;
@@ -599,6 +829,7 @@ export function mountDemoControls({
   onResetSimulation = () => {},
   onSimulationSpeedChange = () => {},
   onScenarioChange = () => {},
+  onFriendCountChange = () => {},
   onSeekTimeline = () => {},
   onJumpCheckpoint = () => {},
   onToggleRoutes = () => {},
@@ -636,6 +867,7 @@ export function mountDemoControls({
     onResetSimulation,
     onSimulationSpeedChange,
     onScenarioChange,
+    onFriendCountChange,
     onSeekTimeline,
     onJumpCheckpoint,
     onToggleRoutes,
@@ -646,6 +878,16 @@ export function mountDemoControls({
   });
 
   function handleControlClick(event) {
+    const scenarioCard = event.target.closest("[data-scenario-card]");
+    if (scenarioCard) {
+      controller.selectScenario(scenarioCard.dataset.scenarioCard);
+      return;
+    }
+    const presetBtn = event.target.closest("[data-friend-preset]");
+    if (presetBtn) {
+      controller.setFriendCount(Number(presetBtn.dataset.friendPreset));
+      return;
+    }
     const checkpointBtn = event.target.closest("[data-checkpoint-id]");
     if (checkpointBtn) {
       controller.jumpCheckpoint(checkpointBtn.dataset.checkpointId);
@@ -662,6 +904,11 @@ export function mountDemoControls({
     else if (btn.id === "sim-pause-btn") controller.triggerPause();
     else if (btn.id === "sim-reset-btn") controller.triggerReset();
     else if (btn.id === "sim-propose-redesign-btn") controller.triggerRedesign();
+    else if (btn.id === "sim-friends-dec") {
+      controller.setFriendCount(controller.getState().friendCount - 1);
+    } else if (btn.id === "sim-friends-inc") {
+      controller.setFriendCount(controller.getState().friendCount + 1);
+    }
   }
 
   function handleControlChange(event) {

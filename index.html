@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f6f4ef" />
+    <meta name="theme-color" content="#f5f3ec" />
     <title>Living Blueprint · Room studio</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23954934'/%3E%3Cpath d='M7 24V11l9-5 9 5v13l-9 4zM7 11l9 5 9-5M16 16v12' fill='none' stroke='%23fff7eb' stroke-width='2'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23234766'/%3E%3Cpath d='M7 24V11l9-5 9 5v13l-9 4zM7 11l9 5 9-5M16 16v12' fill='none' stroke='%23fff7eb' stroke-width='2'/%3E%3C/svg%3E"
     />
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/details.css" />
@@ -21,29 +21,39 @@
       <a href="#studio" class="brand"
         ><span class="brandmark" data-icon="brand"></span>Living Blueprint</a
       >
-      <nav class="stage-nav" aria-label="Design steps">
-        <button id="room-settings" data-step="setup">
-          <span aria-hidden="true">1</span>Room setup
+      <nav class="stage-nav bp-eight-nav" aria-label="8-step blueprint workflow">
+        <button id="room-settings" data-step="setup" data-bp-step="1">
+          <span aria-hidden="true">1</span>Your Home
         </button>
-        <button id="household-step" data-step="household">
-          <span aria-hidden="true">2</span>Household
+        <button id="style-step" data-step="design" data-bp-step="2">
+          <span aria-hidden="true">2</span>Your Style
         </button>
-        <button id="style-step" data-step="design">
-          <span aria-hidden="true">3</span>Design brief
+        <button id="furniture-step" data-bp-step="3" type="button">
+          <span aria-hidden="true">3</span>Your Furniture
         </button>
-        <button id="tour-step" data-step="tour">
-          <span aria-hidden="true">4</span>Explore room
+        <button id="ai-design-step" data-bp-step="4" type="button">
+          <span aria-hidden="true">4</span>AI Design
         </button>
-        <button id="shop" data-step="shop">
-          <span aria-hidden="true">5</span>Shopping list <small id="shop-count"></small>
+        <button id="tour-step" data-step="tour" data-bp-step="5">
+          <span aria-hidden="true">5</span>Explore room
+        </button>
+        <button id="household-step" data-step="household" data-bp-step="6">
+          <span aria-hidden="true">6</span>Your Household
+        </button>
+        <button id="stress-test-step" data-bp-step="7" type="button">
+          <span aria-hidden="true">7</span>Stress Test
+        </button>
+        <button id="shop" data-step="shop" data-bp-step="8">
+          <span aria-hidden="true">8</span>Furnish &amp; Buy <small id="shop-count"></small>
         </button>
       </nav>
     </header>
     <section id="setup-page" hidden></section>
     <main id="household-page" hidden aria-labelledby="household-title">
       <header class="household-heading">
+        <p class="eyebrow">Step 6 · Household Digital Twin</p>
         <h1 id="household-title" tabindex="-1">Your household</h1>
-        <p class="subtitle">Describe who lives here and how they spend a typical day.</p>
+        <p class="subtitle">Describe who lives here and how they spend a typical day, or load the canonical Family of Four.</p>
       </header>
       <div class="household-intake">
         <form id="household-form" class="household-panel">
@@ -53,6 +63,8 @@
           <div class="household-buttons">
             <button class="primary" id="generate-household" type="submit">Generate</button>
             <button class="secondary" id="sample-household" type="button">Load sample household</button>
+            <button class="secondary" id="load-family-of-four" type="button">Load Family of Four</button>
+            <button class="secondary" id="add-grandparents-wheelchair" type="button">+ Grandparents (♿ Wheelchair)</button>
           </div>
           <p class="household-status" id="household-status" role="status"></p>
         </form>
@@ -92,45 +104,21 @@
       </footer>
     </main>
     <main id="studio" hidden>
-      <nav class="planner-flow-strip" id="planner-flow-strip" aria-label="7-step home planning journey">
-        <button type="button" class="planner-flow-step" data-journey-step="1" data-journey-action="setup">
-          <span class="planner-step-num">1</span>
-          <span>Choose / import home</span>
-        </button>
-        <button type="button" class="planner-flow-step" data-journey-step="2" data-journey-action="household">
-          <span class="planner-step-num">2</span>
-          <span>Meet the household</span>
-        </button>
-        <button type="button" class="planner-flow-step" data-journey-step="3" data-journey-action="simulate">
-          <span class="planner-step-num">3</span>
-          <span>Simulate daily life</span>
-        </button>
-        <button type="button" class="planner-flow-step" data-journey-step="4" data-journey-action="findings">
-          <span class="planner-step-num">4</span>
-          <span>See measured problems</span>
-        </button>
-        <button type="button" class="planner-flow-step" data-journey-step="5" data-journey-action="redesign">
-          <span class="planner-step-num">5</span>
-          <span>Ask Gemini to redesign</span>
-        </button>
-        <button type="button" class="planner-flow-step" data-journey-step="6" data-journey-action="compare">
-          <span class="planner-step-num">6</span>
-          <span>Compare before / after</span>
-        </button>
-        <button type="button" class="planner-flow-step" data-journey-step="7" data-journey-action="shop">
-          <span class="planner-step-num">7</span>
-          <span>Review suggested products</span>
-        </button>
-      </nav>
-      <section class="intro">
+      <section class="intro bp-studio-intro">
         <div>
-          <p class="eyebrow">Home digital twin planner</p>
-          <h1 id="room-name">Living room</h1>
+          <p class="eyebrow">Architectural Blueprint × Living Digital Twin</p>
+          <div class="bp-title-line">
+            <h1 id="room-name">Living room</h1>
+            <span class="bp-scale-badge" id="bp-scale-badge">UNITS: METERS · 1:1</span>
+          </div>
           <p class="subtitle">5.4 × 4.2 m · Living space</p>
         </div>
         <div class="project-actions">
           <button class="secondary" id="whole-home-btn">Whole-home demo</button>
           <button class="secondary" id="new-project">New room</button>
+          <button class="secondary" id="select-area-shortcut" hidden type="button">
+            Select area / Draw region
+          </button>
           <button class="secondary" id="compare-photo" hidden>
             View room photo
           </button>
@@ -152,7 +140,7 @@
         <section class="studio" aria-label="Room editor">
           <div class="studio-head">
             <div class="studio-title">
-              <span data-icon="cube"></span> <span>3D Home planner</span>
+              <span data-icon="cube"></span> <span>3D Blueprint Viewport</span>
               <span class="studio-legend-pills" id="studio-overlay-legend" hidden>
                 <span class="legend-pill legend-hotspot">Hotspot</span>
                 <span class="legend-pill legend-sightline">Sightline</span>
@@ -228,8 +216,8 @@
           <section id="demo-controls-panel" hidden></section>
           <section class="panel" id="design-panel">
             <div class="panel-head">
-              <span class="eyebrow">Design brief</span>
-              <h2>Style your room</h2>
+              <span class="eyebrow">Step 2 &amp; 4 · Your Style &amp; AI Design</span>
+              <h2>How should this home feel?</h2>
             </div>
             <form id="style-form">
               <fieldset>
@@ -237,14 +225,20 @@
                 <div class="style-options" id="styles"></div>
               </fieldset>
               <label class="field"
-                ><span class="section-label">Your vision</span
-                ><textarea
+                ><span class="section-label">Your vision</span>
+                <textarea
                   id="brief"
                   rows="3"
                   maxlength="1200"
-                  placeholder="A quiet reading corner with warm wood and soft light…"
+                  placeholder="Warm oak, uncluttered walkways, quiet morning workspace, wheelchair-friendly paths…"
                 ></textarea>
               </label>
+              <div class="bp-style-chips" id="style-priority-chips" aria-label="Quick style priorities">
+                <button type="button" class="bp-chip" data-brief-chip="natural oak &amp; warm linen">Oak &amp; linen</button>
+                <button type="button" class="bp-chip" data-brief-chip="quiet WFH focus zone">Quiet WFH</button>
+                <button type="button" class="bp-chip" data-brief-chip="wide step-free walkways">♿ Clear paths</button>
+                <button type="button" class="bp-chip" data-brief-chip="social family dining">Family hosting</button>
+              </div>
               <div class="reference-wrap">
                 <label class="reference-upload"
                   ><span data-icon="image"></span
@@ -273,8 +267,11 @@
                 <span data-icon="sparkles"></span> Auto-style room
               </button>
               <section id="household-furnishing" hidden aria-label="Household furnishing">
-                <button id="furnishing-shopify" type="button" class="secondary">Browse Shopify alternatives</button>
-                <button type="button" class="secondary" data-propose>Preview household furnishing</button>
+                <div class="bp-furnishing-actions">
+                  <button id="furnishing-shopify" type="button" class="secondary">Browse Shopify alternatives</button>
+                  <button type="button" class="secondary" data-propose>Preview household furnishing</button>
+                </div>
+                <div data-ai-stages hidden></div>
                 <p class="muted" role="status"></p>
                 <div data-preview hidden>
                   <ul></ul>
@@ -286,7 +283,7 @@
             </form>
           </section>
           <section id="tour-panel" class="panel" hidden>
-            <p class="eyebrow">In the room</p>
+            <p class="eyebrow">Step 5 · Explore &amp; Edit</p>
             <h2>Explore your layout</h2>
             <p id="walk-help">
               Drag the background to look around. Use the numbered viewpoints or
@@ -319,9 +316,13 @@
           </section>
         </aside>
       </div>
+      <section id="twin-results-section" hidden></section>
       <section class="panel studio-replay" id="studio-replay-panel" aria-labelledby="studio-replay-title" hidden>
         <header class="studio-replay-header">
-          <h2 id="studio-replay-title">Replay your saved household</h2>
+          <div>
+            <p class="eyebrow">Step 5 · Regional Blueprint Redesign &amp; Routine Replay</p>
+            <h2 id="studio-replay-title">Replay your saved household &amp; edit a selected area</h2>
+          </div>
           <div class="studio-replay-actions">
             <button class="secondary" id="studio-replay-capture" type="button">Capture baseline</button>
             <button class="primary" id="studio-replay-compare" type="button" disabled>Compare current layout</button>
@@ -355,11 +356,10 @@
           </div>
         </section>
       </section>
-      <section id="twin-results-section" hidden></section>
       <section class="inventory" aria-label="Furnishing and suggested products tray">
         <div class="inventory-head">
           <div>
-            <p class="eyebrow">Step 7 · Furnishings &amp; suggested products</p>
+            <p class="eyebrow">Step 8 · Furnish &amp; Buy Preview</p>
             <h2>Pieces in this plan <span id="item-count"></span></h2>
           </div>
           <div class="inventory-actions">
@@ -367,7 +367,7 @@
               <span data-icon="plus"></span> Add furniture
             </button>
             <button class="primary" id="tray-review-products" type="button">
-              Review products &amp; checkout →
+              Continue to Shopify →
             </button>
           </div>
         </div>
@@ -375,16 +375,16 @@
       </section>
     </main>
     <main id="shop-page" hidden aria-labelledby="shop-title">
-      <p class="eyebrow">Step 7 · Merchant shopping handoff</p>
-      <h1 id="shop-title">Suggested &amp; saved pieces</h1>
+      <p class="eyebrow">Step 8 · Furnish &amp; Buy</p>
+      <h1 id="shop-title">Saved pieces &amp; merchant checkout</h1>
       <p class="shop-intro" id="shop-intro"></p>
       <div class="shop-honesty-banner" id="shop-honesty-banner">
-        <strong>Direct merchant storefronts · No synthetic cross-merchant cart</strong>
-        <span>Each piece links directly to its own merchant listing or single-merchant Shopify checkout so pricing and stock come straight from the seller.</span>
+        <strong>Grouped honestly by Shopify merchant · No synthetic cross-merchant cart</strong>
+        <span>Already-owned furniture stays $0 in your layout. New Shopify pieces are grouped per merchant so each checkout reflects real live price and stock.</span>
       </div>
       <div id="saved-products"></div>
       <div class="shop-foot">
-        <button id="back-to-tour" class="secondary">Back to 3D home planner</button
+        <button id="back-to-tour" class="secondary">Back to the room</button
         ><strong id="saved-total"></strong>
       </div>
     </main>

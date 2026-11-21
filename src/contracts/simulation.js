@@ -277,6 +277,38 @@ export function formatFindingHeadline(finding = {}) {
   return FINDING_TITLES[type] || String(finding.type || "Simulation finding");
 }
 
+export function formatFindingWhyItMatters(finding = {}) {
+  if (typeof finding.whyItMatters === "string" && finding.whyItMatters.trim()) {
+    return finding.whyItMatters.trim();
+  }
+  const type = String(finding.type || "").toUpperCase();
+  if (type.startsWith("ACCESSIBILITY_") || finding.evidence?.wheelchair) {
+    return "Wheelchair and mobility-aid users need comfortable doorway clearance and a 1.50 m turning circle.";
+  }
+  switch (type) {
+    case "CONGESTION":
+      return "Family members squeeze past each other during peak routines, slowing meals and prep.";
+    case "NO_PATH":
+      return "Furniture or narrow gaps completely block reaching a scheduled room.";
+    case "PRIVACY_SIGHTLINE":
+      return "Open doors expose private fixtures or beds directly to shared social areas.";
+    case "NOISE_CONFLICT":
+      return "TV or social sound carries into a quiet work call or study zone.";
+    case "TV_OCCLUDED":
+    case "TV_BAD_ANGLE":
+    case "TV_TOO_FAR":
+      return "Seated family members strain to see the screen comfortably.";
+    case "EVACUATION_BOTTLENECK":
+    case "NO_EVACUATION_PATH":
+    case "LONG_EVACUATION_ROUTE":
+      return "Delays safe whole-family egress during an emergency drill.";
+    case "SUN_GLARE":
+      return "Direct sun washes out screens and causes eye strain.";
+    default:
+      return "Affects daily comfort and circulation.";
+  }
+}
+
 export function formatFindingSummaryText(finding = {}) {
   if (typeof finding.summary === "string" && finding.summary.trim()) {
     return finding.summary.trim();
@@ -403,6 +435,10 @@ export function normalizeSimulationViewState(raw = {}) {
         level: resolveFindingLevel(f),
         title: formatFindingHeadline(f),
         summary: formatFindingSummaryText(f),
+        whyItMatters: formatFindingWhyItMatters(f),
+        isAccessibility:
+          String(f.type || "").toUpperCase().startsWith("ACCESSIBILITY_") ||
+          Boolean(f.evidence?.wheelchair),
         location: formatLocationLabel(f.location, f.roomId),
         rawLocation:
           f.rawLocation ?? (typeof f.location === "object" ? f.location : null),
@@ -492,9 +528,14 @@ export function normalizeSimulationViewState(raw = {}) {
         }))
     : [];
 
+  const friendCount = Number.isFinite(Number(raw?.friendCount))
+    ? Math.max(1, Math.min(20, Math.round(Number(raw.friendCount))))
+    : 8;
+
   return {
     status,
     scenarioId,
+    friendCount,
     speed,
     currentTime,
     hasTimeline: Boolean(raw?.hasTimeline && endSecond > startSecond),

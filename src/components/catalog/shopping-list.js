@@ -68,6 +68,33 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     return panel;
   }
 
+  function renderOwnedSection(project) {
+    const ownedItems = (project.items || []).filter(
+      (i) => i.owned && i.type !== "fixed",
+    );
+    if (ownedItems.length === 0) return null;
+    const section = element("section", "shop-owned-section");
+    section.setAttribute("aria-label", "Already owned furniture");
+    const head = element("div", "shop-section-head");
+    head.append(
+      element("span", "bp-spec-tag", "ALREADY OWNED"),
+      element("h2", null, `Already owned (${ownedItems.length})`),
+    );
+    section.append(head);
+    const grid = element("div", "shop-owned-grid");
+    for (const item of ownedItems) {
+      const chip = element("div", "shop-owned-card");
+      const dims = `${Number(item.width || 0).toFixed(2)} × ${Number(item.depth || 0).toFixed(2)} × ${Number(item.height || 0).toFixed(2)} m`;
+      chip.append(
+        element("strong", null, item.name || item.kind || "Owned piece"),
+        element("span", "muted", `${dims} · Kept in layout ($0)`),
+      );
+      grid.append(chip);
+    }
+    section.append(grid);
+    return section;
+  }
+
   function makeCard(row, product) {
     const live = Boolean(row.shopify);
     const title = live
@@ -218,6 +245,16 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       if (!group || (!attempt.error && (attempt.signature !== group.signature || !group.ready))) clearAttempt(domain);
     }
     const display = [];
+    const ownedSection = renderOwnedSection(project);
+    if (ownedSection) display.push(ownedSection);
+    if (saved.length > 0) {
+      const newHead = element("div", "shop-section-head shop-new-products-head");
+      newHead.append(
+        element("span", "bp-spec-tag", "NEW PRODUCTS"),
+        element("h2", null, `New products to purchase (${saved.length})`),
+      );
+      display.push(newHead);
+    }
     if (groups.size > 1) {
       const all = element("button", "primary shop-checkout-all", "Prepare all merchant checkouts");
       all.type = "button";
