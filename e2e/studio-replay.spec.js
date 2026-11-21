@@ -214,9 +214,10 @@ test("drag an area, review the scoped proposal, approve once and replay the same
   expect(await project(page)).toEqual(before);
   await approve.click();
   await expect(failures).toHaveText(["1", "0"]);
+  await expect(page.locator("#studio-replay-status")).toContainText("improved");
+  await page.locator("#continue-stress").click();
   await expect(page.locator("#sim-scenario")).toHaveValue("saved-routine");
   await expect(page.locator("#sim-scorecard")).toBeVisible();
-  await expect(page.locator("#studio-replay-status")).toContainText("improved");
   const after = await project(page);
   expect(after.personas).toEqual(before.personas);
   expect(after.items).toEqual(before.items.map(item => item.id === sofa.id ? { ...item, x: 3.4, z: 7 } : item));

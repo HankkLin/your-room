@@ -302,7 +302,7 @@ export function renderControlPanelMarkup(
       <strong>${escapeHtml(activeScenario?.name || "Morning Routine")}</strong>
       <span id="sim-scenario-desc">${escapeHtml(activeScenario?.description || "")}</span>
     </div>
-    <label class="twin-field" for="sim-scenario" hidden>
+    <label class="twin-field" for="sim-scenario">
       <span class="section-label">All scenarios</span>
       <select id="sim-scenario" aria-label="Simulation scenario" ${isBusy ? "disabled" : ""}>
         ${scenarios

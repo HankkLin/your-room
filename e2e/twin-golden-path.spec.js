@@ -95,6 +95,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await page.locator("#view-3d").click();
   await expect(page.locator("#scene canvas")).toHaveAttribute("data-engine", /three/i);
   await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  await page.locator("#continue-stress").click();
   await expect(page.locator("#sim-persona-summary")).toContainText("Sample simulation household");
   await expect(page.locator("#sim-persona-summary")).toContainText("Kevin");
   await expect(page.locator("#sim-persona-summary")).toContainText("Alice");
@@ -199,7 +200,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   ).toHaveText(String(afterMovementScore));
 
   // Step 17 (E10): Save room & review products preserves redesigned product metadata & merchant link
-  await page.locator("#save-room").click();
+  await page.locator("#tray-review-products").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "shop");
   const walnutCard = page
     .locator(".shop-card")

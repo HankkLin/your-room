@@ -70,7 +70,8 @@ test("custom room flows through the brief, furnished tour and saved Shopify vari
   expect(styled.spent).toBeLessThanOrEqual(550);
   expect(owned(styled)).toEqual(owned(before));
   expect(styled.items.some((i) => i.kind === "rug")).toBe(false);
-  await page.locator("#save-room").click();
+  await page.locator("#continue-stress").click();
+  await page.locator("#tray-review-products").click();
   await expect(page.locator("#shop-page")).toBeVisible();
   await expect(page.locator(".shop-card a").first()).toHaveAttribute(
     "href",
@@ -150,8 +151,8 @@ test("tour exploration, object edits, room commands and undo", async ({
   await page.locator("[data-spot=window]").click();
   await expect(page.locator("#spot-label")).toContainText("Window");
   const pose = await page.locator("#map-eye").getAttribute("transform");
-  for (const direction of ["forward", "right", "left", "backward"]) {
-    await page.locator("[data-walk=" + direction + "]").click();
+  for (const key of ["w", "d", "a", "s"]) {
+    await page.keyboard.press(key);
     if ((await page.locator("#map-eye").getAttribute("transform")) !== pose)
       break;
   }

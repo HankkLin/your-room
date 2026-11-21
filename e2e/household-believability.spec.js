@@ -13,7 +13,7 @@ test("Household believability: Family of 4 heights, slow continuous 1x walking (
   await expect(page.locator("#fp-status-card")).toContainText("Floorplan analyzed");
   await page.locator("#fp-confirm-import").click();
   await page.locator("#skip-household").click();
-  await page.locator("#tour-step").click();
+  await page.locator("#stress-test-step").click();
   await page.locator("#view-3d").click();
 
   // 1. Canonical Family of Four rendered in Household summary

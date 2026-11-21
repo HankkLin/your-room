@@ -41,8 +41,9 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
-  // The saved-household comparison and scenario controls share the live tour.
+  // Continue from the saved-household comparison to the stress test.
   await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  await page.locator("#continue-stress").click();
 
   // Control panel is visible in sidebar and does NOT overlap the 3D scene canvas
   const controlCard = page.locator("#demo-controls-panel .twin-control-card");

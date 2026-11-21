@@ -227,6 +227,10 @@
         </section>
         <aside class="sidebar">
           <section id="demo-controls-panel" hidden></section>
+          <div id="stress-next" class="panel" hidden>
+            <p id="stress-home-required" class="muted">Stress tests require a whole-home floor plan.</p>
+            <button class="primary" id="tray-review-products" type="button">Continue to Furnish &amp; Buy →</button>
+          </div>
           <section class="panel" id="design-panel">
             <div class="panel-head">
               <span class="eyebrow" id="design-step-label">Step 3 · Your Style</span>
@@ -333,8 +337,8 @@
               <p role="status" class="muted" id="edit-result"></p>
             </form>
             <div class="tour-links">
-              <button id="save-room" class="primary">
-                Save room &amp; review products</button
+              <button id="continue-stress" class="primary">
+                Continue to Stress Test</button
               ><button id="revise-brief" class="text-btn">
                 Revise design brief
               </button>
@@ -385,15 +389,12 @@
       <section class="inventory" aria-label="Furnishing and suggested products tray">
         <div class="inventory-head">
           <div>
-            <p class="eyebrow">Step 8 · Furnish &amp; Buy Preview</p>
+            <p class="eyebrow">Step 6 · Explore &amp; Edit</p>
             <h2>Pieces in this plan <span id="item-count"></span></h2>
           </div>
           <div class="inventory-actions">
             <button class="secondary" id="add-piece">
               <span data-icon="plus"></span> Add furniture
-            </button>
-            <button class="primary" id="tray-review-products" type="button">
-              Continue to Shopify →
             </button>
           </div>
         </div>

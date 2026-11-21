@@ -71,6 +71,7 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
   await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  await page.locator("#continue-stress").click();
   await page.locator("#sim-scenario").selectOption("saved-routine");
   await setPlaybackSpeed(page, 20);
   await page.locator("#sim-play-toggle").click();
@@ -79,10 +80,12 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
     "Blocked route: Bedroom → Kitchen",
   );
 
+  await page.locator("#tour-step").click();
   const obstacle = page.locator(`#inventory [data-item="${sofa.id}"]`);
   await obstacle.click();
   await page.locator("#objectbar [data-action=remove]").click();
   await expect(obstacle).toHaveCount(0);
+  await page.locator("#continue-stress").click();
 
   await page.locator("#sim-play-toggle").click();
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });

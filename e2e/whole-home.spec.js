@@ -303,6 +303,8 @@ test("demo walkthrough carries the same house and style through furniture and de
   const original = await saved();
   await page.locator("#brief").fill("Quiet rooms and warm lighting");
   await page.locator("#budget").fill("4200");
+  await expect(page.locator("#demo-controls-panel")).toBeHidden();
+  await expect(page.locator("#twin-results-section")).toBeHidden();
   await page.locator("#continue-furniture").click();
   const plan = page.getByRole("img", { name: "Whole-home floor plan" });
   for (const room of original.house.rooms) await expect(plan).toContainText(room.name);
@@ -311,6 +313,8 @@ test("demo walkthrough carries the same house and style through furniture and de
   await page.locator("[data-name]").last().fill("Hall lamp");
   await page.getByRole("button", { name: /Continue to AI Design/ }).click();
   await expect(page.locator("#ai-design-step")).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("#demo-controls-panel")).toBeHidden();
+  await expect(page.locator("#twin-results-section")).toBeHidden();
   await expect(page.locator("#brief")).toHaveValue("Quiet rooms and warm lighting");
   await expect(page.locator("#budget")).toHaveValue("4200");
   const edited = await saved();
@@ -329,4 +333,15 @@ test("demo walkthrough carries the same house and style through furniture and de
   await page.locator("#resume-room").click();
   await expect(page.locator("#tour-step")).toHaveAttribute("aria-current", "step");
   expect((await saved()).items).toEqual(styled.items);
+  await expect(page.locator("#demo-controls-panel")).toBeHidden();
+  await expect(page.locator("#twin-results-section")).toBeHidden();
+  await expect(page.locator("#tray-review-products")).toBeHidden();
+  await page.locator("#continue-stress").click();
+  await expect(page.locator("#stress-test-step")).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("#demo-controls-panel")).toBeVisible();
+  await expect(page.locator("#twin-results-section")).toBeVisible();
+  await page.reload();
+  await expect(page.locator("#stress-test-step")).toHaveAttribute("aria-current", "step");
+  await page.locator("#tray-review-products").click();
+  await expect(page.locator("#shop-page")).toBeVisible();
 });
