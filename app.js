@@ -56,6 +56,7 @@ import {
 } from "./src/components/catalog/product-preview.js";
 import { createShopifyQuotes, shopifyRequest } from "./src/shopify/shopify-client.js";
 import { getCandidateProducts } from "./src/shopify/candidate-products.js";
+import { productCandidateId } from "./src/contracts/product.js";
 import { showParsedGeometryModal } from "./floorplan-import-ui.js";
 import {
   clearConfirmedImportedHouse,
@@ -888,6 +889,7 @@ function inventoryPrice(item) {
 
 let previewPinnedId = null;
 let previewHoverSource = null;
+const railCandidateLookup = new Map();
 
 function resolveItemProductDetails(source) {
   return resolveProductDetails(source, {
@@ -896,6 +898,156 @@ function resolveItemProductDetails(source) {
     formatUsd: currency,
     isLocked: Boolean(source && isObjectLocked(source)),
   });
+}
+
+function candidatePlacementKeys(source) {
+  const keys = [];
+  const composite =
+    productCandidateId(source?.shopify) || productCandidateId(source);
+  if (composite) keys.push(`shopify:${composite}`);
+  if (source?.variantId) keys.push(`variant:${source.variantId}`);
+  if (source?.productId) keys.push(`product:${source.productId}`);
+  if (source?.id && !source?.x && !source?.position) keys.push(`product:${source.id}`);
+  const url = source?.productUrl || source?.url;
+  if (typeof url === "string" && url.trim()) keys.push(`url:${url.trim()}`);
+  return keys;
+}
+
+function resolveUnplacedLibraryCandidates(items) {
+  const placedKeys = new Set();
+  for (const placed of items || []) {
+    if (placed.type === "fixed" || placed.fromHouseFixture || placed.owned) continue;
+    for (const key of candidatePlacementKeys(placed)) placedKeys.add(key);
+  }
+  const allCandidates = getCandidateProducts({
+    candidateSnapshot: candidateSession.read(),
+    sceneItems: items || [],
+    getQuote: (ref) => shopifyQuotes.get(ref),
+  });
+  const unplaced = [];
+  const seenKeys = new Set();
+  for (const cand of allCandidates) {
+    const keys = candidatePlacementKeys(cand);
+    if (!keys.length) continue;
+    if (keys.some((k) => placedKeys.has(k) || seenKeys.has(k))) continue;
+    keys.forEach((k) => seenKeys.add(k));
+    unplaced.push(cand);
+  }
+  return unplaced;
+}
+
+function resolveActiveRoomIdForPlacement(house) {
+  if (!house?.rooms?.length) return null;
+  const designRoomEl = document.querySelector("#design-discovery [data-design-room]");
+  if (stage === "design" && designRoomEl?.value) {
+    const matched = house.rooms.find((r) => r.id === designRoomEl.value);
+    if (matched) return matched.id;
+  }
+  const selectedItem = state.items.find((i) => i.id === selection);
+  if (selectedItem?.roomId && house.rooms.some((r) => r.id === selectedItem.roomId)) {
+    return selectedItem.roomId;
+  }
+  if (eyePose?.roomId && house.rooms.some((r) => r.id === eyePose.roomId)) {
+    return eyePose.roomId;
+  }
+  const living = house.rooms.find((r) => r.kind === "living" || r.id === "living-room");
+  return (living || house.rooms[0]).id;
+}
+
+function findSafeRoomPlacement(sceneObj, house, occupiedItems, targetRoomId) {
+  if (!house) {
+    const room = state.room || ROOM;
+    const positioned = bounded(sceneObj, room);
+    return fitItem(positioned, room, occupiedItems);
+  }
+  const room =
+    house.rooms.find((r) => r.id === targetRoomId) || house.rooms[0];
+  if (!room) return null;
+  const { minX, maxX, minZ, maxZ, centerX, centerZ } = room.bounds;
+  const baseRot = Number(sceneObj.rotation) || 0;
+  const candidates = [
+    [centerX, centerZ, baseRot],
+    [centerX, centerZ, (baseRot + 90) % 360],
+  ];
+  for (let z = minZ + 0.4; z <= maxZ - 0.4 + 1e-6; z += 0.35) {
+    for (let x = minX + 0.4; x <= maxX - 0.4 + 1e-6; x += 0.35) {
+      candidates.push(
+        [Math.round(x * 100) / 100, Math.round(z * 100) / 100, 0],
+        [Math.round(x * 100) / 100, Math.round(z * 100) / 100, 90],
+      );
+    }
+  }
+  for (const [x, z, rotation] of candidates) {
+    if (getRoomAtPoint(house, x, z)?.id !== room.id) continue;
+    const yawRad = (rotation * Math.PI) / 180;
+    const trial = {
+      ...sceneObj,
+      x,
+      z,
+      rotation,
+      rotationDegrees: rotation,
+      position: [x, Number(sceneObj.elevation ?? sceneObj.y) || 0, z],
+      rotationRadians: [0, yawRad, 0],
+      roomId: room.id,
+    };
+    if (canPlaceInHouse(trial, house, occupiedItems, 0.08)) {
+      return trial;
+    }
+  }
+  return null;
+}
+
+function addLibraryCandidateToRoom(candidateKey) {
+  const candidate = railCandidateLookup.get(candidateKey);
+  if (!candidate) return false;
+  if (previewLayoutItems) return false;
+
+  // Guard against accidental duplicate click if already placed
+  const existingKeys = new Set(
+    state.items
+      .filter((i) => i.type !== "fixed" && !i.fromHouseFixture && !i.owned)
+      .flatMap(candidatePlacementKeys),
+  );
+  if (candidatePlacementKeys(candidate).some((k) => existingKeys.has(k))) {
+    const already = state.items.find((i) =>
+      candidatePlacementKeys(i).some((k) =>
+        candidatePlacementKeys(candidate).includes(k),
+      ),
+    );
+    if (already) {
+      previewHoverSource = null;
+      select(already.id);
+    }
+    return false;
+  }
+
+  const house = activeHouse();
+  const targetRoomId = resolveActiveRoomIdForPlacement(house);
+  const baseObj = productCandidateToSceneObject(candidate, {
+    id: `added-${candidate.kind || "item"}-${crypto.randomUUID().slice(0, 8)}`,
+    kind: candidate.kind,
+    roomId: targetRoomId,
+  });
+
+  const placedObj = findSafeRoomPlacement(
+    baseObj,
+    house,
+    state.items,
+    targetRoomId,
+  );
+  if (!placedObj) {
+    toast("No clear space in this room.");
+    return false;
+  }
+
+  previewHoverSource = null;
+  selection = placedObj.id;
+  previewPinnedId = placedObj.id;
+  commit({ ...state, items: [...state.items, placedObj], hasLayout: true });
+  const roomName =
+    house?.rooms.find((r) => r.id === placedObj.roomId)?.name || "room";
+  toast(`Added ${placedObj.name} to ${roomName}`);
+  return true;
 }
 
 function syncProductPreviewCard() {
@@ -945,24 +1097,80 @@ function syncProductPreviewCard() {
 function renderFurnitureRail(items) {
   const railEl = $("#furniture-rail");
   if (!railEl) return;
-  const railItems = (items || []).filter(
-    (entry) => entry.type !== "fixed" && !entry.fromHouseFixture,
-  );
-  if (!railItems.length || !["design", "tour"].includes(stage)) {
+  if (!["design", "tour"].includes(stage)) {
     railEl.hidden = true;
     railEl.replaceChildren();
     return;
   }
-  railEl.innerHTML = railItems
-    .slice(0, 12)
+  const railItems = (items || []).filter(
+    (entry) => entry.type !== "fixed" && !entry.fromHouseFixture,
+  );
+  const unplacedCandidates = previewLayoutItems
+    ? []
+    : resolveUnplacedLibraryCandidates(items);
+
+  railCandidateLookup.clear();
+  for (const cand of unplacedCandidates) {
+    const key = String(productCandidateId(cand) || cand.id || cand.productId);
+    railCandidateLookup.set(key, cand);
+  }
+
+  if (!railItems.length && !unplacedCandidates.length) {
+    railEl.hidden = true;
+    railEl.replaceChildren();
+    return;
+  }
+
+  const placedMarkup = railItems
+    .slice(0, 24)
     .map((entry) => {
       const details = resolveItemProductDetails(entry);
       const thumb = details?.imageUrl
         ? `<img src="${escape(details.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
         : itemGlyph(entry);
-      return `<button type="button" class="bp-rail-thumb" data-rail-item="${escape(entry.id)}" aria-label="${escape(details?.name || itemName(entry))}" aria-pressed="${selection === entry.id}">${thumb}</button>`;
+      return `<button type="button" class="bp-rail-thumb" data-rail-item="${escape(entry.id)}" aria-label="${escape(details?.name || itemName(entry))}" aria-pressed="${selection === entry.id}" title="${escape(details?.name || itemName(entry))}">${thumb}</button>`;
     })
     .join("");
+
+  const availableMarkup = unplacedCandidates
+    .slice(0, 14)
+    .map((cand) => {
+      const key = String(productCandidateId(cand) || cand.id || cand.productId);
+      const details = resolveItemProductDetails(cand);
+      const thumb = details?.imageUrl
+        ? `<img src="${escape(details.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+        : itemGlyph(cand);
+      const subParts = [details?.merchant, details?.stockLabel].filter(Boolean);
+      return `<button type="button" class="bp-rail-add-card" data-rail-candidate="${escape(key)}" aria-label="Add ${escape(details?.name || cand.name || "furniture")} to room">
+        <span class="bp-rail-add-thumb">${thumb}<span class="bp-rail-plus" aria-hidden="true">+</span></span>
+        <span class="bp-rail-add-info">
+          <strong>${escape(details?.name || cand.name || "Furniture")}</strong>
+          <small>${escape(details?.priceLabel || "")}${subParts.length ? ` · ${escape(subParts[0])}` : ""}</small>
+          <em class="bp-rail-add-stock" data-stock="${escape(details?.stockState || "unknown")}">${escape(details?.stockLabel || "Availability unknown")}</em>
+        </span>
+      </button>`;
+    })
+    .join("");
+
+  railEl.innerHTML = `
+    ${
+      railItems.length
+        ? `<div class="bp-rail-section" aria-label="In this room">
+            <span class="bp-rail-heading">In room (${railItems.length})</span>
+            <div class="bp-rail-placed-grid">${placedMarkup}</div>
+          </div>`
+        : ""
+    }
+    ${
+      unplacedCandidates.length
+        ? `<div class="bp-rail-section bp-rail-available-section" aria-label="Available to add">
+            <span class="bp-rail-heading">Available to add</span>
+            <div class="bp-rail-available-list">${availableMarkup}</div>
+          </div>`
+        : ""
+    }
+  `;
+
   railEl.querySelectorAll(".bp-rail-thumb img").forEach((img) => {
     const btn = img.closest("[data-rail-item]");
     const entry = railItems.find((it) => it.id === btn?.dataset.railItem);
@@ -970,6 +1178,20 @@ function renderFurnitureRail(items) {
       "error",
       () => {
         if (btn && entry) btn.innerHTML = itemGlyph(entry);
+      },
+      { once: true },
+    );
+  });
+  railEl.querySelectorAll(".bp-rail-add-thumb img").forEach((img) => {
+    const btn = img.closest("[data-rail-candidate]");
+    const cand = railCandidateLookup.get(btn?.dataset.railCandidate);
+    img.addEventListener(
+      "error",
+      () => {
+        const wrap = img.closest(".bp-rail-add-thumb");
+        if (wrap && cand) {
+          wrap.innerHTML = `${itemGlyph(cand)}<span class="bp-rail-plus" aria-hidden="true">+</span>`;
+        }
       },
       { once: true },
     );
@@ -1286,14 +1508,24 @@ $("#inventory").addEventListener("mouseleave", () => {
   }
 });
 $("#furniture-rail")?.addEventListener("mouseover", (e) => {
-  const btn = e.target.closest("[data-rail-item]");
-  if (!btn) return;
-  const item = (previewLayoutItems || state.items).find(
-    (entry) => entry.id === btn.dataset.railItem,
-  );
-  if (item && previewHoverSource !== item) {
-    previewHoverSource = item;
-    syncProductPreviewCard();
+  const placedBtn = e.target.closest("[data-rail-item]");
+  if (placedBtn) {
+    const item = (previewLayoutItems || state.items).find(
+      (entry) => entry.id === placedBtn.dataset.railItem,
+    );
+    if (item && previewHoverSource !== item) {
+      previewHoverSource = item;
+      syncProductPreviewCard();
+    }
+    return;
+  }
+  const candBtn = e.target.closest("[data-rail-candidate]");
+  if (candBtn) {
+    const cand = railCandidateLookup.get(candBtn.dataset.railCandidate);
+    if (cand && previewHoverSource !== cand) {
+      previewHoverSource = cand;
+      syncProductPreviewCard();
+    }
   }
 });
 $("#furniture-rail")?.addEventListener("mouseleave", () => {
@@ -1303,10 +1535,16 @@ $("#furniture-rail")?.addEventListener("mouseleave", () => {
   }
 });
 $("#furniture-rail")?.addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-rail-item]");
-  if (btn) {
+  const placedBtn = e.target.closest("[data-rail-item]");
+  if (placedBtn) {
     previewHoverSource = null;
-    select(btn.dataset.railItem);
+    select(placedBtn.dataset.railItem);
+    $("#scene").focus({ preventScroll: true });
+    return;
+  }
+  const candBtn = e.target.closest("[data-rail-candidate]");
+  if (candBtn) {
+    addLibraryCandidateToRoom(candBtn.dataset.railCandidate);
     $("#scene").focus({ preventScroll: true });
   }
 });
