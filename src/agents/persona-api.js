@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createGeminiJsonGenerator, GeminiJsonError } from "./gemini-json.js";
 import {
   personaDraftSchema,
   validatePersonaRooms,
@@ -8,13 +9,6 @@ import {
 export const personaApiPath = "/api/personas/generate";
 const maxHouseholdDescriptionLength = 4000;
 const maxRequestBytes = 32 * 1024;
-const modelsEndpoint = "https://generativelanguage.googleapis.com/v1beta/models";
-const personaModelPreferences = [
-  "gemini-4-hydrogen",
-  "gemini-4-neon",
-  "gemini-3.8-flash",
-  "gemini-2.5-flash",
-];
 
 const systemInstruction = `Create a household draft from the description and available rooms.
 Return one persona per described person. Use only a supplied room ID for every destination.
@@ -31,79 +25,25 @@ class PersonaApiError extends Error {
   }
 }
 
-function checkGeminiResponse(result) {
-  if (result.status === 429) {
-    throw new PersonaApiError(429, "Gemini is busy or has reached its quota. Try again later or load a sample household.");
-  }
-  if (!result.ok) {
-    throw new PersonaApiError(502, "Gemini could not generate a household. Check API access or try again.");
-  }
-}
+const geminiErrors = {
+  quota: "Gemini is busy or has reached its quota. Try again later or load a sample household.",
+  upstream: "Gemini could not generate a household. Check API access or try again.",
+  unconfigured: "Gemini is not configured. Load a sample household or skip this step.",
+  unavailable: "No supported Gemini model is available for household generation. Load a sample household or skip this step.",
+  incomplete: "Gemini did not complete the draft. Try a shorter description or load a sample household.",
+  timeout: "Gemini took too long. Try again or load a sample household.",
+  unreadable: "Gemini returned an unreadable draft or could not be reached. Try again or load a sample household.",
+};
 
-async function choosePersonaModel(fetchImpl, headers, signal) {
-  const result = await fetchImpl(`${modelsEndpoint}?pageSize=1000`, {
-    headers,
-    redirect: "error",
-    signal,
-  });
-  checkGeminiResponse(result);
-  const { models = [] } = await result.json();
-  const available = new Set(models
-    .filter((model) => model.supportedGenerationMethods?.includes("generateContent"))
-    .map((model) => model.name));
-  const model = personaModelPreferences.find((name) => available.has(`models/${name}`));
-  if (!model) {
-    throw new PersonaApiError(503, "No supported Gemini model is available for household generation. Load a sample household or skip this step.");
-  }
-  return model;
-}
-
-export function createPersonaGenerator({ apiKey, fetchImpl = fetch, timeoutMs = 25_000 } = {}) {
-  const key = apiKey?.trim();
-
+export function createPersonaGenerator(options) {
+  const generateJson = createGeminiJsonGenerator(options);
   return async ({ description, rooms }) => {
-    if (!key) {
-      throw new PersonaApiError(503, "Gemini is not configured. Load a sample household or skip this step.");
-    }
-
-    const headers = { "x-goog-api-key": key };
-    const signal = AbortSignal.timeout(timeoutMs);
     let payload;
     try {
-      const model = await choosePersonaModel(fetchImpl, headers, signal);
-      const url = `${modelsEndpoint}/${model}:generateContent`;
-      const result = await fetchImpl(url, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        redirect: "error",
-        signal,
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents: [{ role: "user", parts: [{ text: JSON.stringify({ description, rooms }) }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseJsonSchema: personaDraftSchema,
-          },
-        }),
-      });
-
-      checkGeminiResponse(result);
-      const data = await result.json();
-      const candidate = data?.candidates?.[0];
-      if (candidate?.finishReason !== "STOP" || !Array.isArray(candidate.content?.parts)) {
-        throw new PersonaApiError(502, "Gemini did not complete the draft. Try a shorter description or load a sample household.");
-      }
-      const text = candidate.content.parts
-        .filter((part) => !part?.thought && typeof part?.text === "string")
-        .map((part) => part.text)
-        .join("");
-      payload = JSON.parse(text);
+      ({ payload } = await generateJson({ input: { description, rooms }, systemInstruction, schema: personaDraftSchema }));
     } catch (error) {
-      if (signal.aborted) {
-        throw new PersonaApiError(504, "Gemini took too long. Try again or load a sample household.");
-      }
-      if (error instanceof PersonaApiError) throw error;
-      throw new PersonaApiError(502, "Gemini returned an unreadable draft or could not be reached. Try again or load a sample household.");
+      if (!(error instanceof GeminiJsonError)) throw error;
+      throw new PersonaApiError(error.status, geminiErrors[error.code]);
     }
 
     const draft = payload?.personas;
@@ -169,7 +109,7 @@ export function createPersonaApiMiddleware(generatePersonas) {
     }
     const expectedOrigin = `${request.socket.encrypted ? "https" : "http"}://${request.headers.host}`;
     if (request.headers.origin && request.headers.origin !== expectedOrigin) {
-      return respond(response, 403, { error: "Open Stillroom directly to generate a household." });
+      return respond(response, 403, { error: "Open Living Blueprint directly to generate a household." });
     }
     if (!/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] || "")) {
       return respond(response, 415, { error: "Send the household details as JSON." });

@@ -32,7 +32,7 @@ function validTimeRange(start, end) {
     start >= 0 && start < end && end <= minutesPerDay;
 }
 
-function validateScheduleEntries(schedule, roomIds, name) {
+function validateScheduleEntries(schedule, roomIds, name, allowUnmappedRooms) {
   if (!Array.isArray(schedule) || schedule.length > limits.schedule) {
     return `${name} can have up to ${limits.schedule} schedule entries.`;
   }
@@ -41,7 +41,9 @@ function validateScheduleEntries(schedule, roomIds, name) {
       return `Choose a valid activity for ${name}.`;
     }
     const { roomId, startMinute, endMinute } = entry;
-    if (!roomIds.has(roomId)) return `Choose an available room for each of ${name}’s activities.`;
+    if (!roomIds.has(roomId) && !(allowUnmappedRooms && validText(roomId))) {
+      return `Choose an available room for each of ${name}’s activities.`;
+    }
     if (isFlexibleActivity(entry)) {
       const { windowStartMinute, windowEndMinute, durationMinutes } = entry;
       if (Object.hasOwn(entry, 'startMinute') || Object.hasOwn(entry, 'endMinute') ||
@@ -56,7 +58,7 @@ function validateScheduleEntries(schedule, roomIds, name) {
   return null;
 }
 
-function evaluateHousehold(personas, rooms) {
+function evaluateHousehold(personas, rooms, allowUnmappedRooms = false) {
   if (!Array.isArray(personas) || personas.length > limits.people) {
     return { error: `A household can have up to ${limits.people} people.` };
   }
@@ -83,7 +85,7 @@ function evaluateHousehold(personas, rooms) {
       !Object.hasOwn(needs, key) || !Number.isFinite(needs[key]) || needs[key] < 0 || needs[key] > 1)) {
       return { error: `${name}’s needs must each be a number from 0 to 1.` };
     }
-    const scheduleError = validateScheduleEntries(schedule, roomIds, name);
+    const scheduleError = validateScheduleEntries(schedule, roomIds, name, allowUnmappedRooms);
     if (scheduleError) return { error: scheduleError };
     const result = resolveSchedule(schedule);
     if (result.error === 'overlap') return { error: `${name} has overlapping activities.` };
@@ -97,6 +99,11 @@ function evaluateHousehold(personas, rooms) {
 
 export function validatePersonas(personas, rooms) {
   return evaluateHousehold(personas, rooms).error ?? null;
+}
+
+// Imports can carry room IDs from another home. Saving and replay still require local IDs.
+export function validateImportedPersonaDraft(personas, rooms) {
+  return evaluateHousehold(personas, rooms, true).error ?? null;
 }
 
 export function prepareHouseholdReplay(personas, rooms) {

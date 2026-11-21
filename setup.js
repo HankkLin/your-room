@@ -19,6 +19,8 @@ import { icon } from "./icons.js";
 import { openFloorplanImporter } from "./floorplan-import-ui.js";
 import { toSceneObject } from "./src/contracts/scene.js";
 import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
+import { confirmImportedHouse, importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
+import { createBlockedRouteDemo } from "./src/simulation/studio-replay-demo.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
 const paints = {
@@ -397,6 +399,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       icon("cube") +
       '</span><span><strong>Import a whole-home floorplan</strong><small>Extract multi-room walls, doors, windows, and locked fixtures.</small></span><span class="start-arrow">↗</span><input type="file" id="floorplan-upload" accept="image/png,image/jpeg,image/webp"></label>' +
       '<button class="text-btn sample-photo-link" id="try-sample-floorplan">Try sample whole-home floorplan <span aria-hidden="true">→</span></button>' +
+      '<button class="text-btn sample-photo-link" id="try-replay-demo">Try blocked-route replay demo <span aria-hidden="true">→</span></button>' +
       '<button class="start-option" id="custom-room"><span class="start-symbol">' +
       icon("room") +
       '</span><span><strong>Build a custom room</strong><small>Set the shape, dimensions, and finishes.</small></span><span class="start-arrow">→</span></button>' +
@@ -698,7 +701,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       const n = mergeDetection(list || []);
       detection = "done";
       message = n
-        ? "Review the detected pieces. Their initial positions are approximate and can be adjusted in the editor."
+        ? "Review the photo-derived previews. Their dimensions and floor positions are estimated."
         : "No furniture was recognized. Add pieces below or continue with an empty room.";
     } catch {
       if (!active || photoToken !== token) return;
@@ -766,6 +769,10 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
             fitItem(
               {
                 ...item,
+                // A single view estimates the front silhouette. Keep depth at the furniture-type estimate.
+                width: Number.isFinite(hint.aspectRatio) && hint.aspectRatio > 0
+                  ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
+                  : item.width,
                 x: (clamp(hint.x, 0, 1) - 0.5) * draft.room.width,
                 z: (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth,
               },
@@ -776,6 +783,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         items.push({
           ...placed,
           color: hint?.color ?? placed.color,
+          ...(piece.detected && hint ? { photoPreview: true, dimensionsSource: "estimated" } : {}),
           name: piece.name || kinds[piece.kind],
           id: uid(),
         });
@@ -795,6 +803,17 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       false,
     );
   }
+  function finishFloorplanImport(confirmedHouse, { items = [], householdDraft } = {}) {
+    leave({
+      ...state,
+      roomName: confirmedHouse.name || "Imported Home",
+      room: roomDefaults(houseToPrimaryStudioRoom(confirmedHouse)),
+      roomPhoto: null,
+      importedHouse: confirmedHouse,
+      items,
+      spent: 0,
+    }, false, { householdDraft });
+  }
   function launchFloorplanFlow(initialMode, initialFile = null) {
     ++photoToken;
     openFloorplanImporter({
@@ -812,18 +831,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
             : confirmedHouse.id === "mercer-apartment-sample"
               ? buildMercerSampleStarterItems()
               : [];
-        leave(
-          {
-            ...state,
-            roomName: confirmedHouse.name || "Imported Home",
-            room: roomDefaults(houseToPrimaryStudioRoom(confirmedHouse)),
-            roomPhoto: null,
-            importedHouse: confirmedHouse,
-            items: starterItems,
-            spent: getSpend(starterItems),
-          },
-          false,
-        );
+        finishFloorplanImport(confirmedHouse, { items: starterItems });
       },
     });
   }
@@ -838,6 +846,10 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     }
     if (b.id === "try-sample-floorplan") {
       launchFloorplanFlow("sample");
+      return;
+    }
+    if (b.id === "try-replay-demo") {
+      finishFloorplanImport(confirmImportedHouse(importSampleFloorplan()), createBlockedRouteDemo());
       return;
     }
     if (b.id === "try-sample-photo") {

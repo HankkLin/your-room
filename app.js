@@ -1,3 +1,4 @@
+import { createStudioReplayPanel } from "./src/components/simulation/studio-replay-panel.js";
 import {
   ROOM,
   initialState,
@@ -6,7 +7,6 @@ import {
   catalog,
   styles,
   createItem,
-  createShopifyPreview,
   furniturePreviewKinds,
   createOwnedItems,
   getSpend,
@@ -16,6 +16,7 @@ import {
 import { createScene } from "./scene.js";
 import { createPlanScene } from "./scene-fallback.js";
 import { openSetup } from "./setup.js";
+import { resolveStorageKey } from "./src/lib/browser-storage.js";
 import {
   normalizeArchitecture,
   footprintCorners,
@@ -36,13 +37,19 @@ import {
 } from "./house-model.js";
 import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
+import { furnishingCandidatesFromSession, prepareFurnishing } from "./src/persona/furnishing.js";
+import { refreshFurnishingOffers } from "./src/persona/furnishing-offers.js";
+import { mountFurnishingPanel } from "./src/components/persona/furnishing-panel.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
+import { createCandidateSession } from "./src/shopify/candidate-session.js";
+import { createCandidatePlacement, refreshPatchCandidates, savedProductsForPatch, savedShopifyRow } from "./src/shopify/scene-candidate.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
+import { dimensionLabel } from "./src/shopify/product-assets.js";
 import { formatShopifyMoney } from "./src/components/catalog/shopify-ui.js";
-import { createShopifyQuotes, shopifyRef, shopifyRequest } from "./src/shopify/shopify-client.js";
+import { createShopifyQuotes, shopifyRequest } from "./src/shopify/shopify-client.js";
 import { getCandidateProducts } from "./src/shopify/candidate-products.js";
 import { showParsedGeometryModal } from "./floorplan-import-ui.js";
 import {
@@ -54,13 +61,12 @@ import {
   createSimulationPlaybackController,
   sampleTimelineAt,
 } from "./src/components/simulation/playback-controller.js";
-import {
-  createFamilyStayoverPersonas,
-  getSimulationSnapshotAt,
-} from "./src/simulation/index.js";
+import { getSimulationSnapshotAt } from "./src/simulation/index.js";
 import { captureStudioLayout, runStudioReplay } from "./src/simulation/studio-replay.js";
 import {
+  describeApprovedHouseholdReplay,
   executeStudioRedesign,
+  recheckStudioRedesign,
   resolveValidHouseholdForHouse,
   runTwinScenario,
 } from "./src/twin-integration.js";
@@ -86,7 +92,7 @@ const palettes = {
   "Soft modern": ["#c4cbd0", "#919fa6", "#727780"],
   "Earthy eclectic": ["#b0654b", "#868c62", "#c4a258"],
 };
-const storageKey = "stillroom.project.v1";
+const storageKey = resolveStorageKey("project.v1");
 const demo = initialState();
 let state = demo;
 let hasProject = false;
@@ -133,10 +139,43 @@ let scene;
 let clearCatalog;
 let quoteRefresh;
 const dialog = $("#dialog");
+const candidateSession = createCandidateSession();
 const shopifyQuotes = createShopifyQuotes(() => {
   if (stage === "shop") shoppingList.render();
   if (stage === "tour") render();
 });
+const furnishingPanel = $("#household-furnishing");
+const resetFurnishing = mountFurnishingPanel(furnishingPanel, {
+  getContext: () => prepareFurnishing({
+    project: state, style: draftStyle, brief: $("#brief").value.trim(), budget: $("#budget").valueAsNumber,
+    reference, liveCandidates: furnishingCandidatesFromSession(candidateSession.read()), getQuote: (ref) => shopifyQuotes.get(ref),
+  }),
+  refreshRetained: (signal) => shopifyQuotes.refresh(
+    state.items.filter((item) => !item.owned && item.shopify).map((item) => item.shopify), { signal },
+  ),
+  refreshSelected: (items, signal) => refreshFurnishingOffers(items, candidateSession, shopifyQuotes, shopifyRequest, signal),
+  onApprove(additions, input) {
+    const saved = new Map((state.savedProducts ?? []).map((row) => [row.id, row]));
+    for (const item of additions) {
+      if (item.shopify) saved.set(item.id, savedShopifyRow(item, saved.get(item.id), shopifyQuotes.get(item.shopify)));
+    }
+    commit({ ...state, savedProducts: [...saved.values()], items: [...state.items, ...additions], style: input.style, budget: input.budgetMinor / 100,
+      reference, brief: input.brief, hasLayout: true });
+    syncForm();
+    navigate("tour");
+    toast("Household furnishing applied");
+  },
+});
+$("#furnishing-shopify").onclick = () => {
+  resetFurnishing();
+  modal("Shopify alternatives for this design", "");
+  clearCatalog = mountShopifyPicker($("#modal-body"), {
+    browseOnly: true, candidateSession, shopifyRequest, initialKind: "desk",
+    kinds: furniturePreviewKinds.map((kind) => ({ value: kind, label: kind[0].toUpperCase() + kind.slice(1) })),
+  });
+  $("#modal-body input").focus();
+};
+$("#style-form").addEventListener("input", resetFurnishing);
 const shoppingList = createShoppingList({
   root: $("#saved-products"),
   intro: $("#shop-intro"),
@@ -150,12 +189,50 @@ const shoppingList = createShoppingList({
   },
   onStockChange: () => void refreshShopifyQuotes(),
 });
+const studioReplay = createStudioReplayPanel($("#studio-replay-panel"), {
+  getContext: () => ({
+    inTour: stage === "tour",
+    house: state.importedHouse || state.house,
+    items: state.items,
+    personas: state.personas,
+    rooms: listPersonaRooms(state),
+  }),
+  commitEnvironment(snapshot) {
+    const key = state.importedHouse ? "importedHouse" : "house";
+    const house = state[key];
+    if (house) commit({ ...state, [key]: { ...house, environment: { ...house.environment, snapshot } } });
+  },
+  commitItems: (items) => commit({ ...state, items }),
+  onApprovedReplay(details) {
+    demoControls.selectScenario("saved-routine");
+    showApprovedReplay(describeApprovedHouseholdReplay(details), "saved-routine");
+  },
+});
 
 let simulationAdapter = null;
 let activePlaybackDataset = null;
 let previewLayoutItems = null;
 let previewLayoutHouse = null;
 let redesignSession = null;
+let pendingTwinReview = null;
+
+function routineSignature() {
+  const house = state.importedHouse || state.house;
+  if (!house) return "";
+  return JSON.stringify([house.houseId ?? house.id, house.rooms, house.walls, house.doors,
+    house.windows, house.fixtures, house.ceilingHeight, state.personas]);
+}
+
+function isCurrentRun(run) {
+  return run && run.sourceItems === state.items && run.routineSignature === routineSignature();
+}
+
+function cancelTwinReview(message = "") {
+  if (!pendingTwinReview) return;
+  pendingTwinReview = null;
+  demoControls.setState({ redesignPending: false, redesignStatus: message ? "FAILED" : null,
+    redesignActions: [], redesignMessage: message, canRedesign: Boolean(activePlaybackDataset?.canRedesign) });
+}
 
 const playbackController = createSimulationPlaybackController({
   onFrame(frame) {
@@ -196,8 +273,6 @@ const playbackController = createSimulationPlaybackController({
         errorMessage: null,
         isMockData: false,
       });
-      const legendEl = $("#studio-overlay-legend");
-      if (legendEl) legendEl.hidden = true;
       render();
       return;
     }
@@ -214,8 +289,6 @@ const playbackController = createSimulationPlaybackController({
         house: previewLayoutHouse || activeHouse(),
         items: previewLayoutItems || state.items,
       });
-      const legendEl = $("#studio-overlay-legend");
-      if (legendEl) legendEl.hidden = findingsToShow.length === 0;
       if (redesignSession && currentViewMode === "after") {
         scene?.showPatchTransition?.(redesignSession.patchChanges || []);
       }
@@ -264,7 +337,6 @@ const playbackController = createSimulationPlaybackController({
         redesignStatus: redesignSession?.uiPayload?.redesignStatus ?? null,
         isMockData: Boolean(ds.isMockData),
       });
-      syncPlannerJourneyStrip();
       return;
     }
 
@@ -280,25 +352,21 @@ const playbackController = createSimulationPlaybackController({
       canRedesign: Boolean(ds?.canRedesign && pb.status !== "RUNNING"),
       isMockData: Boolean(ds?.isMockData),
     });
-    syncPlannerJourneyStrip();
   },
 });
 
 function startPlaybackFromDataset(dataset, { preserveRedesign = false } = {}) {
   if (!preserveRedesign) {
+    cancelTwinReview();
     redesignSession = null;
     previewLayoutItems = null;
     previewLayoutHouse = null;
   }
   activePlaybackDataset = dataset;
-  if (Array.isArray(dataset.displayPersonas) && dataset.displayPersonas.length > 0) {
-    demoControls.setPersonas(dataset.displayPersonas);
-  }
   scene?.clearPlayback?.();
   playbackController.setSpeed(demoControls.getState().speed);
   playbackController.load({
     simulation: dataset.simulation,
-    personas: dataset.displayPersonas || dataset.household || [],
     getSnapshotAt:
       dataset.getSnapshotAt || getSimulationSnapshotAt || sampleTimelineAt,
     agentRoutes: dataset.agentRoutes || [],
@@ -317,30 +385,25 @@ function startPlaybackFromDataset(dataset, { preserveRedesign = false } = {}) {
 }
 
 async function handleProposeRedesign(scenarioId) {
-  const house = activeHouse();
-  if (!house) {
-    toast("Load a whole-home layout first.");
+  const baseline = activePlaybackDataset;
+  if (!baseline?.canRedesign || !baseline.scenarioConfig || scenarioId !== baseline.scenarioId || !isCurrentRun(baseline)) {
+    toast("Run the current layout and household before requesting a redesign.");
     return;
   }
-
+  if (pendingTwinReview) return;
+  const review = { baseline };
+  pendingTwinReview = review;
   playbackController.pause();
-  demoControls.setState({
-    redesignPending: true,
-    redesignMessage: null,
-    errorMessage: null,
-  });
+  demoControls.setState({ redesignPending: true, redesignMessage: null, errorMessage: null });
 
   try {
     const outcome = await executeStudioRedesign({
-      scenarioId,
-      house,
-      items: state.items,
-      state,
-      maxAttempts: 3,
-      useFallbackOnFailure: true,
+      scenarioId, baseline, items: state.items,
+      candidateProducts: getCandidateProducts({ candidateSnapshot: candidateSession.read() }),
     });
-
+    if (pendingTwinReview !== review || !isCurrentRun(baseline)) return;
     if (!outcome.accepted || !outcome.afterItems || !outcome.afterHouse) {
+      pendingTwinReview = null;
       demoControls.setState({
         status: "COMPLETE",
         redesignPending: false,
@@ -354,16 +417,32 @@ async function handleProposeRedesign(scenarioId) {
       return;
     }
 
-    redesignSession = {
-      ...outcome,
-      beforeEvaluationFindings: [
-        ...(outcome.beforeAccessFindings || []),
-        ...(outcome.replayResult.before.evaluation.findings || []),
-      ],
-    };
-    previewLayoutItems = null;
-    previewLayoutHouse = null;
+    review.outcome = outcome;
+    demoControls.setState({
+      redesignPending: false, canRedesign: false, redesignStatus: "REVIEW",
+      redesignMessage: outcome.redesignMessage, redesignActions: outcome.uiPayload.redesignActions,
+      isFallbackRedesign: outcome.uiPayload.isFallback, attemptSummaries: outcome.attemptSummaries,
+    });
+  } catch (error) {
+    if (pendingTwinReview === review) cancelTwinReview(error.message || "Could not prepare the redesign.");
+  }
+}
 
+async function approveTwinReview() {
+  const review = pendingTwinReview;
+  if (!review?.outcome || review.applying) return;
+  if (!isCurrentRun(review.baseline)) return cancelTwinReview("The layout or household changed. Run it again.");
+  review.applying = true;
+  demoControls.setState({ redesignPending: true });
+  try {
+    const patch = review.outcome.replayResult.selectedPatch;
+    const candidates = await refreshPatchCandidates(patch, review.outcome.candidateProducts);
+    if (pendingTwinReview !== review || !isCurrentRun(review.baseline)) return;
+    const outcome = recheckStudioRedesign(review.outcome, candidates);
+    const savedProducts = savedProductsForPatch(state.savedProducts, patch, outcome.afterItems);
+    const { scenarioId } = review.baseline;
+    pendingTwinReview = null;
+    activePlaybackDataset = null;
     // Commit redesigned movable items to live Studio state (preserving locked fixtures & Shopify metadata)
     if (state.importedHouse) {
       const syncedImported = setConfirmedImportedHouse({
@@ -376,71 +455,96 @@ async function handleProposeRedesign(scenarioId) {
         ...state,
         importedHouse: syncedImported,
         items: outcome.afterItems,
+        savedProducts,
       });
     } else {
       commit({
         ...state,
         items: outcome.afterItems,
+        savedProducts,
       });
     }
 
-    // Build replay dataset on the accepted AFTER layout using the exact same scenario + personas
-    const replayDataset = {
-      scenarioId,
-      capturedHouse: outcome.afterHouse,
-      household: outcome.household,
-      displayPersonas: outcome.displayPersonas,
-      simulation: outcome.afterSimulation,
-      getSnapshotAt: getSimulationSnapshotAt,
-      agentRoutes: [],
-      isEvacuation: false,
-      clockMode: "clock",
-      simSecondsPerRealSecond: scenarioId === "normal-day" ? 900 : 240,
-      findings: outcome.uiPayload.findings,
-      scores: outcome.uiPayload.afterScores,
-      beforeScores: outcome.uiPayload.beforeScores,
-      afterScores: outcome.uiPayload.afterScores,
-      overallBeforeScore: outcome.uiPayload.overallBeforeScore,
-      overallAfterScore: outcome.uiPayload.overallAfterScore,
-      beforeItems: outcome.beforeItems,
-      afterItems: outcome.afterItems,
-      patchChanges: outcome.patchChanges,
-      redesignActions: outcome.uiPayload.redesignActions,
-      canRedesign: outcome.uiPayload.findings.length > 0,
-      isMockData: false,
-    };
-
-    demoControls.setState({
-      activeLayoutView: "after",
-      hasLayoutToggle: true,
-      redesignPending: false,
-      beforeScores: outcome.uiPayload.beforeScores,
-      afterScores: outcome.uiPayload.afterScores,
-      scores: outcome.uiPayload.afterScores,
-      overallBeforeScore: outcome.uiPayload.overallBeforeScore,
-      overallAfterScore: outcome.uiPayload.overallAfterScore,
-      resolvedFindings: outcome.uiPayload.resolvedFindings,
-      remainingFindings: outcome.uiPayload.remainingFindings,
-      introducedFindings: outcome.uiPayload.introducedFindings,
-      attemptSummaries: outcome.attemptSummaries,
-      redesignActions: outcome.uiPayload.redesignActions,
-      isFallbackRedesign: outcome.uiPayload.isFallback,
-      redesignMessage: outcome.redesignMessage,
-      redesignStatus: outcome.uiPayload.redesignStatus,
-      isMockData: false,
-    });
-
-    startPlaybackFromDataset(replayDataset, { preserveRedesign: true });
-    scene?.showPatchTransition?.(outcome.patchChanges || []);
-    toast("Redesign validated & applied · Replaying scenario on updated layout");
+    review.committed = true;
+    showApprovedReplay(outcome, scenarioId);
   } catch (err) {
+    if (pendingTwinReview !== review && !review.committed) return;
+    pendingTwinReview = null;
     demoControls.setState({
+      canRedesign: Boolean(activePlaybackDataset?.canRedesign),
       redesignPending: false,
       redesignStatus: "FAILED",
       redesignMessage: err?.message || "Unable to complete Gemini redesign.",
     });
     toast(err?.message || "Redesign failed.");
   }
+}
+
+function showApprovedReplay(outcome, scenarioId) {
+  redesignSession = {
+    ...outcome,
+    beforeEvaluationFindings: outcome.replayResult.before.evaluation.findings,
+  };
+  previewLayoutItems = null;
+  previewLayoutHouse = null;
+
+  // Build replay dataset on the accepted AFTER layout using the exact same scenario + personas
+  const replayDataset = {
+    scenarioId,
+    scenarioConfig: outcome.scenario,
+    environment: outcome.environment,
+    sourceItems: state.items,
+    routineSignature: routineSignature(),
+    evaluation: outcome.replayResult.after.evaluation,
+    capturedHouse: outcome.afterHouse,
+    household: outcome.household,
+    displayPersonas: outcome.displayPersonas,
+    simulation: outcome.afterSimulation,
+    getSnapshotAt: getSimulationSnapshotAt,
+    agentRoutes: [],
+    isEvacuation: false,
+    clockMode: "clock",
+    simSecondsPerRealSecond: scenarioId === "normal-day" ? 900 : 240,
+    findings: outcome.uiPayload.findings,
+    showFindingsImmediately: true,
+    scores: outcome.uiPayload.afterScores,
+    beforeScores: outcome.uiPayload.beforeScores,
+    afterScores: outcome.uiPayload.afterScores,
+    overallBeforeScore: outcome.uiPayload.overallBeforeScore,
+    overallAfterScore: outcome.uiPayload.overallAfterScore,
+    beforeItems: outcome.beforeItems,
+    afterItems: outcome.afterItems,
+    patchChanges: outcome.patchChanges,
+    redesignActions: outcome.uiPayload.redesignActions,
+    canRedesign: outcome.uiPayload.findings.length > 0,
+    isMockData: false,
+  };
+
+  demoControls.setState({
+    activeLayoutView: "after",
+    hasLayoutToggle: true,
+    redesignPending: false,
+    findings: replayDataset.findings,
+    selectedFindingId: null,
+    beforeScores: outcome.uiPayload.beforeScores,
+    afterScores: outcome.uiPayload.afterScores,
+    scores: outcome.uiPayload.afterScores,
+    overallBeforeScore: outcome.uiPayload.overallBeforeScore,
+    overallAfterScore: outcome.uiPayload.overallAfterScore,
+    resolvedFindings: outcome.uiPayload.resolvedFindings,
+    remainingFindings: outcome.uiPayload.remainingFindings,
+    introducedFindings: outcome.uiPayload.introducedFindings,
+    attemptSummaries: outcome.attemptSummaries,
+    redesignActions: outcome.uiPayload.redesignActions,
+    isFallbackRedesign: outcome.uiPayload.isFallback,
+    redesignMessage: outcome.redesignMessage,
+    redesignStatus: outcome.uiPayload.redesignStatus,
+    isMockData: false,
+  });
+
+  startPlaybackFromDataset(replayDataset, { preserveRedesign: true });
+  scene?.showPatchTransition?.(outcome.patchChanges || []);
+  toast("Redesign validated & applied · Replaying scenario on updated layout");
 }
 
 const demoControls = mountDemoControls({
@@ -467,15 +571,15 @@ const demoControls = mountDemoControls({
           scenarioId === (activePlaybackDataset?.scenarioId || "morning-routine"),
       );
       const dataset = runTwinScenario(scenarioId, {
-        house,
-        items: state.items,
-        state,
+        house, items: state.items, state, comparisonRun: preserveRedesign ? activePlaybackDataset : null,
       });
+      dataset.sourceItems = state.items;
+      dataset.routineSignature = routineSignature();
       if (preserveRedesign && redesignSession) {
         dataset.beforeScores = redesignSession.uiPayload.beforeScores;
         dataset.afterScores = dataset.scores;
         dataset.overallBeforeScore = redesignSession.uiPayload.overallBeforeScore;
-        dataset.overallAfterScore = dataset.overallBeforeScore;
+        dataset.overallAfterScore = dataset.evaluation.overallScore;
         dataset.beforeItems = redesignSession.beforeItems;
         dataset.afterItems = state.items;
         dataset.patchChanges = redesignSession.patchChanges;
@@ -501,6 +605,7 @@ const demoControls = mountDemoControls({
     playbackController.pause();
   },
   onResetSimulation() {
+    cancelTwinReview();
     if (simulationAdapter) {
       simulationAdapter.reset?.();
       scene?.clearPlayback?.();
@@ -516,7 +621,8 @@ const demoControls = mountDemoControls({
     simulationAdapter?.setSpeed?.(multiplier);
     playbackController.setSpeed(multiplier);
   },
-  onScenarioChange(nextScenarioId) {
+  onScenarioChange() {
+    cancelTwinReview();
     if (!simulationAdapter && (playbackController.getState().hasSimulation || redesignSession)) {
       redesignSession = null;
       activePlaybackDataset = null;
@@ -524,15 +630,6 @@ const demoControls = mountDemoControls({
       previewLayoutHouse = null;
       playbackController.reset();
     }
-    const house = activeHouse();
-    if (house) {
-      const nextPersonas =
-        nextScenarioId === "grandparents-stayover"
-          ? createFamilyStayoverPersonas(house)
-          : resolveValidHouseholdForHouse(state, house).displayPersonas;
-      demoControls.setPersonas(nextPersonas);
-    }
-    syncPlannerJourneyStrip();
   },
   onSeekTimeline(second) {
     playbackController.seek(second);
@@ -543,17 +640,9 @@ const demoControls = mountDemoControls({
   onSelectFinding(findingOrNull) {
     scene?.focusFinding?.(findingOrNull);
   },
-  onProposeRedesign(scenarioId) {
-    void handleProposeRedesign(scenarioId);
-  },
-  onLoadFamilyHousehold() {
-    const house = activeHouse();
-    if (!house) return;
-    const family = createFamilyStayoverPersonas(house);
-    commit({ ...state, personas: family });
-    demoControls.selectScenario("grandparents-stayover");
-    toast("5-member family loaded (Dad, Mom, Leo, Maya & Grandma Evelyn ♿)");
-  },
+  onProposeRedesign: handleProposeRedesign,
+  onApproveRedesign: approveTwinReview,
+  onDismissRedesign: () => cancelTwinReview(),
   onSelectLayoutView(viewMode) {
     const ds = activePlaybackDataset;
     if (!ds && !redesignSession) return;
@@ -669,6 +758,7 @@ function syncForm() {
   renderDraft();
 }
 function renderDraft() {
+  resetFurnishing();
   $("#styles").innerHTML = Object.entries(palettes)
     .map(
       ([label, colors]) =>
@@ -721,63 +811,17 @@ function inventoryPrice(item) {
   const quote = shopifyQuotes.get(item.shopify);
   return formatShopifyMoney(quote?.priceMinor, quote?.currency) ?? "Price unconfirmed";
 }
-function describeItemSuggestionReason(item) {
-  const ops = redesignSession?.replayResult?.selectedPatch?.operations || [];
-  const op = ops.find((entry) => entry?.objectId === item.id);
-  if (op) {
-    if (op.type === "replace") {
-      return "Gemini swap · Selected to open room walkway & sightline clearance";
-    }
-    if (op.type === "add") {
-      return "Gemini addition · Creates dedicated activity zone away from prep traffic";
-    }
-    if (op.type === "move" || op.type === "rotate") {
-      return "Gemini repositioned · Cleared bottleneck in household simulation";
-    }
-  }
-  if (!item.owned && !isObjectLocked(item)) {
-    return item.roomId
-      ? `Suggested furnishing for ${String(item.roomId).replace(/-/g, " ")}`
-      : "Suggested furnishing for room plan";
-  }
-  return null;
-}
-
-function syncPlannerJourneyStrip() {
-  const strip = $("#planner-flow-strip");
-  if (!strip) return;
-  const house = activeHouse();
-  strip.hidden = !house;
-  if (!house) return;
-
-  const simState = demoControls.getState();
-  let activeStep = 3;
-  if (stage === "setup") activeStep = 1;
-  else if (stage === "household") activeStep = 2;
-  else if (stage === "shop") activeStep = 7;
-  else if (simState.afterScores) activeStep = 6;
-  else if (simState.redesignPending) activeStep = 5;
-  else if (simState.status === "COMPLETE" && simState.findings.length > 0) {
-    activeStep = 4;
-  } else {
-    activeStep = 3;
-  }
-
-  strip.querySelectorAll("[data-journey-step]").forEach((btn) => {
-    const stepNum = Number(btn.dataset.journeyStep);
-    const stateLabel =
-      stepNum < activeStep
-        ? "done"
-        : stepNum === activeStep
-          ? "active"
-          : "upcoming";
-    btn.dataset.stepState = stateLabel;
-    if (stepNum === activeStep) btn.setAttribute("aria-current", "step");
-    else btn.removeAttribute("aria-current");
-  });
-}
-
 function render() {
+  if (activePlaybackDataset?.sourceItems && !isCurrentRun(activePlaybackDataset)) {
+    cancelTwinReview("The layout or household changed. Run it again.");
+    activePlaybackDataset = null;
+    redesignSession = null;
+    previewLayoutHouse = null;
+    previewLayoutItems = null;
+    playbackController.reset();
+  }
+  studioReplay.update();
+  $("#studio-replay-panel").hidden = stage !== "tour" || !(state.importedHouse || state.house);
   const house = activeHouse();
   $("#room-name").textContent = state.roomName;
   const room = state.room || ROOM;
@@ -799,13 +843,6 @@ function render() {
       ? `<strong>${escape(itemName(item))}</strong><span class="object-tools"><span class="locked-pill">${icon("lock")} ${item.type === "fixed" ? "Fixed fixture · Locked" : "Locked"}</span>${item.type === "fixed" ? "" : `<button data-action="unlock">Unlock</button>`}</span>`
       : `<strong>${escape(itemName(item))}</strong><span class="object-tools"><button data-action="rotate" title="Rotate 90 degrees">${icon("rotate")} Rotate</button>${item.owned ? "" : '<button data-action="save">Save piece</button>'}<button data-action="swap">${icon("swap")} Swap</button><button data-action="lock" title="Lock piece">${icon("lock")} Lock</button><button data-action="remove">${icon("trash")} Remove</button></span>`
     : `<span class="gesture">${icon("move")} ${view === "interior" ? "Drag to look around" : view === "plan" ? "Drag a piece to move" : "Drag to orbit"} <span aria-hidden="true">·</span> Select a piece to edit</span>`;
-
-  const patchedIds = new Set(
-    (redesignSession?.replayResult?.selectedPatch?.operations || [])
-      .map((op) => op?.objectId)
-      .filter(Boolean),
-  );
-
   $("#inventory").innerHTML =
     state.items
       .map((i) => {
@@ -813,39 +850,32 @@ function render() {
           ? house.rooms.find((r) => r.id === i.roomId)?.name ||
             getRoomAtPoint(house, i.x, i.z)?.name
           : null;
-        const merchantLabel = i.merchant || i.store || i.shopify?.sellerDomain || null;
-        const isPatched = patchedIds.has(i.id);
         const kindTag =
           i.type === "fixed"
             ? "Fixed fixture · Locked"
             : i.locked
               ? "Locked piece"
-              : isPatched
-                ? "Updated by Gemini redesign"
-                : i.owned
-                  ? "Existing piece"
-                  : i.shopify
-                    ? "Approximate 3D preview"
-                    : "Suggested piece";
-        const metaParts = [roomLabel, merchantLabel, kindTag].filter(Boolean);
-        const whyNote = isPatched ? describeItemSuggestionReason(i) : null;
-        return `<button class="item-row${isPatched ? " item-row-redesigned" : ""}" data-item="${escape(i.id)}" data-locked="${Boolean(isObjectLocked(i))}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(itemName(i))}<small>${escape(metaParts.join(" · "))}</small>${whyNote ? `<small class="item-why-note">${escape(whyNote)}</small>` : ""}</span><span class="price">${inventoryPrice(i)}</span></button>`;
+              : i.owned
+                ? "Already owned"
+                : i.shopify
+                  ? (i.modelUrl ? "Shopify piece" : "Approximate 3D preview")
+                  : "Suggested piece";
+        const sub = [roomLabel && escape(roomLabel), kindTag,
+          i.photoPreview && "Photo-derived 3D preview",
+          (i.shopify || i.photoPreview) && dimensionLabel(i),
+        ].filter(Boolean).join(" · ");
+        return `<button class="item-row" data-item="${escape(i.id)}" data-locked="${Boolean(isObjectLocked(i))}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(itemName(i))}<small>${sub}</small></span><span class="price">${inventoryPrice(i)}</span></button>`;
       })
       .join("") ||
     '<p class="muted">Add a piece or auto-style this room to start.</p>';
   const estimate = roomEstimate(state.items);
   $("#notes").textContent =
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(estimate.total)} ${estimate.partial ? "partial estimate" : "estimated"}`;
-  const isGrandparentsActive =
-    demoControls.getState().scenarioId === "grandparents-stayover" && house;
   const effectivePersonas = house
-    ? isGrandparentsActive
-      ? createFamilyStayoverPersonas(house)
-      : resolveValidHouseholdForHouse(state, house).displayPersonas
+    ? resolveValidHouseholdForHouse(state, house).displayPersonas
     : (state.personas || []);
   demoControls.setPersonas(effectivePersonas);
   demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
-  syncPlannerJourneyStrip();
   scene?.update(
     previewLayoutItems || state.items,
     selection,
@@ -953,7 +983,7 @@ function catalogDialog(swapId = null) {
     body.onclick = null;
   };
 
-  function place(makeItem) {
+  function place(makeItem, saveApproved = false) {
     if (!dialog.open) return false;
     const current = state.items.find((item) => item.id === swapId);
     if (swapId && (!current || isObjectLocked(current))) return false;
@@ -980,7 +1010,11 @@ function catalogDialog(swapId = null) {
       return false;
     }
     selection = item.id;
-    commit({ ...state, items: [...remaining, item] });
+    const savedProducts = saveApproved ? [
+      ...(state.savedProducts ?? []).filter((row) => row.id !== swapId),
+      savedShopifyRow(item, null, shopifyQuotes.get(item.shopify)),
+    ] : state.savedProducts;
+    commit({ ...state, items: [...remaining, item], savedProducts });
     dialog.close();
     return true;
   }
@@ -997,6 +1031,8 @@ function catalogDialog(swapId = null) {
       if (useShopify) {
         unmountPicker = mountShopifyPicker(shopify, {
           swap: Boolean(old),
+          objectId: old?.id,
+          candidateSession,
           initialKind: old?.kind ?? "table",
           kinds: furniturePreviewKinds.map((kind) => ({
             value: kind,
@@ -1004,8 +1040,8 @@ function catalogDialog(swapId = null) {
           })),
           shopifyRequest,
           onQuote: (product) => shopifyQuotes.remember(product),
-          onPlace: (product, kind) =>
-            place((placement) => createShopifyPreview(kind, shopifyRef(product), placement)),
+          onPlace: (product, kind, approved) =>
+            place((placement) => createCandidatePlacement(product, kind, placement), approved),
         });
         shopify.querySelector("input").focus();
       } else {
@@ -1284,6 +1320,10 @@ function updateWalkControls() {
       : "Select furniture in the room to move, rotate, replace, or save it.";
 }
 function markStage(next) {
+  if (next !== stage) cancelTwinReview();
+  $("#studio-replay-panel").hidden = next !== "tour" || !(state.importedHouse || state.house);
+  resetFurnishing();
+  furnishingPanel.hidden = next !== "design" || !state.personas?.length;
   if (stage === "household" && next !== "household") householdPage.close();
   if (stage === "shop" && next !== "shop") shoppingList.close();
   if (next !== stage) quoteRefresh?.abort();
@@ -1330,12 +1370,12 @@ window.addEventListener("keydown", (event) => {
   )
     toggleExpanded(false);
 });
-function navigate(next) {
+function navigate(next, { householdDraft } = {}) {
   markStage(next);
   state = { ...state, flowVersion: 2, screen: next };
   if (next === "shop") shoppingList.render(state);
   else if (next === "household") {
-    householdPage.open({ personas: state.personas, rooms: listPersonaRooms(state) });
+    householdPage.open({ personas: householdDraft ?? state.personas, rooms: listPersonaRooms(state) });
   } else {
     enterEditor();
     render();
@@ -1347,6 +1387,8 @@ function navigate(next) {
   window.scrollTo(0, 0);
 }
 function loadWholeHomeDemo() {
+  studioReplay.reset();
+  cancelTwinReview();
   hasProject = true;
   selection = null;
   simulationAdapter?.reset?.();
@@ -1374,11 +1416,13 @@ function beginSetup(fresh = false) {
     isNew: fresh,
     onCancel: hasProject ? () => navigate(previous) : null,
     readPhoto,
-    onApply(next, { demo: sample = false, wholeHome = false } = {}) {
+    onApply(next, { demo: sample = false, wholeHome = false, householdDraft } = {}) {
       if (wholeHome) {
         loadWholeHomeDemo();
         return;
       }
+      studioReplay.reset();
+      cancelTwinReview();
       simulationAdapter?.reset?.();
       redesignSession = null;
       activePlaybackDataset = null;
@@ -1407,7 +1451,7 @@ function beginSetup(fresh = false) {
       selection = null;
       syncForm();
       const nextStage = sample ? "tour" : newProject ? "household" : "design";
-      navigate(nextStage);
+      navigate(nextStage, { householdDraft });
       if (scene) {
         if (importedHouse) {
           changeView($("#view-3d").disabled ? "plan" : "3d");
@@ -1625,31 +1669,12 @@ $(".brand").onclick = (e) => {
   if (stage !== "setup") beginSetup();
 };
 function savePieces(items, { replaceExisting = false } = {}) {
-  const house = activeHouse();
-  const saved = new Map(
-    replaceExisting
-      ? []
-      : (state.savedProducts || []).map((row) => [row.id, row]),
-  );
+  const previous = new Map((state.savedProducts ?? []).map(row => [row.id, row]));
+  const saved = replaceExisting ? new Map() : new Map(previous);
   for (const item of items) {
     if (item.owned || isObjectLocked(item)) continue;
-    const roomLabel = house
-      ? house.rooms.find((r) => r.id === item.roomId)?.name ||
-        getRoomAtPoint(house, item.x, item.z)?.name ||
-        null
-      : null;
-    const suggestedReason = describeItemSuggestionReason(item);
-    const contextFields = {
-      ...(roomLabel ? { roomLabel } : {}),
-      ...(suggestedReason ? { suggestedReason } : {}),
-    };
     if (item.shopify) {
-      saved.set(item.id, {
-        id: item.id,
-        name: item.name,
-        shopify: item.shopify,
-        ...contextFields,
-      });
+      saved.set(item.id, savedShopifyRow(item, previous.get(item.id), shopifyQuotes.get(item.shopify)));
     } else if (item.productId) {
       saved.set(item.id, {
         id: item.id,
@@ -1663,7 +1688,6 @@ function savePieces(items, { replaceExisting = false } = {}) {
         ...(Number.isFinite(Number(item.price)) ? { price: Number(item.price) } : {}),
         ...(item.url ? { url: item.url } : {}),
         ...(item.photo ? { photo: item.photo } : {}),
-        ...contextFields,
       });
     } else if (item.url || item.merchant || item.store) {
       saved.set(item.id, {
@@ -1675,7 +1699,6 @@ function savePieces(items, { replaceExisting = false } = {}) {
         price: Number(item.price) || 0,
         url: item.url || null,
         photo: item.photo || null,
-        ...contextFields,
       });
     }
   }
@@ -1686,41 +1709,13 @@ function savePieces(items, { replaceExisting = false } = {}) {
       : "Room saved to your shopping list",
   );
 }
-function saveRoomAndGoToShop() {
+$("#save-room").onclick = () => {
   savePieces(
     state.items.filter((i) => !i.owned && !isObjectLocked(i)),
     { replaceExisting: true },
   );
   navigate("shop");
-}
-$("#save-room").onclick = saveRoomAndGoToShop;
-const trayReviewBtn = $("#tray-review-products");
-if (trayReviewBtn) trayReviewBtn.onclick = saveRoomAndGoToShop;
-
-$("#planner-flow-strip")?.addEventListener("click", (event) => {
-  const stepBtn = event.target.closest("[data-journey-action]");
-  if (!stepBtn) return;
-  const action = stepBtn.dataset.journeyAction;
-  if (action === "setup") {
-    beginSetup();
-  } else if (action === "household") {
-    navigate("household");
-  } else if (action === "simulate") {
-    if (stage !== "tour") navigate("tour");
-    $("#demo-controls-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  } else if (action === "findings") {
-    if (stage !== "tour") navigate("tour");
-    $("#sim-findings-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  } else if (action === "redesign") {
-    if (stage !== "tour") navigate("tour");
-    $("#sim-comparison-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  } else if (action === "compare") {
-    if (stage !== "tour") navigate("tour");
-    $("#sim-comparison-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  } else if (action === "shop") {
-    saveRoomAndGoToShop();
-  }
-});
+};
 async function refreshShopifyQuotes() {
   quoteRefresh?.abort();
   const shopping = stage === "shop";
@@ -1925,7 +1920,7 @@ $("#edit-request").onsubmit = (e) => {
       "Try “add a lamp”, “remove the rug”, “rotate this”, or “soft modern under $800”.";
   result.textContent = message;
 };
-window.__stillroom = {
+window.__livingBlueprint = {
   getState: () => state,
   getScene: () => scene,
   simulationUI: demoControls,
@@ -1933,10 +1928,9 @@ window.__stillroom = {
   captureStudioLayout: (house = activeHouse(), items = state.items) =>
     captureStudioLayout(house, items),
   runStudioReplay,
-  getCandidateProducts: () => getCandidateProducts({ sceneItems: state.items }),
+  getCandidateProducts: () => getCandidateProducts({ candidateSnapshot: candidateSession.read() }),
   proposeRedesign: (scenarioId = demoControls.getState().scenarioId) =>
     handleProposeRedesign(scenarioId),
-  loadFamilyHousehold: () => demoControls.triggerLoadFamily(),
   connectSimulationPlayback(payload = {}) {
     simulationAdapter?.dispose?.();
     simulationAdapter = null;

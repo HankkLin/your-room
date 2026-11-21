@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { toSceneObject } from "./src/contracts/scene.js";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
@@ -228,6 +229,25 @@ test("TV Visibility V1, V2, V3, V4 — Clear view, occlusion, bad angle, and mis
   assert(
     angleResult.findings.some((f) => f.type === FINDING_TYPES.TV_BAD_ANGLE),
   );
+});
+
+test("TV suitability uses modeled width at the seat and preserves a distance-only fallback", () => {
+  const tv = { id: "display", kind: "tv", x: 3, z: 0.25, facing: [0, 1], width: 0.45 };
+  const seat = { id: "seat", kind: "chair", x: 3, z: 3.25 };
+  const evaluate = (screen, viewer = seat) => validateTvVisibility({ house: { objects: [screen, viewer] } });
+  const narrow = evaluate(tv);
+  assert.equal(narrow.findings[0].type, FINDING_TYPES.TV_TOO_FAR);
+  assert.equal(narrow.findings[0].evidence.apparentScreenAngleDegrees, 8.6);
+  assert.equal(narrow.findings[0].evidence.modeledTvWidthMeters, 0.45);
+  assert.equal(narrow.findings[0].evidence.distanceMeters, 3);
+  assert.equal(narrow.findings[0].evidence.minScreenAngleDegrees, 20);
+  assert.equal(evaluate({ ...tv, width: 1.4 }).findings.length, 0);
+  assert.equal(evaluate({ ...tv, width: 2.3 }, { ...seat, z: 6.25 }).findings.length, 0);
+  const unknown = toSceneObject({ ...tv, width: undefined });
+  assert.equal(evaluate(unknown).findings.length, 0);
+  const far = evaluate(unknown, { ...seat, z: 6.25 }).findings[0];
+  assert.equal(far.evidence.maxDistanceMeters, 4.8);
+  assert.equal(far.evidence.modeledTvWidthMeters, undefined);
 });
 
 test("Noise N1, N2, N3, N4 — Schedule overlap, wall attenuation, and distance attenuation", () => {

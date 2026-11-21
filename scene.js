@@ -38,7 +38,7 @@ function addLighting(scene) {
   return sun;
 }
 
-const objectSignature = (item) => JSON.stringify([item.kind, item.name, item.color, item.width, item.depth, item.height, Boolean(item.locked), Number(item.elevation) || 0]);
+const objectSignature = (item) => JSON.stringify([item.kind, item.shopify && item.modelUrl, item.name, item.color, item.width, item.depth, item.height, Boolean(item.locked), Number(item.elevation) || 0]);
 
 function selectionOutline() {
   const outline = new THREE.Group();
@@ -166,10 +166,10 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   let pendingFrame = 0;
   let disposed = false;
   const camera = () => currentView === 'plan' ? plan : currentView === 'interior' ? eye : oblique;
-  const furnitureAssets = createFurnitureAssets((kind) => {
+  const furnitureAssets = createFurnitureAssets((assetKey) => {
     if (disposed) return;
     for (const record of objects.values()) {
-      if (record.kind === kind) record.needsAsset = true;
+      if (record.kind === assetKey || record.modelUrl === assetKey) record.needsAsset = true;
     }
     api.update(itemsInScene, selected, currentStyle, roomLayout, houseLayout);
   });
@@ -556,7 +556,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
           }
           const object = furnitureAssets.create(item) ?? createFurniture(item, materials);
           furniture.add(object);
-          record = { object, signature, kind: item.kind };
+          record = { object, signature, kind: item.kind, modelUrl: item.modelUrl };
           objects.set(item.id, record);
         }
         const y = Number(item.elevation ?? item.y) || 0;

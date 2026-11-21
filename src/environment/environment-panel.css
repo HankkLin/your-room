@@ -1,0 +1,9 @@
+.studio-environment { margin: 12px 0; font-size: 14px; }
+.studio-environment summary { cursor: pointer; font-weight: 600; }
+.environment-form { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.environment-form label { display: grid; gap: 4px; }
+.environment-form label[hidden] { display: none; }
+.environment-form input, .environment-form select { border: 1px solid var(--line); border-radius: 6px; padding: 7px; max-width: 100%; }
+.studio-environment dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin-block: 8px; }
+.studio-environment dd { margin: 0; overflow-wrap: anywhere; }
+.studio-environment small { color: var(--muted); }

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const household = (page) => page.locator("#household-page");
 const project = (page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 
 async function skipHousehold(page) {
   await expect(household(page)).toBeVisible();
@@ -69,6 +69,25 @@ test("whole-home sample floorplan imports, supports manual review/calibration, a
     "Primary Bedroom",
   );
   await page.locator("#close-modal").click();
+
+  // Reopen a home saved under the project's previous name.
+  await page.evaluate(() => {
+    for (const suffix of ["project.v1", "importedHouse.v1"]) {
+      const key = `living-blueprint.${suffix}`;
+      const saved = localStorage.getItem(key);
+      if (saved === null) throw new Error(`Missing fixture: ${key}`);
+      localStorage.setItem(`stillroom.${suffix}`, saved);
+      localStorage.removeItem(key);
+    }
+  });
+  await page.reload();
+  await expect(page.locator("#view-house-json")).toBeVisible();
+  const restored = await project(page);
+  expect(restored.importedHouse).toEqual(confirmedHouse);
+  const restoredHouse = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("living-blueprint.importedHouse.v1")),
+  );
+  expect(restoredHouse).toEqual(confirmedHouse);
 
   expect(pageErrors).toEqual([]);
 });

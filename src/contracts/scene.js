@@ -117,6 +117,7 @@ export function houseFixturesAsSceneObjects(house) {
     roomId: fixture.roomId ?? null,
     position: Array.isArray(fixture.position) ? [...fixture.position] : [0, 0, 0],
     rotation: Array.isArray(fixture.rotation) ? [...fixture.rotation] : [0, 0, 0],
+    ...(fixture.widthDefaulted || !(Number(fixture.dimensions?.width) > 0) ? { widthDefaulted: true } : {}),
     dimensions: {
       width: fixture.dimensions?.width ?? 0.6,
       height: fixture.dimensions?.height ?? 0.85,
@@ -157,7 +158,7 @@ export function canModifyObject(target, operationType) {
 
 /**
  * Normalize either a canonical FixedFixture / SceneObject (`position: [x,y,z]`,
- * `rotation: [0,yawRad,0]`) or a flat Stillroom item (`x, z, rotation` in deg)
+ * `rotation: [0,yawRad,0]`) or a flat Living Blueprint item (`x, z, rotation` in deg)
  * into a unified renderable SceneObject preserving all Shopify/product metadata.
  *
  * @param {object} item
@@ -167,10 +168,9 @@ export function toSceneObject(item = {}) {
   const x = Number(item.x ?? item.position?.[0]) || 0;
   const y = Number(item.elevation ?? item.y ?? item.position?.[1]) || 0;
   const z = Number(item.z ?? item.position?.[2]) || 0;
-  const width = Math.max(
-    0.05,
-    Number(item.width ?? item.dimensions?.width) || 0.6,
-  );
+  const suppliedWidth = Number(item.width ?? item.dimensions?.width);
+  const hasModeledWidth = Number.isFinite(suppliedWidth) && suppliedWidth > 0;
+  const width = Math.max(0.05, suppliedWidth || 0.6);
   const height = Math.max(
     0.008,
     Number(item.height ?? item.dimensions?.height) || 0.75,
@@ -200,6 +200,7 @@ export function toSceneObject(item = {}) {
 
   return {
     ...item,
+    ...(!hasModeledWidth ? { widthDefaulted: true } : {}),
     kind,
     type,
     locked,

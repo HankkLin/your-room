@@ -31,11 +31,10 @@ export const DEFAULT_CONGESTION_CONFIG = Object.freeze({
 export const DEFAULT_LONG_PATH_METERS = 15.0;
 
 export const FINDING_TYPES = Object.freeze({
-  // Movement, Congestion & Accessibility
+  // Movement & Congestion
   NO_PATH: "NO_PATH",
   LONG_PATH: "LONG_PATH",
   CONGESTION: "CONGESTION",
-  ACCESSIBILITY_CLEARANCE: "ACCESSIBILITY_CLEARANCE",
 
   // Privacy Sightlines
   PRIVACY_SIGHTLINE: "PRIVACY_SIGHTLINE",
@@ -107,62 +106,27 @@ export const DEMO_SCENARIOS = Object.freeze([
   {
     id: "morning-routine",
     name: "Morning Routine",
-    description:
-      "7:00–9:00 AM family rush: breakfast prep, school readiness, and early WFH setup.",
-    storyBadge: "Weekday morning",
-    markers: [
-      { minute: 435, label: "Bathroom queue" },
-      { minute: 465, label: "Breakfast prep" },
-      { minute: 495, label: "WFH & school" },
-    ],
-  },
-  {
-    id: "grandparents-stayover",
-    name: "Grandparents Stayover — Wheelchair",
-    description:
-      "Weekend family visit testing 0.90 m wheelchair clearance, turning space, and step-free routes.",
-    storyBadge: "Mobility & accessibility",
-    markers: [
-      { minute: 545, label: "Grandparents arrive" },
-      { minute: 565, label: "Wheelchair kitchen route" },
-      { minute: 590, label: "Family tea" },
-    ],
+    description: "Household members move through their normal morning schedule.",
   },
   {
     id: "normal-day",
     name: "Normal Day",
-    description:
-      "Full 15-hour household day across remote work calls, shared meals, study, and evening TV.",
-    storyBadge: "All-day living",
-    markers: [
-      { minute: 465, label: "Breakfast" },
-      { minute: 540, label: "Work call" },
-      { minute: 960, label: "Kids & TV" },
-      { minute: 1100, label: "Family dinner" },
-    ],
+    description: "Full-day routine across work, meals, leisure, and rest.",
+  },
+  {
+    id: "saved-routine",
+    name: "Saved Household Routine",
+    description: "Replay the activities and times approved in your household.",
   },
   {
     id: "dinner-party-8-guests",
     name: "Dinner Party — 8 Guests",
-    description:
-      "Friends suddenly arrive for dinner: 10 people circulating between entry, living room, and kitchen.",
-    storyBadge: "Friends arrive (10 people)",
-    markers: [
-      { minute: 1082, label: "Friends arrive" },
-      { minute: 1102, label: "Kitchen serving" },
-      { minute: 1140, label: "Living room mingler" },
-    ],
+    description: "High-occupancy gathering stressing kitchen and hallway clearance.",
   },
   {
     id: "fire-emergency",
     name: "Fire Emergency",
-    description:
-      "Simultaneous family fire drill checking unobstructed escape paths from every room to the exit.",
-    storyBadge: "Safety drill",
-    markers: [
-      { second: 1, label: "Alarm sounds" },
-      { second: 3, label: "Exit convergence" },
-    ],
+    description: "Emergency evacuation check from every room to the exterior exit.",
   },
 ]);
 
@@ -195,7 +159,6 @@ const FINDING_TITLES = Object.freeze({
   NO_PATH: "Blocked household route",
   LONG_PATH: "Detour route length",
   CONGESTION: "Room congestion",
-  ACCESSIBILITY_CLEARANCE: "Wheelchair clearance fail",
   PRIVACY_SIGHTLINE: "Privacy sightline exposure",
   TV_OCCLUDED: "TV sightline blocked",
   TV_BAD_ANGLE: "Off-axis TV viewing angle",
@@ -254,6 +217,9 @@ export function formatFindingHeadline(finding = {}) {
   }
   const type = String(finding.type || "INFO").toUpperCase();
   const roomLabel = formatLocationLabel(finding.location, finding.roomId);
+  if (type === "TV_TOO_FAR" && Number.isFinite(finding.evidence?.modeledTvWidthMeters)) {
+    return "TV appears too small from this seat";
+  }
   if (type === "CONGESTION" && roomLabel) {
     return `${roomLabel} congestion`;
   }
@@ -263,48 +229,9 @@ export function formatFindingHeadline(finding = {}) {
   if (type === "NO_PATH" && finding.fromRoomId && finding.toRoomId) {
     const from = formatLocationLabel(null, finding.fromRoomId);
     const to = formatLocationLabel(null, finding.toRoomId);
-    if (finding.evidence?.wheelchair) {
-      return `Wheelchair clearance fail: ${from} → ${to}`;
-    }
     return `Blocked route: ${from} → ${to}`;
   }
-  if (type === "ACCESSIBILITY_CLEARANCE" && roomLabel) {
-    return `Wheelchair clearance fail (${roomLabel})`;
-  }
   return FINDING_TITLES[type] || String(finding.type || "Simulation finding");
-}
-
-export function formatFindingWhyItMatters(finding = {}) {
-  if (typeof finding.whyItMatters === "string" && finding.whyItMatters.trim()) {
-    return finding.whyItMatters.trim();
-  }
-  const type = String(finding.type || "").toUpperCase();
-  const ev = finding.evidence || {};
-  if (type === "ACCESSIBILITY_CLEARANCE" || ev.wheelchair) {
-    return "Wheelchair and mobility-aid users need ≥ 0.90 m clear passage and 1.50 m turning space.";
-  }
-  switch (type) {
-    case "CONGESTION":
-      return "People must squeeze past each other during peak routines, slowing meals and prep.";
-    case "NO_PATH":
-      return "Furniture or narrow gaps completely prevent reaching a scheduled room.";
-    case "PRIVACY_SIGHTLINE":
-      return "Open doors expose private fixtures or beds directly to shared social areas.";
-    case "NOISE_CONFLICT":
-      return "TV or social sound carries into a quiet work or study zone.";
-    case "TV_OCCLUDED":
-    case "TV_BAD_ANGLE":
-    case "TV_TOO_FAR":
-      return "Seated family members strain to see the screen comfortably.";
-    case "EVACUATION_BOTTLENECK":
-    case "NO_EVACUATION_PATH":
-    case "LONG_EVACUATION_ROUTE":
-      return "Delays safe whole-family egress during an emergency drill.";
-    case "SUN_GLARE":
-      return "Direct afternoon sun washes out screens and causes eye strain.";
-    default:
-      return "Affects daily comfort and room circulation.";
-  }
 }
 
 export function formatFindingSummaryText(finding = {}) {
@@ -334,17 +261,7 @@ export function formatFindingSummaryText(finding = {}) {
     case "NO_PATH": {
       const from = formatLocationLabel(null, finding.fromRoomId) || "origin";
       const to = formatLocationLabel(null, finding.toRoomId) || "destination";
-      if (ev.wheelchair) {
-        return `Passage between ${from} and ${to} is narrower than the ${Number(ev.requiredWidthMeters || 0.9).toFixed(2)} m wheelchair clearance requirement.`;
-      }
       return `No walkable clearance path from ${from} to ${to}.`;
-    }
-    case "ACCESSIBILITY_CLEARANCE": {
-      const clearM = Number.isFinite(Number(ev.measuredWidthMeters))
-        ? `${Number(ev.measuredWidthMeters).toFixed(2)} m`
-        : "narrow";
-      const reqM = Number(ev.requiredWidthMeters || 0.9).toFixed(2);
-      return `${roomLabel} passage or turn zone measures ${clearM} (requires ≥ ${reqM} m for wheelchair access).`;
     }
     case "NOISE_CONFLICT": {
       const mins = ev.overlapMinutes ? `${ev.overlapMinutes} min` : "scheduled window";
@@ -355,7 +272,12 @@ export function formatFindingSummaryText(finding = {}) {
     case "TV_BAD_ANGLE":
       return "Seating faces the TV at an uncomfortable off-axis viewing angle.";
     case "TV_TOO_FAR":
-      return "Primary seating is positioned beyond comfortable TV viewing distance.";
+      if (Number.isFinite(ev.modeledTvWidthMeters) && Number.isFinite(ev.apparentScreenAngleDegrees) && Number.isFinite(ev.minScreenAngleDegrees)) {
+        return `At ${ev.distanceMeters} m, the modeled TV width of ${ev.modeledTvWidthMeters} m spans approximately ${ev.apparentScreenAngleDegrees}° from this seat. The simulation target is ${ev.minScreenAngleDegrees}°.`;
+      }
+      return Number.isFinite(ev.distanceMeters) && Number.isFinite(ev.maxDistanceMeters)
+        ? `The seat is ${ev.distanceMeters} m from the TV, beyond the ${ev.maxDistanceMeters} m distance check. Screen size is unknown.`
+        : "The seat exceeds the simulation’s TV viewing distance check.";
     case "EVACUATION_BOTTLENECK":
       return `Simultaneous occupants converge on ${ev.exitDoorId || "exterior exit"} during evacuation.`;
     case "NO_EVACUATION_PATH":
@@ -416,10 +338,6 @@ export function normalizeSimulationViewState(raw = {}) {
         level: resolveFindingLevel(f),
         title: formatFindingHeadline(f),
         summary: formatFindingSummaryText(f),
-        whyItMatters: formatFindingWhyItMatters(f),
-        isAccessibility:
-          String(f.type || "").toUpperCase() === "ACCESSIBILITY_CLEARANCE" ||
-          Boolean(f.evidence?.wheelchair || f.isAccessibility),
         location: formatLocationLabel(f.location, f.roomId),
         rawLocation:
           f.rawLocation ?? (typeof f.location === "object" ? f.location : null),
@@ -439,18 +357,12 @@ export function normalizeSimulationViewState(raw = {}) {
   const afterScores = normalizeScoreMap(raw?.afterScores);
   const scores = normalizeScoreMap(raw?.scores) ?? beforeScores;
 
-  const overallBeforeScore =
-    raw?.overallBeforeScore != null &&
-    raw.overallBeforeScore !== "" &&
-    Number.isFinite(Number(raw.overallBeforeScore))
-      ? Math.round(Number(raw.overallBeforeScore))
-      : null;
-  const overallAfterScore =
-    raw?.overallAfterScore != null &&
-    raw.overallAfterScore !== "" &&
-    Number.isFinite(Number(raw.overallAfterScore))
-      ? Math.round(Number(raw.overallAfterScore))
-      : null;
+  const overallBeforeScore = raw?.overallBeforeScore != null && Number.isFinite(Number(raw.overallBeforeScore))
+    ? Math.round(Number(raw.overallBeforeScore))
+    : null;
+  const overallAfterScore = raw?.overallAfterScore != null && Number.isFinite(Number(raw.overallAfterScore))
+    ? Math.round(Number(raw.overallAfterScore))
+    : null;
 
   const redesignActions = Array.isArray(raw?.redesignActions)
     ? raw.redesignActions

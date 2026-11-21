@@ -41,6 +41,25 @@
   gap: 9px;
   margin-top: 14px;
 }
+.household-import {
+  margin-block: 1rem;
+}
+.household-import summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.household-import-format {
+  margin-block: 1rem;
+}
+.household-import pre {
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.household-import textarea {
+  width: 100%;
+}
 .household-review-heading {
   margin: 26px 0 14px;
 }

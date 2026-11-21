@@ -1,19 +1,19 @@
+import { environmentInputs } from "./environment/environment-context.js";
 import { mergeHouseFixturesIntoItems, toSceneObject } from "../house-model.js";
 import { prepareHouseholdReplay, validatePersonas } from "./contracts/persona.js";
-import { FINDING_TYPES, STRESS_SCENARIO_TYPES } from "./contracts/simulation.js";
+import { STRESS_SCENARIO_TYPES } from "./contracts/simulation.js";
 import { listPersonaRooms } from "./persona/rooms.js";
 import {
+  compareEvaluations,
+  evaluateCandidatePatch,
   extractCategoryScoreMap,
   runRedesignReplay,
   toRedesignUiPayload,
 } from "./redesign/index.js";
 import { getCandidateProducts } from "./shopify/candidate-products.js";
 import {
-  GRANDPARENTS_STAYOVER_SCENARIO,
   MORNING_ROUTINE_SCENARIO,
-  buildNavigationModel,
   createDemoHousehold,
-  createFamilyStayoverPersonas,
   createWholeHomeDemoPersonas,
   evaluateHouseholdExperience,
   getSimulationSnapshotAt,
@@ -29,107 +29,6 @@ export const NORMAL_DAY_SCENARIO = Object.freeze({
   endMinute: 1320, // 22:00
   stepSeconds: 2,
 });
-
-const WHEELCHAIR_REQUIRED_WIDTH_M = 0.9;
-const WHEELCHAIR_TURNING_DIAMETER_M = 1.5;
-
-/**
- * Deterministic wheelchair & mobility clearance validator:
- * Checks interior doorways (`< 0.90 m` clear width) and primary room turning spaces
- * (`< 1.50 m` free turning circle) when any household member has `wheelchair === true`
- * or `needs.accessibility >= 0.75`.
- */
-export function evaluateAccessibilityClearance(house, household = []) {
-  const needsWheelchair = (household || []).some(
-    (p) => Boolean(p?.wheelchair) || Number(p?.needs?.accessibility) >= 0.75,
-  );
-  if (!needsWheelchair || !house) return [];
-
-  const nav = buildNavigationModel(house, { agentRadius: 0.24 });
-  const findings = [];
-
-  for (const door of house.doors || []) {
-    if (!door || door.blocked || door.closed) continue;
-    const widthM = Math.round((Number(door.width) || 0.85) * 100) / 100;
-    if (widthM < WHEELCHAIR_REQUIRED_WIDTH_M - 0.005) {
-      const roomBName =
-        house.rooms?.find((r) => r.id === door.roomB)?.name ||
-        house.rooms?.find((r) => r.id === door.roomA)?.name ||
-        door.roomB ||
-        door.roomA ||
-        "Doorway";
-      const targetRoomId = door.roomB || door.roomA || null;
-      findings.push({
-        id: `accessibility-door-${door.id}`,
-        type: FINDING_TYPES.ACCESSIBILITY_CLEARANCE,
-        roomId: targetRoomId,
-        location: {
-          roomId: targetRoomId,
-          label: `${roomBName} doorway`,
-          position: Array.isArray(door.position)
-            ? [Number(door.position[0]), Number(door.position[1])]
-            : undefined,
-        },
-        severity: widthM < 0.82 ? 0.86 : 0.68,
-        title: `${roomBName} wheelchair doorway pinch`,
-        summary: `${roomBName} doorway measures ${widthM.toFixed(2)} m wide — narrower than the 0.90 m comfortable wheelchair passage standard.`,
-        evidence: {
-          wheelchair: true,
-          doorId: door.id,
-          measuredWidthMeters: widthM,
-          requiredWidthMeters: WHEELCHAIR_REQUIRED_WIDTH_M,
-        },
-      });
-    }
-  }
-
-  // Check 1.50 m wheelchair turning circle (radius >= 0.75 m free clearance) in Kitchen & Bathroom
-  for (const room of house.rooms || []) {
-    if (!room || !["kitchen", "bathroom"].includes(room.kind || room.id)) continue;
-    const roomIdx = nav.roomIndexById.get(room.id);
-    if (roomIdx == null) continue;
-
-    let maxRadius = 0;
-    let bestWorld = null;
-    for (let row = 0; row < nav.height; row += 1) {
-      for (let col = 0; col < nav.width; col += 1) {
-        const idx = row * nav.width + col;
-        if (nav.roomIndexGrid[idx] !== roomIdx) continue;
-        const r = nav.clearanceGrid[idx];
-        if (r > maxRadius) {
-          maxRadius = r;
-          bestWorld = nav.cellToWorld(col, row);
-        }
-      }
-    }
-
-    const turningDiameter = Math.round(maxRadius * 2 * 100) / 100;
-    if (turningDiameter > 0 && turningDiameter < WHEELCHAIR_TURNING_DIAMETER_M - 0.04) {
-      findings.push({
-        id: `accessibility-turn-${room.id}`,
-        type: FINDING_TYPES.ACCESSIBILITY_CLEARANCE,
-        roomId: room.id,
-        location: {
-          roomId: room.id,
-          label: room.name || room.id,
-          position: bestWorld || undefined,
-        },
-        severity: turningDiameter < 1.25 ? 0.78 : 0.62,
-        title: `${room.name || room.id} tight wheelchair turn`,
-        summary: `Largest clear turning circle in ${room.name || room.id} is ${turningDiameter.toFixed(2)} m across (1.50 m recommended for 360° wheelchair pivot).`,
-        evidence: {
-          wheelchair: true,
-          roomId: room.id,
-          measuredWidthMeters: turningDiameter,
-          requiredWidthMeters: WHEELCHAIR_TURNING_DIAMETER_M,
-          turningRadiusMeters: Math.round(maxRadius * 100) / 100,
-        },
-      });
-    }
-  }
-
-  return findings;
-}
 
 function summarizeErrorReason(reason = "") {
   const str = String(reason);
@@ -169,7 +68,7 @@ export function formatAttemptSummaries(attempts = [], { isFallback = false } = {
     }
   }
   if (isFallback && !attempts.some((a) => a.accepted)) {
-    lines.push("Verified deterministic fallback patch applied");
+    lines.push("Deterministic fallback patch validated");
   }
   return lines;
 }
@@ -206,7 +105,7 @@ export function buildPatchChanges(beforeItems = [], afterItems = [], patch = nul
 }
 
 /**
- * Project a patched `afterHouse` back into Stillroom's flat `state.items` array,
+ * Project a patched `afterHouse` back into Living Blueprint's flat `state.items` array,
  * keeping all canonical `house.fixtures` locked and untouched while preserving
  * movable furniture & Shopify product metadata.
  */
@@ -253,22 +152,25 @@ export function resolveValidHouseholdForHouse(state, house) {
 }
 
 /**
- * Build a real, non-mock playback dataset for any of the 4 UI scenarios:
+ * Build a deterministic playback dataset for the selected scenario:
  * - `morning-routine`
  * - `normal-day`
+ * - `saved-routine`
  * - `dinner-party-8-guests`
  * - `fire-emergency`
  */
-export function runTwinScenario(scenarioId, { house, items, state }) {
+export function runTwinScenario(scenarioId, { house, items, state, comparisonRun }) {
   const capturedHouse = captureStudioLayout(house, items);
   if (!capturedHouse) {
     throw new Error("Load or import a home layout before running simulation.");
   }
 
-  const { displayPersonas, simulationHousehold } = resolveValidHouseholdForHouse(
-    state,
-    capturedHouse,
-  );
+  const environment = comparisonRun ? comparisonRun.environment : capturedHouse.environment?.snapshot ?? null;
+  const { sun } = environmentInputs(environment);
+  capturedHouse.environment = { ...capturedHouse.environment, snapshot: environment };
+  const { displayPersonas, simulationHousehold, usedFallbackPersonas } = comparisonRun
+    ? { displayPersonas: comparisonRun.displayPersonas, simulationHousehold: comparisonRun.household }
+    : resolveValidHouseholdForHouse(state, capturedHouse);
 
   if (scenarioId === "dinner-party-8-guests") {
     const party = runStressScenario({
@@ -278,6 +180,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     });
     const evaluation = evaluateHouseholdExperience({
       house: capturedHouse,
+      sun,
       household: simulationHousehold,
       simulation: party.simulation,
     });
@@ -285,6 +188,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
 
     return {
       scenarioId,
+      environment,
       capturedHouse,
       household: simulationHousehold,
       displayPersonas,
@@ -300,7 +204,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
       afterScores: null,
       overallBeforeScore: evaluation.overallScore,
       overallAfterScore: null,
-      canRedesign: evaluation.findings.length > 0,
+      canRedesign: false,
       isMockData: false,
       evaluation,
     };
@@ -314,6 +218,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     });
     const evaluation = evaluateHouseholdExperience({
       house: capturedHouse,
+      sun,
       household: simulationHousehold,
       simulation: evac.simulation,
       includeEvacuation: true,
@@ -323,6 +228,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
 
     return {
       scenarioId,
+      environment,
       capturedHouse,
       household: simulationHousehold,
       displayPersonas,
@@ -348,69 +254,18 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     };
   }
 
-  if (scenarioId === "grandparents-stayover") {
-    const familyPersonas = createFamilyStayoverPersonas(capturedHouse);
-    const simulation = simulateHouse(
-      capturedHouse,
-      familyPersonas,
-      GRANDPARENTS_STAYOVER_SCENARIO,
-    );
-    const evaluation = evaluateHouseholdExperience({
-      house: capturedHouse,
-      household: familyPersonas,
-      simulation,
-      scenario: GRANDPARENTS_STAYOVER_SCENARIO,
-    });
-    const accessibilityFindings = evaluateAccessibilityClearance(
-      capturedHouse,
-      familyPersonas,
-    );
-    const combinedFindings = [...accessibilityFindings, ...evaluation.findings];
-    const baseScores = extractCategoryScoreMap(evaluation);
-    const accessDeduction = Math.min(35, accessibilityFindings.length * 11);
-    const scores = {
-      ...baseScores,
-      movement: Math.max(0, (baseScores.movement ?? 80) - accessDeduction),
-    };
-    const overallBeforeScore = Math.max(
-      0,
-      Math.round(evaluation.overallScore - accessDeduction * 0.25),
-    );
-
-    return {
-      scenarioId,
-      scenarioConfig: GRANDPARENTS_STAYOVER_SCENARIO,
-      capturedHouse,
-      household: familyPersonas,
-      displayPersonas: familyPersonas,
-      simulation,
-      getSnapshotAt: getSimulationSnapshotAt,
-      agentRoutes: [],
-      isEvacuation: false,
-      clockMode: "clock",
-      simSecondsPerRealSecond: 400,
-      findings: combinedFindings,
-      scores,
-      beforeScores: scores,
-      afterScores: null,
-      overallBeforeScore,
-      overallAfterScore: null,
-      canRedesign: combinedFindings.length > 0,
-      isMockData: false,
-      evaluation,
-    };
+  if (scenarioId === "saved-routine" && usedFallbackPersonas) {
+    throw new Error("Save a household with a scheduled activity to replay its routine.");
   }
+  const scenarioConfig = comparisonRun?.scenarioConfig ?? {
+    "morning-routine": MORNING_ROUTINE_SCENARIO,
+    "normal-day": NORMAL_DAY_SCENARIO,
+    "saved-routine": { id: "saved-routine", timelineSampleSeconds: 60 },
+  }[scenarioId];
 
-  // `morning-routine` or `normal-day`
-  const scenarioConfig =
-    scenarioId === "normal-day"
-      ? NORMAL_DAY_SCENARIO
-      : MORNING_ROUTINE_SCENARIO;
-
-  const householdForRun =
-    scenarioId === "normal-day" && displayPersonas.length > 0
-      ? displayPersonas
-      : simulationHousehold;
+  const householdForRun = scenarioId === "normal-day" && usedFallbackPersonas
+    ? prepareHouseholdReplay(displayPersonas, capturedHouse.rooms)
+    : simulationHousehold;
 
   const simulation = simulateHouse(
     capturedHouse,
@@ -419,26 +274,17 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
   );
   const evaluation = evaluateHouseholdExperience({
     house: capturedHouse,
+    sun,
     household: householdForRun,
     simulation,
     scenario: scenarioConfig,
   });
   const scores = extractCategoryScoreMap(evaluation);
 
-  const spanSeconds = Math.max(
-    60,
-    (simulation.endSecond ?? scenarioConfig.endMinute * 60) -
-      (simulation.startSecond ?? scenarioConfig.startMinute * 60),
-  );
-  // Target ~18s at 1x (~3.6s at 5x, ~0.9s at 20x) regardless of schedule duration
-  const simSecondsPerRealSecond = Math.max(
-    180,
-    Math.round(spanSeconds / 18),
-  );
-
   return {
     scenarioId,
     scenarioConfig,
+    environment,
     capturedHouse,
     household: householdForRun,
     displayPersonas,
@@ -447,7 +293,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     agentRoutes: [],
     isEvacuation: false,
     clockMode: "clock",
-    simSecondsPerRealSecond,
+    simSecondsPerRealSecond: scenarioId === "normal-day" ? 900 : 180,
     findings: evaluation.findings,
     scores,
     beforeScores: scores,
@@ -469,52 +315,75 @@ export async function executeStudioRedesign({
   house,
   items,
   state,
+  baseline = null,
+  candidateProducts = getCandidateProducts({ sceneItems: items }),
   maxAttempts = 3,
   useFallbackOnFailure = true,
 }) {
-  const beforeItems = structuredClone(items || []);
-  const beforeHouse = captureStudioLayout(house, beforeItems);
-  if (!beforeHouse) {
-    throw new Error("No active whole-home layout to redesign.");
+  const run = baseline ?? runTwinScenario(scenarioId, { house, items, state });
+  if (!run.scenarioConfig || run.scenarioId !== scenarioId) {
+    throw new Error("Choose a household routine to compare a redesign.");
   }
-
-  const resolved = resolveValidHouseholdForHouse(state, beforeHouse);
-  const isGrandparentsScenario = scenarioId === "grandparents-stayover";
-  const displayPersonas = isGrandparentsScenario
-    ? createFamilyStayoverPersonas(beforeHouse)
-    : resolved.displayPersonas;
-  const simulationHousehold = isGrandparentsScenario
-    ? displayPersonas
-    : resolved.simulationHousehold;
-
-  const scenario =
-    scenarioId === "normal-day"
-      ? NORMAL_DAY_SCENARIO
-      : isGrandparentsScenario
-        ? GRANDPARENTS_STAYOVER_SCENARIO
-        : MORNING_ROUTINE_SCENARIO;
-  const household =
-    (scenarioId === "normal-day" || isGrandparentsScenario) && displayPersonas.length > 0
-      ? displayPersonas
-      : simulationHousehold;
-
-  const candidateProducts = getCandidateProducts({ sceneItems: beforeItems });
+  const { capturedHouse: beforeHouse, household, displayPersonas, scenarioConfig: scenario, environment } = run;
+  const beforeItems = structuredClone(items);
+  const { sun } = environmentInputs(environment);
 
   const replayResult = await runRedesignReplay({
     house: beforeHouse,
     household,
     scenario,
+    sun,
     candidateProducts,
     maxAttempts,
     useFallbackOnFailure,
   });
 
+  return describeStudioOutcome(replayResult, { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, candidateProducts });
+}
+
+// Approval uses the exact reviewed operations and the captured conditions. It never asks for a second proposal.
+export function recheckStudioRedesign(outcome, candidateProducts) {
+  const { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, replayResult } = outcome;
+  const { sun } = environmentInputs(environment);
+  const evaluated = evaluateCandidatePatch({
+    house: beforeHouse, patch: replayResult.selectedPatch, beforeEvaluation: replayResult.before.evaluation,
+    household, scenario, sun, candidateProducts,
+  });
+  if (!evaluated.accepted) throw new Error(evaluated.rejectedBecause.join(" ") || "The approved patch failed validation.");
+  const verified = { ...replayResult, comparison: evaluated.comparison, delta: evaluated.comparison.delta,
+    after: { house: evaluated.afterHouse, evaluation: evaluated.afterEvaluation } };
+  return describeStudioOutcome(verified, { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, candidateProducts });
+}
+
+export function describeApprovedHouseholdReplay({ baseline, result, afterHouse, afterItems, displayPersonas, patch }) {
+  const comparison = compareEvaluations(baseline.result.evaluation, result.evaluation);
+  const movementDeltas = ["pathFailures", "collisions", "congestionEvents"].map(
+    key => result.summary[key] - baseline.result.summary[key],
+  );
+  const better = movementDeltas.some(delta => delta < 0) || comparison.improvedCategories.length ||
+    comparison.resolvedFindings.length || comparison.improvedFindings.length;
+  const worse = movementDeltas.some(delta => delta > 0) || comparison.regressedCategories.length ||
+    comparison.introducedFindings.length || comparison.worsenedFindings.length;
+  const status = better && worse ? "MIXED" : worse ? "REGRESSION" : better ? "IMPROVED" : "NO_CHANGE";
+  const replayResult = {
+    status, attempts: [], selectedPatch: patch, comparison, delta: comparison.delta,
+    before: { house: baseline.scene, evaluation: baseline.result.evaluation },
+    after: { house: afterHouse, evaluation: result.evaluation },
+  };
+  const outcome = describeStudioOutcome(replayResult, {
+    beforeItems: baseline.items, beforeHouse: baseline.scene, household: baseline.household, displayPersonas,
+    scenario: { id: "saved-routine", timelineSampleSeconds: 60 }, environment: baseline.environment, candidateProducts: [],
+  });
+  return { ...outcome, afterItems };
+}
+
+function describeStudioOutcome(replayResult, { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, candidateProducts }) {
   const uiPayload = toRedesignUiPayload(replayResult, { candidateProducts });
   const attemptSummaries = formatAttemptSummaries(replayResult.attempts, {
     isFallback: uiPayload.isFallback,
   });
 
-  if (replayResult.status !== "IMPROVED" || !replayResult.after?.house) {
+  if (!replayResult.after?.house) {
     return {
       accepted: false,
       replayResult,
@@ -539,32 +408,10 @@ export async function executeStudioRedesign({
     replayResult.selectedPatch,
   );
 
-  // Preserve deterministic wheelchair / mobility clearance checks on before & after layouts
-  const beforeAccessFindings = evaluateAccessibilityClearance(beforeHouse, household);
-  const afterAccessFindings = evaluateAccessibilityClearance(afterHouse, household);
-  if (beforeAccessFindings.length > 0 || afterAccessFindings.length > 0) {
-    const afterIds = new Set(afterAccessFindings.map((f) => f.id));
-    const beforeIds = new Set(beforeAccessFindings.map((f) => f.id));
-    const resolvedAccess = beforeAccessFindings.filter((f) => !afterIds.has(f.id));
-    const remainingAccess = afterAccessFindings.filter((f) => beforeIds.has(f.id));
-    const introducedAccess = afterAccessFindings.filter((f) => !beforeIds.has(f.id));
-    uiPayload.findings = [...afterAccessFindings, ...(uiPayload.findings || [])];
-    uiPayload.resolvedFindings = [
-      ...resolvedAccess,
-      ...(uiPayload.resolvedFindings || []),
-    ];
-    uiPayload.remainingFindings = [
-      ...remainingAccess,
-      ...(uiPayload.remainingFindings || []),
-    ];
-    uiPayload.introducedFindings = [
-      ...introducedAccess,
-      ...(uiPayload.introducedFindings || []),
-    ];
-  }
-
   return {
     accepted: true,
+    candidateProducts,
+    environment,
     replayResult,
     uiPayload,
     attemptSummaries,
@@ -576,7 +423,6 @@ export async function executeStudioRedesign({
     beforeItems,
     afterItems,
     patchChanges,
-    beforeAccessFindings,
     afterSimulation: replayResult.after.evaluation.simulation,
     beforeSimulation: replayResult.before.evaluation.simulation,
     redesignMessage: replayResult.selectedPatch?.reasoning || null,

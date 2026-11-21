@@ -1,4 +1,5 @@
 import { catalog } from "../../model.js";
+import { toRedesignCandidate } from "./scene-candidate.js";
 
 /**
  * Extract a numeric Shopify variant ID from a merchant product URL query string
@@ -22,7 +23,7 @@ export function extractVariantIdFromProductUrl(url) {
 }
 
 /**
- * Build source-backed `ProductCandidate[]` from Stillroom's real `offers.json` +
+ * Build source-backed `ProductCandidate[]` from Living Blueprint's real `offers.json` +
  * `catalog` entries (and merge any live Shopify session picks if provided).
  *
  * Preserves:
@@ -36,10 +37,10 @@ export function extractVariantIdFromProductUrl(url) {
  * - `dimensionSource: "estimated"` (never claims live stock)
  *
  * @param {object} [options]
- * @param {Array<object>} [options.sceneItems=[]]
+ * @param {object} [options.candidateSnapshot] Current catalog results, kept separate from placed pieces.
  * @returns {Array<object>}
  */
-export function getCandidateProducts({ sceneItems = [] } = {}) {
+export function getCandidateProducts({ candidateSnapshot } = {}) {
   const candidates = catalog.map((entry) => {
     const variantId =
       entry.variantId || extractVariantIdFromProductUrl(entry.url) || null;
@@ -72,38 +73,8 @@ export function getCandidateProducts({ sceneItems = [] } = {}) {
     };
   });
 
-  // Also include any live-picked Shopify items currently in the user's session if not already listed
-  const seenIds = new Set(candidates.map((c) => c.productId));
-  for (const item of Array.isArray(sceneItems) ? sceneItems : []) {
-    if (!item?.shopify?.variantId || seenIds.has(item.shopify.variantId)) {
-      continue;
-    }
-    seenIds.add(item.shopify.variantId);
-    candidates.push({
-      id: item.shopify.variantId,
-      productId: item.shopify.variantId,
-      variantId: item.shopify.variantId,
-      shopify: { ...item.shopify },
-      kind: item.kind || "chair",
-      name: item.name || "Shopify piece",
-      store: item.shopify.sellerDomain,
-      merchant: item.shopify.sellerDomain,
-      price: Number(item.price) || 0,
-      url: item.url || null,
-      photo: item.photo || null,
-      color: item.color || "#c5b69e",
-      width: item.width,
-      height: item.height,
-      depth: item.depth,
-      dimensions: {
-        width: item.width,
-        height: item.height,
-        depth: item.depth,
-      },
-      dimensionSource: item.dimensionsSource || "estimated",
-      dimensionsSource: item.dimensionsSource || "estimated",
-    });
-  }
-
-  return candidates;
+  if (!candidateSnapshot || !(candidateSnapshot.expiresAt > Date.now()) || !Array.isArray(candidateSnapshot.products)) return candidates;
+  const live = candidateSnapshot.products.map(product => toRedesignCandidate(product, candidateSnapshot.kind)).filter(Boolean);
+  // The Gemini prompt takes a bounded prefix, so put requested live alternatives first.
+  return [...live, ...candidates];
 }
