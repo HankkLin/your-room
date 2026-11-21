@@ -75,6 +75,9 @@ function mergeProductFields(target, productSource) {
     "photo",
     "merchantProduct",
     "color",
+    "shopify",
+    "dimensionSource",
+    "dimensionsSource",
   ]) {
     if (productSource[field] !== undefined) {
       merged[field] = productSource[field];

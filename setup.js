@@ -7,6 +7,8 @@ import {
 } from "./room-layout.js";
 import {
   ROOM,
+  catalog,
+  createItem,
   createOwnedItems,
   initialState,
   fitItem,
@@ -15,6 +17,7 @@ import {
 import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
 import { openFloorplanImporter } from "./floorplan-import-ui.js";
+import { toSceneObject } from "./src/contracts/scene.js";
 import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
@@ -63,6 +66,79 @@ const selectOptions = (kind) =>
   Object.entries(kinds)
     .map(([k, name]) => option(k, name, kind))
     .join("");
+function buildMercerSampleStarterItems() {
+  const byId = (id) => catalog.find((p) => p.id === id);
+  const place = (productId, overrides) => {
+    const product = byId(productId);
+    if (!product) return null;
+    const base = createItem(
+      overrides.name ? { ...product, name: overrides.name } : product,
+      overrides,
+    );
+    return toSceneObject({
+      ...base,
+      roomId: overrides.roomId,
+      type: overrides.owned ? "existing" : "shopify",
+      locked: false,
+    });
+  };
+
+  return [
+    place("stone-table", {
+      id: "kitchen-table-1",
+      roomId: "kitchen",
+      name: "Breakfast Bistro Table",
+      x: 7.25,
+      z: 1.35,
+      rotation: 0,
+    }),
+    place("linen-chair", {
+      id: "kitchen-chair-1",
+      roomId: "kitchen",
+      name: "Kitchen Café Chair",
+      x: 6.42,
+      z: 1.35,
+      rotation: 90,
+    }),
+    place("linen-sofa", {
+      id: "living-sofa-1",
+      roomId: "living-room",
+      x: 2.9,
+      z: 3.25,
+      rotation: 180,
+      owned: true,
+    }),
+    place("oat-rug", {
+      id: "living-rug-1",
+      roomId: "living-room",
+      x: 2.9,
+      z: 2.25,
+      rotation: 0,
+    }),
+    place("brass-lamp", {
+      id: "living-lamp-1",
+      roomId: "living-room",
+      x: 4.5,
+      z: 3.4,
+      rotation: 0,
+    }),
+    place("olive-tree", {
+      id: "living-plant-1",
+      roomId: "living-room",
+      x: 0.65,
+      z: 0.65,
+      rotation: 0,
+    }),
+    place("cream-bed", {
+      id: "bedroom-bed-1",
+      roomId: "bedroom",
+      x: 1.65,
+      z: 7.25,
+      rotation: 0,
+    }),
+  ].filter(Boolean);
+}
+
 function roomDefaults(value = {}) {
   const room = normalizeArchitecture(value);
   return {
@@ -730,6 +806,12 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         render(true);
       },
       onConfirmed(confirmedHouse) {
+        const starterItems =
+          Array.isArray(confirmedHouse.objects) && confirmedHouse.objects.length > 0
+            ? confirmedHouse.objects
+            : confirmedHouse.id === "mercer-apartment-sample"
+              ? buildMercerSampleStarterItems()
+              : [];
         leave(
           {
             ...state,
@@ -737,8 +819,8 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
             room: roomDefaults(houseToPrimaryStudioRoom(confirmedHouse)),
             roomPhoto: null,
             importedHouse: confirmedHouse,
-            items: [],
-            spent: 0,
+            items: starterItems,
+            spent: getSpend(starterItems),
           },
           false,
         );

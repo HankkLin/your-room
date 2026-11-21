@@ -37,18 +37,30 @@ import {
 import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
-import { createStudioReplayPanel } from "./src/components/simulation/studio-replay-panel.js";
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
 import { formatShopifyMoney } from "./src/components/catalog/shopify-ui.js";
 import { createShopifyQuotes, shopifyRef, shopifyRequest } from "./src/shopify/shopify-client.js";
+import { getCandidateProducts } from "./src/shopify/candidate-products.js";
 import { showParsedGeometryModal } from "./floorplan-import-ui.js";
 import {
   clearConfirmedImportedHouse,
   setConfirmedImportedHouse,
 } from "./src/spatial/floorplan-importer.js";
+import { mountDemoControls } from "./src/components/simulation/demo-controls.js";
+import {
+  createSimulationPlaybackController,
+  sampleTimelineAt,
+} from "./src/components/simulation/playback-controller.js";
+import { getSimulationSnapshotAt } from "./src/simulation/index.js";
+import { captureStudioLayout, runStudioReplay } from "./src/simulation/studio-replay.js";
+import {
+  executeStudioRedesign,
+  resolveValidHouseholdForHouse,
+  runTwinScenario,
+} from "./src/twin-integration.js";
 
 const $ = (selector) => document.querySelector(selector);
 const escape = (value) =>
@@ -135,13 +147,444 @@ const shoppingList = createShoppingList({
   },
   onStockChange: () => void refreshShopifyQuotes(),
 });
-const studioReplay = createStudioReplayPanel($("#studio-replay-panel"), {
-  getContext: () => ({
-    house: state.importedHouse || state.house,
-    items: state.items,
-    personas: state.personas,
-    rooms: listPersonaRooms(state),
-  }),
+
+let simulationAdapter = null;
+let activePlaybackDataset = null;
+let previewLayoutItems = null;
+let previewLayoutHouse = null;
+let redesignSession = null;
+
+const playbackController = createSimulationPlaybackController({
+  onFrame(frame) {
+    scene?.setPlaybackFrame?.(frame);
+  },
+  onTick(tick) {
+    demoControls.updateClockAndProgress(tick);
+  },
+  onStatusChange(pb) {
+    const ds = activePlaybackDataset;
+    if (pb.status === "READY" && !pb.hasTimeline && !redesignSession) {
+      previewLayoutItems = null;
+      previewLayoutHouse = null;
+      scene?.clearPlayback?.();
+      demoControls.setState({
+        status: "READY",
+        currentTime: null,
+        hasTimeline: false,
+        selectedFindingId: null,
+        hasLayoutToggle: false,
+        activeLayoutView: "before",
+        canRedesign: false,
+        redesignPending: false,
+        redesignStatus: null,
+        redesignMessage: null,
+        isFallbackRedesign: false,
+        findings: [],
+        scores: null,
+        beforeScores: null,
+        afterScores: null,
+        overallBeforeScore: null,
+        overallAfterScore: null,
+        resolvedFindings: [],
+        remainingFindings: [],
+        introducedFindings: [],
+        attemptSummaries: [],
+        redesignActions: [],
+        errorMessage: null,
+        isMockData: false,
+      });
+      render();
+      return;
+    }
+
+    if (pb.completed && ds) {
+      const currentViewMode = demoControls.getState().activeLayoutView;
+      const showingBefore = Boolean(
+        redesignSession && currentViewMode === "before",
+      );
+      const findingsToShow = showingBefore
+        ? (redesignSession.beforeEvaluationFindings || ds.findings || [])
+        : (ds.findings || []);
+      scene?.setPlaybackFindings?.(findingsToShow, {
+        house: previewLayoutHouse || activeHouse(),
+        items: previewLayoutItems || state.items,
+      });
+      if (redesignSession && currentViewMode === "after") {
+        scene?.showPatchTransition?.(redesignSession.patchChanges || []);
+      }
+
+      demoControls.setState({
+        status: "COMPLETE",
+        currentTime: pb.currentTime,
+        hasTimeline: pb.hasTimeline,
+        startSecond: pb.startSecond,
+        endSecond: pb.endSecond,
+        currentSecond: pb.currentSecond,
+        showAllRoutes: pb.showAllRoutes,
+        hasLayoutToggle: Boolean(
+          redesignSession || (ds.beforeItems && ds.afterItems),
+        ),
+        activeLayoutView: redesignSession ? currentViewMode : "before",
+        canRedesign: Boolean(ds.canRedesign),
+        redesignPending: false,
+        findings: findingsToShow,
+        scores: showingBefore
+          ? (redesignSession.uiPayload.beforeScores ?? ds.beforeScores)
+          : (ds.scores ?? ds.afterScores ?? ds.beforeScores ?? null),
+        beforeScores:
+          redesignSession?.uiPayload?.beforeScores ?? ds.beforeScores ?? null,
+        afterScores:
+          redesignSession?.uiPayload?.afterScores ?? ds.afterScores ?? null,
+        overallBeforeScore:
+          redesignSession?.uiPayload?.overallBeforeScore ??
+          ds.overallBeforeScore ??
+          null,
+        overallAfterScore:
+          redesignSession?.uiPayload?.overallAfterScore ??
+          ds.overallAfterScore ??
+          null,
+        resolvedFindings: redesignSession?.uiPayload?.resolvedFindings ?? [],
+        remainingFindings: redesignSession?.uiPayload?.remainingFindings ?? [],
+        introducedFindings:
+          redesignSession?.uiPayload?.introducedFindings ?? [],
+        attemptSummaries: redesignSession?.attemptSummaries ?? [],
+        redesignActions:
+          redesignSession?.uiPayload?.redesignActions ??
+          ds.redesignActions ??
+          [],
+        isFallbackRedesign: Boolean(redesignSession?.uiPayload?.isFallback),
+        redesignMessage: redesignSession?.redesignMessage ?? null,
+        redesignStatus: redesignSession?.uiPayload?.redesignStatus ?? null,
+        isMockData: Boolean(ds.isMockData),
+      });
+      return;
+    }
+
+    demoControls.setState({
+      status: pb.status,
+      currentTime: pb.currentTime,
+      hasTimeline: pb.hasTimeline,
+      startSecond: pb.startSecond,
+      endSecond: pb.endSecond,
+      currentSecond: pb.currentSecond,
+      showAllRoutes: pb.showAllRoutes,
+      selectedFindingId: pb.selectedFindingId,
+      canRedesign: Boolean(ds?.canRedesign && pb.status !== "RUNNING"),
+      isMockData: Boolean(ds?.isMockData),
+    });
+  },
+});
+
+function startPlaybackFromDataset(dataset, { preserveRedesign = false } = {}) {
+  if (!preserveRedesign) {
+    redesignSession = null;
+    previewLayoutItems = null;
+    previewLayoutHouse = null;
+  }
+  activePlaybackDataset = dataset;
+  scene?.clearPlayback?.();
+  playbackController.setSpeed(demoControls.getState().speed);
+  playbackController.load({
+    simulation: dataset.simulation,
+    getSnapshotAt:
+      dataset.getSnapshotAt || getSimulationSnapshotAt || sampleTimelineAt,
+    agentRoutes: dataset.agentRoutes || [],
+    isEvacuation: Boolean(dataset.isEvacuation),
+    clockMode: dataset.clockMode || "clock",
+    completedLabel: dataset.completedLabel || null,
+    simSecondsPerRealSecond: dataset.simSecondsPerRealSecond,
+  });
+  if (dataset.showFindingsImmediately && Array.isArray(dataset.findings)) {
+    scene?.setPlaybackFindings?.(dataset.findings, {
+      house: previewLayoutHouse || activeHouse(),
+      items: previewLayoutItems || state.items,
+    });
+  }
+  playbackController.play();
+}
+
+async function handleProposeRedesign(scenarioId) {
+  const house = activeHouse();
+  if (!house) {
+    toast("Load a whole-home layout first.");
+    return;
+  }
+
+  playbackController.pause();
+  demoControls.setState({
+    redesignPending: true,
+    redesignMessage: null,
+    errorMessage: null,
+  });
+
+  try {
+    const outcome = await executeStudioRedesign({
+      scenarioId,
+      house,
+      items: state.items,
+      state,
+      maxAttempts: 3,
+      useFallbackOnFailure: true,
+    });
+
+    if (!outcome.accepted || !outcome.afterItems || !outcome.afterHouse) {
+      demoControls.setState({
+        status: "COMPLETE",
+        redesignPending: false,
+        redesignStatus: outcome.replayResult.status,
+        redesignMessage: outcome.redesignMessage,
+        attemptSummaries: outcome.attemptSummaries,
+        canRedesign: true,
+        isMockData: false,
+      });
+      toast("Redesign rejected by spatial validator — layout unchanged.");
+      return;
+    }
+
+    redesignSession = {
+      ...outcome,
+      beforeEvaluationFindings: outcome.replayResult.before.evaluation.findings,
+    };
+    previewLayoutItems = null;
+    previewLayoutHouse = null;
+
+    // Commit redesigned movable items to live Studio state (preserving locked fixtures & Shopify metadata)
+    if (state.importedHouse) {
+      const syncedImported = setConfirmedImportedHouse({
+        ...state.importedHouse,
+        objects: outcome.afterHouse.objects.filter(
+          (o) => !o.fromHouseFixture && o.type !== "fixed",
+        ),
+      });
+      commit({
+        ...state,
+        importedHouse: syncedImported,
+        items: outcome.afterItems,
+      });
+    } else {
+      commit({
+        ...state,
+        items: outcome.afterItems,
+      });
+    }
+
+    // Build replay dataset on the accepted AFTER layout using the exact same scenario + personas
+    const replayDataset = {
+      scenarioId,
+      capturedHouse: outcome.afterHouse,
+      household: outcome.household,
+      displayPersonas: outcome.displayPersonas,
+      simulation: outcome.afterSimulation,
+      getSnapshotAt: getSimulationSnapshotAt,
+      agentRoutes: [],
+      isEvacuation: false,
+      clockMode: "clock",
+      simSecondsPerRealSecond: scenarioId === "normal-day" ? 900 : 240,
+      findings: outcome.uiPayload.findings,
+      scores: outcome.uiPayload.afterScores,
+      beforeScores: outcome.uiPayload.beforeScores,
+      afterScores: outcome.uiPayload.afterScores,
+      overallBeforeScore: outcome.uiPayload.overallBeforeScore,
+      overallAfterScore: outcome.uiPayload.overallAfterScore,
+      beforeItems: outcome.beforeItems,
+      afterItems: outcome.afterItems,
+      patchChanges: outcome.patchChanges,
+      redesignActions: outcome.uiPayload.redesignActions,
+      canRedesign: outcome.uiPayload.findings.length > 0,
+      isMockData: false,
+    };
+
+    demoControls.setState({
+      activeLayoutView: "after",
+      hasLayoutToggle: true,
+      redesignPending: false,
+      beforeScores: outcome.uiPayload.beforeScores,
+      afterScores: outcome.uiPayload.afterScores,
+      scores: outcome.uiPayload.afterScores,
+      overallBeforeScore: outcome.uiPayload.overallBeforeScore,
+      overallAfterScore: outcome.uiPayload.overallAfterScore,
+      resolvedFindings: outcome.uiPayload.resolvedFindings,
+      remainingFindings: outcome.uiPayload.remainingFindings,
+      introducedFindings: outcome.uiPayload.introducedFindings,
+      attemptSummaries: outcome.attemptSummaries,
+      redesignActions: outcome.uiPayload.redesignActions,
+      isFallbackRedesign: outcome.uiPayload.isFallback,
+      redesignMessage: outcome.redesignMessage,
+      redesignStatus: outcome.uiPayload.redesignStatus,
+      isMockData: false,
+    });
+
+    startPlaybackFromDataset(replayDataset, { preserveRedesign: true });
+    scene?.showPatchTransition?.(outcome.patchChanges || []);
+    toast("Redesign validated & applied · Replaying scenario on updated layout");
+  } catch (err) {
+    demoControls.setState({
+      redesignPending: false,
+      redesignStatus: "FAILED",
+      redesignMessage: err?.message || "Unable to complete Gemini redesign.",
+    });
+    toast(err?.message || "Redesign failed.");
+  }
+}
+
+const demoControls = mountDemoControls({
+  controlHost: $("#demo-controls-panel"),
+  resultsHost: $("#twin-results-section"),
+  onRunSimulation(scenarioId) {
+    if (simulationAdapter) {
+      simulationAdapter.run?.(scenarioId, {
+        house: activeHouse(),
+        items: state.items,
+        personas: state.personas || [],
+      });
+      return;
+    }
+    if (playbackController.getState().status === "PAUSED") {
+      playbackController.play();
+      return;
+    }
+    try {
+      const house = activeHouse();
+      const preserveRedesign = Boolean(
+        redesignSession &&
+          demoControls.getState().activeLayoutView === "after" &&
+          scenarioId === (activePlaybackDataset?.scenarioId || "morning-routine"),
+      );
+      const dataset = runTwinScenario(scenarioId, {
+        house,
+        items: state.items,
+        state,
+      });
+      if (preserveRedesign && redesignSession) {
+        dataset.beforeScores = redesignSession.uiPayload.beforeScores;
+        dataset.afterScores = dataset.scores;
+        dataset.overallBeforeScore = redesignSession.uiPayload.overallBeforeScore;
+        dataset.overallAfterScore = dataset.overallBeforeScore;
+        dataset.beforeItems = redesignSession.beforeItems;
+        dataset.afterItems = state.items;
+        dataset.patchChanges = redesignSession.patchChanges;
+        dataset.redesignActions = redesignSession.uiPayload.redesignActions;
+      }
+      startPlaybackFromDataset(dataset, { preserveRedesign });
+      if (preserveRedesign && redesignSession) {
+        scene?.showPatchTransition?.(redesignSession.patchChanges || []);
+      }
+    } catch (err) {
+      demoControls.setState({
+        status: "ERROR",
+        errorMessage: err?.message || "Simulation failed.",
+        isMockData: false,
+      });
+    }
+  },
+  onPauseSimulation() {
+    if (simulationAdapter) {
+      simulationAdapter.pause?.();
+      return;
+    }
+    playbackController.pause();
+  },
+  onResetSimulation() {
+    if (simulationAdapter) {
+      simulationAdapter.reset?.();
+      scene?.clearPlayback?.();
+      return;
+    }
+    redesignSession = null;
+    activePlaybackDataset = null;
+    previewLayoutItems = null;
+    previewLayoutHouse = null;
+    playbackController.reset();
+  },
+  onSimulationSpeedChange(multiplier) {
+    simulationAdapter?.setSpeed?.(multiplier);
+    playbackController.setSpeed(multiplier);
+  },
+  onScenarioChange() {
+    if (!simulationAdapter && (playbackController.getState().hasSimulation || redesignSession)) {
+      redesignSession = null;
+      activePlaybackDataset = null;
+      previewLayoutItems = null;
+      previewLayoutHouse = null;
+      playbackController.reset();
+    }
+  },
+  onSeekTimeline(second) {
+    playbackController.seek(second);
+  },
+  onToggleRoutes(showAll) {
+    playbackController.setShowAllRoutes(showAll);
+  },
+  onSelectFinding(findingOrNull) {
+    scene?.focusFinding?.(findingOrNull);
+  },
+  onProposeRedesign(scenarioId) {
+    void handleProposeRedesign(scenarioId);
+  },
+  onSelectLayoutView(viewMode) {
+    const ds = activePlaybackDataset;
+    if (!ds && !redesignSession) return;
+
+    if (redesignSession) {
+      if (viewMode === "before") {
+        previewLayoutItems = redesignSession.beforeItems;
+        previewLayoutHouse = normalizeHouse(redesignSession.beforeHouse);
+        scene?.showPatchTransition?.([]);
+        scene?.setPlaybackFindings?.(
+          redesignSession.beforeEvaluationFindings || [],
+          {
+            house: previewLayoutHouse,
+            items: previewLayoutItems,
+          },
+        );
+        demoControls.setState({
+          findings: redesignSession.beforeEvaluationFindings || [],
+          scores: redesignSession.uiPayload.beforeScores,
+        });
+      } else {
+        previewLayoutItems = null;
+        previewLayoutHouse = null;
+        scene?.showPatchTransition?.(redesignSession.patchChanges || []);
+        scene?.setPlaybackFindings?.(redesignSession.uiPayload.findings || [], {
+          house: activeHouse(),
+          items: state.items,
+        });
+        demoControls.setState({
+          findings: redesignSession.uiPayload.findings || [],
+          scores: redesignSession.uiPayload.afterScores,
+        });
+      }
+      scene?.update(
+        previewLayoutItems || state.items,
+        selection,
+        state.style,
+        state.room || ROOM,
+        previewLayoutHouse || activeHouse(),
+      );
+      return;
+    }
+
+    if (viewMode === "after" && Array.isArray(ds?.afterItems)) {
+      previewLayoutItems = ds.afterItems;
+      scene?.showPatchTransition?.(ds.patchChanges || []);
+      demoControls.setState({
+        scores: ds.afterScores ?? ds.beforeScores,
+      });
+    } else {
+      previewLayoutItems = null;
+      scene?.showPatchTransition?.([]);
+      demoControls.setState({
+        scores: ds?.beforeScores ?? null,
+      });
+    }
+    scene?.update(
+      previewLayoutItems || state.items,
+      selection,
+      state.style,
+      state.room || ROOM,
+      activeHouse(),
+    );
+  },
 });
 const householdPage = createHouseholdPage($("#household-page"), {
   onSave(personas) {
@@ -292,9 +735,19 @@ function render() {
   const estimate = roomEstimate(state.items);
   $("#notes").textContent =
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(estimate.total)} ${estimate.partial ? "partial estimate" : "estimated"}`;
-  scene?.update(state.items, selection, state.style, room, house);
+  const effectivePersonas = house
+    ? resolveValidHouseholdForHouse(state, house).displayPersonas
+    : (state.personas || []);
+  demoControls.setPersonas(effectivePersonas);
+  demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
+  scene?.update(
+    previewLayoutItems || state.items,
+    selection,
+    state.style,
+    room,
+    previewLayoutHouse || house,
+  );
   drawPlanPins();
-  studioReplay.update();
 }
 function select(id) {
   selection = id;
@@ -746,6 +1199,7 @@ function markStage(next) {
   $("#design-panel").hidden = next !== "design";
   $("#tour-panel").hidden = next !== "tour";
   $(".inventory").hidden = next !== "tour";
+  demoControls.setVisible(Boolean(activeHouse()) && ["design", "tour"].includes(next));
   updateWalkControls();
 }
 function toggleExpanded(expanded) {
@@ -789,7 +1243,12 @@ function navigate(next) {
 function loadWholeHomeDemo() {
   hasProject = true;
   selection = null;
-  studioReplay.reset();
+  simulationAdapter?.reset?.();
+  redesignSession = null;
+  activePlaybackDataset = null;
+  previewLayoutItems = null;
+  previewLayoutHouse = null;
+  playbackController.reset();
   clearConfirmedImportedHouse();
   commit(createWholeHomeDemoState());
   history = [];
@@ -814,12 +1273,17 @@ function beginSetup(fresh = false) {
         loadWholeHomeDemo();
         return;
       }
+      simulationAdapter?.reset?.();
+      redesignSession = null;
+      activePlaybackDataset = null;
+      previewLayoutItems = null;
+      previewLayoutHouse = null;
+      playbackController.reset();
       hasProject = true;
       const importedHouse = sample ? null : (next.importedHouse ?? null);
       const changedHouse = importedHouse !== (state.importedHouse ?? null);
       const newProject = fresh || changedHouse;
       if (!importedHouse && newProject) clearConfirmedImportedHouse();
-      if (newProject) studioReplay.reset();
       const items = importedHouse
         ? mergeHouseFixturesIntoItems(importedHouse, next.items || [])
         : next.items;
@@ -1054,16 +1518,46 @@ $(".brand").onclick = (e) => {
   e.preventDefault();
   if (stage !== "setup") beginSetup();
 };
-function savePieces(items) {
+function savePieces(items, { replaceExisting = false } = {}) {
   const saved = new Map(
-    (state.savedProducts || []).map((row) => [row.id, row]),
+    replaceExisting
+      ? []
+      : (state.savedProducts || []).map((row) => [row.id, row]),
   );
   for (const item of items) {
     if (item.owned || isObjectLocked(item)) continue;
-    if (item.shopify)
-      saved.set(item.id, { id: item.id, name: item.name, shopify: item.shopify });
-    else if (item.productId)
-      saved.set(item.id, { id: item.id, productId: item.productId });
+    if (item.shopify) {
+      saved.set(item.id, {
+        id: item.id,
+        name: item.name,
+        shopify: item.shopify,
+      });
+    } else if (item.productId) {
+      saved.set(item.id, {
+        id: item.id,
+        productId: item.productId,
+        name: item.name,
+        ...(item.variantId ? { variantId: item.variantId } : {}),
+        ...(item.variant ? { variant: item.variant } : {}),
+        ...(item.merchant || item.store
+          ? { merchant: item.merchant || item.store, store: item.store || item.merchant }
+          : {}),
+        ...(Number.isFinite(Number(item.price)) ? { price: Number(item.price) } : {}),
+        ...(item.url ? { url: item.url } : {}),
+        ...(item.photo ? { photo: item.photo } : {}),
+      });
+    } else if (item.url || item.merchant || item.store) {
+      saved.set(item.id, {
+        id: item.id,
+        name: item.name,
+        merchant: item.merchant || item.store || "Merchant",
+        store: item.store || item.merchant || "Merchant",
+        variant: item.variant || "Default Title",
+        price: Number(item.price) || 0,
+        url: item.url || null,
+        photo: item.photo || null,
+      });
+    }
   }
   commit({ ...state, savedProducts: [...saved.values()] });
   toast(
@@ -1073,7 +1567,10 @@ function savePieces(items) {
   );
 }
 $("#save-room").onclick = () => {
-  savePieces(state.items.filter((i) => !i.owned && !isObjectLocked(i)));
+  savePieces(
+    state.items.filter((i) => !i.owned && !isObjectLocked(i)),
+    { replaceExisting: true },
+  );
   navigate("shop");
 };
 async function refreshShopifyQuotes() {
@@ -1283,6 +1780,49 @@ $("#edit-request").onsubmit = (e) => {
 window.__stillroom = {
   getState: () => state,
   getScene: () => scene,
+  simulationUI: demoControls,
+  playbackController,
+  captureStudioLayout: (house = activeHouse(), items = state.items) =>
+    captureStudioLayout(house, items),
+  runStudioReplay,
+  getCandidateProducts: () => getCandidateProducts({ sceneItems: state.items }),
+  proposeRedesign: (scenarioId = demoControls.getState().scenarioId) =>
+    handleProposeRedesign(scenarioId),
+  connectSimulationPlayback(payload = {}) {
+    simulationAdapter?.dispose?.();
+    simulationAdapter = null;
+    startPlaybackFromDataset({
+      ...payload,
+      isMockData: Boolean(payload.isMockData),
+    });
+    return playbackController;
+  },
+  connectSimulationEngine(engine) {
+    simulationAdapter?.dispose?.();
+    playbackController.reset();
+    simulationAdapter = engine;
+    demoControls.setState({
+      status: "READY",
+      currentTime: null,
+      findings: [],
+      scores: null,
+      beforeScores: null,
+      afterScores: null,
+      redesignActions: [],
+      errorMessage: null,
+      isMockData: false,
+    });
+    engine?.onStateChange?.((patch) => {
+      demoControls.setState(patch);
+      if (Array.isArray(patch?.findings)) {
+        scene?.setPlaybackFindings?.(patch.findings, {
+          house: activeHouse(),
+          items: state.items,
+        });
+      }
+    });
+    return demoControls;
+  },
 };
 syncForm();
 if (

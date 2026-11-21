@@ -44,6 +44,7 @@ export {
 export {
   MORNING_ROUTINE_SCENARIO,
   createDemoHousehold,
+  createWholeHomeDemoPersonas,
   runMorningRoutineDemo,
 } from "./demo-household.js";
 

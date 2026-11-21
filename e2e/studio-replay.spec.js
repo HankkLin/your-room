@@ -69,33 +69,32 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
   await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
-  const replay = page.locator("#studio-replay-panel");
-  const capture = replay.getByRole("button", { name: "Capture baseline", exact: true });
-  const compare = replay.getByRole("button", { name: "Compare current layout", exact: true });
-  await expect(compare).toBeDisabled();
-  await capture.click();
-  await expect(page.locator("#studio-replay-status")).toContainText("Baseline captured");
+  // Single unified simulation UI: #demo-controls-panel & #twin-results-section
+  await expect(page.locator("#studio-replay-panel")).toHaveCount(0);
+  await page.locator("#sim-scenario").selectOption("morning-routine");
+  await page.locator('[data-sim-speed="20"]').click();
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+  await expect(page.locator("#sim-findings-list")).toContainText(
+    "Blocked route: Bedroom → Kitchen",
+  );
 
   const obstacle = page.locator(`#inventory [data-item="${sofa.id}"]`);
   await obstacle.click();
   await page.locator("#objectbar [data-action=remove]").click();
   await expect(obstacle).toHaveCount(0);
 
-  await compare.click();
-  const failures = replay.getByRole("row").filter({ hasText: "Path failures" });
-  await expect(failures.locator("td")).toHaveText(["1", "0"]);
-  const findings = page.locator("#studio-replay-findings");
-  await expect(findings).toContainText("Baseline route blocked from Bedroom to Kitchen.");
-  await expect(findings).toContainText("No blocked routes were recorded in the current layout.");
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+  await expect(page.locator("#sim-findings-panel")).not.toContainText(
+    "Blocked route: Bedroom → Kitchen",
+  );
   expect((await project(page)).personas).toEqual(approved.personas);
 
   await page.locator("#household-step").click();
   await household.getByLabel("End time", { exact: true }).nth(1).fill("08:30");
   await household.getByRole("button", { name: "Save and continue" }).click();
   await page.locator("#tour-step").click();
-  await expect(compare).toBeDisabled();
-  await capture.click();
-  await expect(compare).toBeEnabled();
 
   await page.reload();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");

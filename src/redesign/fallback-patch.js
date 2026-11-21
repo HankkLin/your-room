@@ -97,9 +97,9 @@ export function createRedesignDemoHouse() {
 function generateRoomCandidateSpots(room) {
   const b = polygonBounds(room.polygon);
   const spots = [];
-  // Prefer spacious south-central / south-west dining spots clear of east wall counters & north fixtures
-  for (let zFrac of [0.82, 0.76, 0.86, 0.7, 0.62]) {
-    for (let xFrac of [0.46, 0.52, 0.4, 0.58, 0.34, 0.65]) {
+  // Prefer spacious corners and edges clear of wall counters, fixtures & doors
+  for (let zFrac of [0.82, 0.76, 0.86, 0.7, 0.62, 0.25, 0.16]) {
+    for (let xFrac of [0.46, 0.52, 0.4, 0.58, 0.34, 0.65, 0.24, 0.18]) {
       spots.push([
         round2(b.minX + b.width * xFrac),
         0,
@@ -155,48 +155,156 @@ export function buildFallbackScenePatch({ house, evaluation } = {}) {
           (o) => o.id !== primary.id && o.kind === "chair",
         );
 
-        for (const spot of candidateSpots) {
-          const secondaryOffsets = [
-            [-0.72, 0, round2(Math.PI / 2)],
-            [0.72, 0, round2(-Math.PI / 2)],
-            [0, 0.68, round2(Math.PI)],
-            [0, -0.68, 0],
-          ];
+        // Look for an away-from-fixture spot first by sorting candidateSpots farthest from kitchen stove/sink
+        const roomBounds = polygonBounds(room.polygon);
+        const roomCenter = [
+          (roomBounds.minX + roomBounds.maxX) / 2,
+          (roomBounds.minZ + roomBounds.maxZ) / 2,
+        ];
+        const prepFixtures = (house.fixtures || []).filter(
+          (f) =>
+            f.roomId === targetRoomId &&
+            (f.kind === "stove" || f.kind === "sink"),
+        );
+        const primaryCookFixture =
+          prepFixtures.find((f) => f.kind === "sink") || prepFixtures[0] || null;
+        const cookStandEstimate = primaryCookFixture
+          ? [
+              (primaryCookFixture.position?.[0] ?? primaryCookFixture.x ?? 0) +
+                (roomCenter[0] -
+                  (primaryCookFixture.position?.[0] ?? primaryCookFixture.x ?? 0)) *
+                  0.45,
+              (primaryCookFixture.position?.[2] ?? primaryCookFixture.z ?? 0) +
+                (roomCenter[1] -
+                  (primaryCookFixture.position?.[2] ?? primaryCookFixture.z ?? 0)) *
+                  0.45,
+            ]
+          : null;
+        const sortedSpots = [...candidateSpots].sort((a, b) => {
+          if (!cookStandEstimate) return 0;
+          const distToCook = (pt) =>
+            Math.hypot(pt[0] - cookStandEstimate[0], pt[2] - cookStandEstimate[1]);
+          return distToCook(b) - distToCook(a);
+        });
 
-          const offsetCandidates = secondary ? secondaryOffsets : [[0, 0, 0]];
-          for (const [dx, dz, chairYaw] of offsetCandidates) {
-            const ops = [
-              {
-                type: "move",
-                objectId: primary.id,
-                position: spot,
-                rotation: [0, 0, 0],
-              },
-            ];
-            if (secondary) {
-              ops.push({
-                type: "move",
-                objectId: secondary.id,
-                position: [round2(spot[0] + dx), 0, round2(spot[2] + dz)],
-                rotation: [0, chairYaw, 0],
-              });
+        let firstValidPatch = null;
+        let bestSingleMovePatch = null;
+
+        for (const spot of sortedSpots) {
+          for (const tableYaw of [0, round2(Math.PI / 2)]) {
+            const rawTableW = Number(primary.dimensions?.width ?? primary.width ?? 0.86);
+            const rawTableD = Number(primary.dimensions?.depth ?? primary.depth ?? 0.64);
+            const rotated = Math.abs(tableYaw) > 0.5;
+            const tableHalfW = (rotated ? rawTableD : rawTableW) / 2;
+            const tableHalfD = (rotated ? rawTableW : rawTableD) / 2;
+            const chairHalfD = Number(secondary?.dimensions?.depth ?? secondary?.depth ?? 0.56) / 2;
+            const gapX = round2(tableHalfW + chairHalfD + 0.08);
+            const gapZ = round2(tableHalfD + chairHalfD + 0.08);
+
+            const secondaryOffsets = [
+              [0, gapZ, round2(Math.PI)],
+              [0, -gapZ, 0],
+              [-gapX, 0, round2(Math.PI / 2)],
+              [gapX, 0, round2(-Math.PI / 2)],
+            ].sort((oA, oB) => {
+              if (!cookStandEstimate) return 0;
+              const dA = Math.hypot(
+                spot[0] + oA[0] - cookStandEstimate[0],
+                spot[2] + oA[1] - cookStandEstimate[1],
+              );
+              const dB = Math.hypot(
+                spot[0] + oB[0] - cookStandEstimate[0],
+                spot[2] + oB[1] - cookStandEstimate[1],
+              );
+              return dB - dA;
+            });
+
+            const offsetCandidates = secondary ? secondaryOffsets : [[0, 0, 0]];
+            for (const [dx, dz, chairYaw] of offsetCandidates) {
+              const chairPos = secondary
+                ? [round2(spot[0] + dx), 0, round2(spot[2] + dz)]
+                : spot;
+              const ops = [
+                {
+                  type: "move",
+                  objectId: primary.id,
+                  position: spot,
+                  rotation: [0, tableYaw, 0],
+                },
+              ];
+              if (secondary) {
+                ops.push({
+                  type: "move",
+                  objectId: secondary.id,
+                  position: chairPos,
+                  rotation: [0, chairYaw, 0],
+                });
+              }
+
+              const candidatePatch = {
+                id: "fallback-patch-kitchen-clearance",
+                isFallback: true,
+                source: "deterministic_fallback",
+                reasoning:
+                  "Deterministic fallback: relocate movable breakfast furniture away from the kitchen prep zone to separate cooking and dining circulation.",
+                targetFindings: [formatFindingTag(anyCongestion)],
+                operations: ops,
+              };
+
+              if (validateScenePatch(house, candidatePatch).valid) {
+                if (!firstValidPatch) firstValidPatch = candidatePatch;
+                const standDist = cookStandEstimate
+                  ? Math.hypot(
+                      chairPos[0] - cookStandEstimate[0],
+                      chairPos[2] - cookStandEstimate[1],
+                    )
+                  : 99;
+                if (standDist >= 1.95) {
+                  return candidatePatch;
+                }
+              }
             }
 
-            const candidatePatch = {
-              id: "fallback-patch-kitchen-clearance",
-              isFallback: true,
-              source: "deterministic_fallback",
-              reasoning:
-                "Deterministic fallback: relocate movable breakfast furniture away from the northern kitchen prep zone to separate cooking and dining circulation.",
-              targetFindings: [formatFindingTag(anyCongestion)],
-              operations: ops,
-            };
-
-            if (validateScenePatch(house, candidatePatch).valid) {
-              return candidatePatch;
+            // If room is too compact for both table + lounge chair side-by-side in the clear corner,
+            // also consider removing the extra chair while relocating the breakfast table cleanly.
+            if (secondary && !bestSingleMovePatch) {
+              const standDist = cookStandEstimate
+                ? Math.hypot(
+                    spot[0] - cookStandEstimate[0],
+                    spot[2] - cookStandEstimate[1],
+                  )
+                : 99;
+              if (standDist >= 1.9) {
+                const compactOps = [
+                  {
+                    type: "move",
+                    objectId: primary.id,
+                    position: spot,
+                    rotation: [0, tableYaw, 0],
+                  },
+                  {
+                    type: "remove",
+                    objectId: secondary.id,
+                  },
+                ];
+                const compactPatch = {
+                  id: "fallback-patch-kitchen-compact",
+                  isFallback: true,
+                  source: "deterministic_fallback",
+                  reasoning:
+                    "Deterministic fallback: relocate breakfast table to the clear corner and remove the oversized café chair crowding the prep zone.",
+                  targetFindings: [formatFindingTag(anyCongestion)],
+                  operations: compactOps,
+                };
+                if (validateScenePatch(house, compactPatch).valid) {
+                  bestSingleMovePatch = compactPatch;
+                }
+              }
             }
           }
         }
+        if (bestSingleMovePatch) return bestSingleMovePatch;
+        if (firstValidPatch) return firstValidPatch;
       }
 
       // Case 2: Unfurnished room with shared-fixture congestion -> place compact breakfast table in clear corner

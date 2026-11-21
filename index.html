@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="/details.css" />
     <link rel="stylesheet" href="/journey.css" />
     <link rel="stylesheet" href="/household.css" />
-    <link rel="stylesheet" href="/studio-replay.css" />
+    <link rel="stylesheet" href="/demo-controls.css" />
   </head>
   <body>
     <header class="masthead">
@@ -173,6 +173,7 @@
           <div class="objectbar" id="objectbar"></div>
         </section>
         <aside class="sidebar">
+          <section id="demo-controls-panel" hidden></section>
           <section class="panel" id="design-panel">
             <div class="panel-head">
               <span class="eyebrow">Design brief</span>
@@ -256,27 +257,7 @@
           </section>
         </aside>
       </div>
-      <section class="panel studio-replay" id="studio-replay-panel" aria-labelledby="studio-replay-title" hidden>
-        <header class="studio-replay-header">
-          <h2 id="studio-replay-title">Household replay</h2>
-          <div class="studio-replay-actions">
-            <button class="secondary" id="studio-replay-capture" type="button">Capture baseline</button>
-            <button class="primary" id="studio-replay-compare" type="button" disabled>Compare current layout</button>
-            <button class="text-btn" id="studio-replay-reset" type="button" disabled>Reset baseline</button>
-          </div>
-        </header>
-        <p class="studio-replay-message" id="studio-replay-empty-household" hidden>Save a household with at least one scheduled activity to compare layouts.</p>
-        <p class="studio-replay-message" id="studio-replay-status" role="status"></p>
-        <div class="studio-replay-summary" id="studio-replay-summary" hidden>
-          <table id="studio-replay-results" aria-label="Before and after results">
-            <thead>
-              <tr><th scope="col">Metric</th><th scope="col">Before</th><th scope="col">After</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <ul id="studio-replay-findings" class="studio-replay-findings" aria-label="Blocked routes" hidden></ul>
-        </div>
-      </section>
+      <section id="twin-results-section" hidden></section>
       <section class="inventory">
         <div class="inventory-head">
           <div>

@@ -4,6 +4,7 @@ import { box, createFurniture, createRoomMaterials } from './scene-furniture.js'
 import { createFurnitureAssets } from './real-furniture.js';
 import { constrainToRoom, createArchitecture, defaultRoom, isInsideRoom, normalizeArchitecture, roomOpeningPose } from './scene-architecture.js';
 import { constrainToHouse, getRoomAtPoint, isObjectLocked, isWalkablePoint, normalizeHouse } from './house-model.js';
+import { createSimulationSceneLayer } from './src/components/avatar/simulation-scene-layer.js';
 
 const initialCamera = new THREE.Vector3(7.5, 5.1, 8.65);
 const initialTarget = new THREE.Vector3(0, 0.92, -0.1);
@@ -124,6 +125,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   const sun = addLighting(scene);
   const outline = selectionOutline();
   scene.add(outline);
+  const simLayer = createSimulationSceneLayer({ scene, invalidate });
 
   const oblique = new THREE.PerspectiveCamera(31, 1, 0.1, 90);
   oblique.position.copy(initialCamera);
@@ -622,6 +624,31 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
       resetCameras();
       invalidate();
     },
+    setPlaybackFrame({ snapshots = [], visibleRoutes = [], agentMeta = new Map() } = {}) {
+      simLayer.updateAvatars(snapshots, agentMeta);
+      simLayer.updateRoutes(visibleRoutes, agentMeta);
+    },
+    setPlaybackFindings(findings = [], context = {}) {
+      simLayer.setFindings(findings, {
+        house: context.house ?? houseLayout,
+        items: context.items ?? itemsInScene,
+      });
+    },
+    focusFinding(findingOrNull = null) {
+      simLayer.focusFinding(findingOrNull);
+    },
+    showPatchTransition(changes = []) {
+      simLayer.showPatchTransition(changes);
+    },
+    clearPlayback() {
+      simLayer.clear();
+    },
+    getPlaybackStats() {
+      return {
+        avatarCount: simLayer.getAvatarCount(),
+        overlayCount: simLayer.getOverlayCount(),
+      };
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -633,6 +660,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
       canvas.removeEventListener('pointerup', pointerUp, true);
       canvas.removeEventListener('pointercancel', pointerCancel, true);
       canvas.removeEventListener('lostpointercapture', pointerCancel);
+      simLayer.dispose();
       architecture.dispose();
       disposeObject(scene, [], true);
       furnitureAssets.dispose();

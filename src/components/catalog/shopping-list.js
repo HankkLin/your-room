@@ -67,12 +67,21 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
 
   function makeCard(row, product) {
     const live = Boolean(row.shopify);
-    const title = live ? product?.title || row.name || "Saved Shopify piece" : product.name;
-    const merchant = live ? product?.merchant || row.shopify.sellerDomain : product.store;
-    const variant = live ? product?.variantTitle : product.variant;
-    const price = live ? formatShopifyMoney(product?.priceMinor, product?.currency) : formatUsd(product.price);
-    const photoUrl = live ? shopifyHttpsUrl(product?.imageUrl) : product.photo;
-    const productUrl = live ? shopifyHttpsUrl(product?.productUrl) : product.url;
+    const title = live
+      ? product?.title || row.name || "Saved Shopify piece"
+      : product?.name || row.name || "Saved piece";
+    const merchant = live
+      ? product?.merchant || row.shopify.sellerDomain
+      : product?.store || product?.merchant || row.merchant || row.store || "Merchant";
+    const variant = live ? product?.variantTitle : product?.variant || row.variant;
+    const numericPrice = Number(product?.price ?? row.price);
+    const price = live
+      ? formatShopifyMoney(product?.priceMinor, product?.currency)
+      : Number.isFinite(numericPrice)
+        ? formatUsd(numericPrice)
+        : null;
+    const photoUrl = live ? shopifyHttpsUrl(product?.imageUrl) : (product?.photo || row.photo || null);
+    const productUrl = live ? shopifyHttpsUrl(product?.productUrl) : (product?.url || row.url || null);
     const card = element("article", "shop-card");
     const photo = element("div", "shop-photo");
     if (photoUrl) {
@@ -120,7 +129,12 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     if (!project) return;
     current = project;
     const saved = (project.savedProducts ?? []).flatMap((row) => {
-      const product = row.shopify ? quotes.get(row.shopify) : catalog.find((piece) => piece.id === row.productId);
+      const product = row.shopify
+        ? quotes.get(row.shopify)
+        : catalog.find((piece) => piece.id === row.productId) ||
+          (row.name && (row.merchant || row.store || row.url || Number.isFinite(Number(row.price)))
+            ? row
+            : null);
       return row.shopify || product ? [{ row, product }] : [];
     });
     intro.textContent = saved.length
@@ -131,7 +145,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       : [element("div", "shop-empty", "Your saved products will appear here.")]));
     const knownMinor = saved.map(({ row, product }) => row.shopify
       ? product?.currency === "USD" && Number.isSafeInteger(product.priceMinor) ? product.priceMinor : null
-      : Math.round(product.price * 100));
+      : Number.isFinite(Number(product?.price)) ? Math.round(Number(product.price) * 100) : null);
     const partial = knownMinor.includes(null);
     const subtotal = knownMinor.reduce((sum, amount) => sum + (amount ?? 0), 0);
     total.textContent = `${partial ? "Partial estimated subtotal" : "Estimated subtotal"} · ${formatUsd(subtotal / 100)}`;
