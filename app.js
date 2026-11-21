@@ -1061,9 +1061,19 @@ function savePieces(items) {
   );
   for (const item of items) {
     if (item.owned || isObjectLocked(item)) continue;
-    if (item.shopify)
-      saved.set(item.id, { id: item.id, name: item.name, shopify: item.shopify });
-    else if (item.productId)
+    if (item.shopify) {
+      const previous = saved.get(item.id);
+      const sameVariant = previous?.shopify?.variantId === item.shopify.variantId &&
+        previous.shopify.sellerDomain.toLowerCase() === item.shopify.sellerDomain.toLowerCase();
+      const row = { ...(sameVariant ? previous : {}), id: item.id, name: item.name, shopify: item.shopify };
+      if (!Number.isSafeInteger(row.savedPrice?.priceMinor) || !row.savedPrice.currency) {
+        const quote = shopifyQuotes.get(item.shopify);
+        if (quote?.currency && Number.isSafeInteger(quote.priceMinor)) {
+          row.savedPrice = { priceMinor: quote.priceMinor, currency: quote.currency };
+        }
+      }
+      saved.set(item.id, row);
+    } else if (item.productId)
       saved.set(item.id, { id: item.id, productId: item.productId });
   }
   commit({ ...state, savedProducts: [...saved.values()] });

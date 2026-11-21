@@ -5,7 +5,7 @@ export function shopifyRef(product) {
 }
 
 function refKey(ref) {
-  return JSON.stringify([ref.variantId, ref.sellerDomain]);
+  return JSON.stringify([ref.variantId, ref.sellerDomain.toLowerCase()]);
 }
 
 export async function shopifyRequest(operation, body, { signal } = {}) {
@@ -28,6 +28,7 @@ export async function shopifyRequest(operation, body, { signal } = {}) {
     const error = new Error(data?.error || "Shopify is temporarily unavailable.");
     error.status = response.status;
     error.warnings = data?.warnings;
+    error.products = data?.products;
     error.retryAfter = data?.retryAfter;
     error.uncertain = data?.uncertain === true || (operation === "checkout" && !data);
     throw error;
@@ -56,6 +57,36 @@ export function createShopifyQuotes(onExpire) {
     quotes.set(refKey(product), { product, expiresAt: Date.now() + quoteLifetimeMs });
   }
 
+  async function refreshMerchant(refs, signal) {
+    const unique = [...new Map(refs.map((ref) => [refKey(ref), ref])).values()];
+    const warnings = [];
+    for (let offset = 0; offset < unique.length; offset += 50) {
+      const batch = unique.slice(offset, offset + 50);
+      const previous = batch.map((ref) => quotes.get(refKey(ref)));
+      let products = [];
+      try {
+        const data = await shopifyRequest("lookup", { refs: batch }, { signal });
+        if (!Array.isArray(data.products)) throw new Error("Shopify product details are unavailable.");
+        products = data.products;
+        warnings.push(...(data.warnings ?? []));
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        warnings.push({ text: `${batch[0].sellerDomain} · ${error.message}` }, ...(error.warnings ?? []));
+      }
+      if (signal?.aborted) return [];
+      const byRef = new Map(products.map((product) => [refKey(product), product]));
+      batch.forEach((ref, index) => {
+        const key = refKey(ref);
+        if (quotes.get(key) !== previous[index]) return;
+        const product = byRef.get(key);
+        if (product) set(product);
+        else quotes.delete(key);
+      });
+      scheduleExpiry();
+    }
+    return warnings;
+  }
+
   return {
     get(ref) {
       if (!ref) return null;
@@ -67,27 +98,14 @@ export function createShopifyQuotes(onExpire) {
       scheduleExpiry();
     },
     async refresh(refs, { signal } = {}) {
-      const unique = [...new Map(refs.filter(Boolean).map((ref) => [refKey(ref), ref])).values()];
-      const warnings = [];
-      for (let offset = 0; offset < unique.length; offset += 50) {
-        const batch = unique.slice(offset, offset + 50);
-        const previous = batch.map((ref) => quotes.get(refKey(ref)));
-        const data = await shopifyRequest("lookup", { refs: batch }, { signal });
-        if (signal?.aborted) return [];
-        if (!Array.isArray(data.products)) throw new Error("Shopify product details are unavailable.");
-        const byRef = new Map(data.products.map((product) => [refKey(product), product]));
-        batch.forEach((ref, index) => {
-          const key = refKey(ref);
-          const current = quotes.get(key);
-          if (current && current !== previous[index]) return;
-          const product = byRef.get(key);
-          if (product) set(product);
-          else quotes.delete(key);
-        });
-        scheduleExpiry();
-        warnings.push(...(data.warnings ?? []));
+      const merchants = new Map();
+      for (const ref of refs.filter(Boolean)) {
+        const domain = ref.sellerDomain.toLowerCase();
+        if (!merchants.has(domain)) merchants.set(domain, []);
+        merchants.get(domain).push(ref);
       }
-      return warnings;
+      const results = await Promise.all([...merchants.values()].map((group) => refreshMerchant(group, signal)));
+      return results.flat();
     },
   };
 }

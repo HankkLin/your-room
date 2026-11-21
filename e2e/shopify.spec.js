@@ -103,10 +103,10 @@ test("a live Shopify pick survives reload and opens a checkout link for its vari
   expect(saved.savedProducts).toContainEqual(expect.objectContaining({ shopify: ref }));
   expect(calls).toContainEqual({ endpoint: "lookup", body: { refs: [ref] } });
 
-  await card.getByRole("button", { name: "Start checkout" }).click();
+  await page.getByRole("button", { name: "Start checkout" }).click();
   await expect(page.getByRole("link", { name: "Continue to checkout" }))
     .toHaveAttribute("href", checkoutUrl);
-  expect(calls).toContainEqual({ endpoint: "checkout", body: { ref } });
+  expect(calls).toContainEqual({ endpoint: "checkout", body: { lines: [lineFor(lamp)] } });
 });
 
 test("a live Shopify swap preserves the whole-home room and locked fixtures", async ({ page }) => {
@@ -145,17 +145,18 @@ test("an unconfirmed Shopify checkout retains the merchant product link", async 
   });
   const card = await addLampAndSaveRoom(page);
   const merchantLink = card.getByRole("link", { name: `Shop at ${lamp.merchant}` });
-  const startCheckout = card.getByRole("button", { name: "Start checkout" });
+  const group = page.getByRole("region", { name: ref.sellerDomain });
+  const startCheckout = group.getByRole("button", { name: "Start checkout" });
 
   await expect(merchantLink).toHaveAttribute("href", lamp.productUrl);
   await startCheckout.click();
-  await expect(card.getByText(error)).toBeVisible();
+  await expect(group.getByText(error)).toBeVisible();
   await expect(merchantLink).toBeVisible();
   await expect(merchantLink).toHaveAttribute("href", lamp.productUrl);
   await expect(startCheckout).toBeDisabled();
-  await expect(card.getByRole("link", { name: "Continue to checkout" })).toHaveCount(0);
+  await expect(group.getByRole("link", { name: "Continue to checkout" })).toHaveCount(0);
   expect(calls.filter(({ endpoint }) => endpoint === "checkout")).toEqual([
-    { endpoint: "checkout", body: { ref } },
+    { endpoint: "checkout", body: { lines: [lineFor(lamp)] } },
   ]);
 });
 
@@ -226,7 +227,7 @@ test("a Shopify pick that becomes unavailable stays visible and removable", asyn
   available = false;
   await page.reload();
   await expect(card).toContainText(/unavailable|out of stock|sold out/i);
-  const checkout = card.getByRole("button", { name: "Start checkout" });
+  const checkout = page.getByRole("button", { name: "Start checkout" });
   await expect
     .poll(async () => (await checkout.count()) === 0 || !(await checkout.isEnabled()))
     .toBe(true);
@@ -234,4 +235,140 @@ test("a Shopify pick that becomes unavailable stays visible and removable", asyn
   await expect(card).toHaveCount(0);
   await page.reload();
   await expect(card).toHaveCount(0);
+});
+
+function lineFor(product, quantity = 1) {
+  const { variantId, sellerDomain, priceMinor, currency } = product;
+  return { ref: { variantId, sellerDomain }, quantity, priceMinor, currency };
+}
+
+const shade = { ...lamp, title: "Woven shade", variantId: "gid://shopify/ProductVariant/222" };
+const rug = { ...lamp, title: "Wool rug", sellerDomain: "rug-shop.example", merchant: "Rug Shop" };
+const rugCheckout = "https://rug-shop.example/checkouts/rug";
+const products = [lamp, shade, rug];
+
+async function openSavedMerchants(page, handlers = {}) {
+  const calls = await mockShopify(page, {
+    lookup: ({ refs }) => ({
+      json: { products: products.filter(p => refs.some(r => r.sellerDomain === p.sellerDomain && r.variantId === p.variantId)) },
+    }),
+    checkout: ({ lines }) => ({
+      json: { continueUrl: lines[0].ref.sellerDomain === rug.sellerDomain ? rugCheckout : checkoutUrl },
+    }),
+    ...handlers,
+  });
+  await loadDemo(page);
+  await page.locator("#shop").click();
+  // Existing projects may have several placed rows with the same variant and no saved price.
+  const rows = [lamp, lamp, shade, rug].map((p, i) => ({
+    id: `saved-${i}`, name: p.title, shopify: lineFor(p).ref,
+  }));
+  await page.evaluate(rows => {
+    const key = "stillroom.project.v1";
+    const saved = JSON.parse(localStorage.getItem(key));
+    saved.savedProducts = rows;
+    localStorage.setItem(key, JSON.stringify(saved));
+  }, rows);
+  await page.reload();
+  return {
+    calls,
+    a: page.getByRole("region", { name: ref.sellerDomain }),
+    b: page.getByRole("region", { name: rug.sellerDomain }),
+    all: page.getByRole("button", { name: "Prepare all merchant checkouts" }),
+  };
+}
+
+test("whole-home checkout groups duplicate placements and keeps separate merchant links", async ({ page }) => {
+  const { calls, a, b, all } = await openSavedMerchants(page);
+  await all.click();
+  await expect(a.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", checkoutUrl);
+  await expect(b.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", rugCheckout);
+  expect(calls.filter(c => c.endpoint === "checkout").map(c => c.body)).toEqual(expect.arrayContaining([
+    { lines: [lineFor(lamp, 2), lineFor(shade)] }, { lines: [lineFor(rug)] },
+  ]));
+  expect(calls.filter(c => c.endpoint === "checkout")).toHaveLength(2);
+  await expect(page.locator("#saved-total")).toContainText("$756");
+  await a.getByLabel(`Include ${lamp.title} in checkout`).first().uncheck();
+  await expect(page.locator("#saved-total")).toContainText("$567");
+  await expect(a.getByRole("link", { name: "Continue to checkout" })).toHaveCount(0);
+  await expect(b.getByRole("link", { name: "Continue to checkout" })).toBeVisible();
+  await a.getByRole("button", { name: "Start checkout" }).click();
+  await expect(a.getByRole("link", { name: "Continue to checkout" })).toBeVisible();
+  expect(calls.filter(c => c.endpoint === "checkout").at(-1).body.lines).toEqual([lineFor(lamp), lineFor(shade)]);
+});
+
+test("a price change requires another click and leaves the other merchant handoff available", async ({ page }) => {
+  const newLamp = { ...lamp, priceMinor: 19900 };
+  const { calls, a, b, all } = await openSavedMerchants(page, {
+    checkout: ({ lines }) => {
+      if (lines[0].ref.sellerDomain === rug.sellerDomain) return { json: { continueUrl: rugCheckout } };
+      if (lines[0].priceMinor === lamp.priceMinor) {
+        return { status: 409, json: { error: "The price of Linen Arc Floor Lamp changed.", products: [newLamp, shade] } };
+      }
+      return { json: { continueUrl: checkoutUrl } };
+    },
+  });
+  await all.click();
+  await expect(a.getByText(/price of .* changed/)).toBeVisible();
+  await expect(a.getByRole("link", { name: "Continue to checkout" })).toHaveCount(0);
+  await expect(b.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", rugCheckout);
+  await expect(a.getByText("$199.00", { exact: true }).first()).toBeVisible();
+  await a.getByRole("button", { name: "Start checkout" }).click();
+  await expect(a.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", checkoutUrl);
+  expect(calls.filter(c => c.endpoint === "checkout").at(-1).body.lines).toEqual([lineFor(newLamp, 2), lineFor(shade)]);
+});
+
+test("re-saving the same placement keeps the original unit quote and saved quantity", async ({ page }) => {
+  let livePrice = lamp.priceMinor;
+  const calls = await mockShopify(page, {
+    lookup: () => ({ json: { products: [{ ...lamp, priceMinor: livePrice }] } }),
+  });
+  const card = await addLampAndSaveRoom(page);
+  const firstSave = (await project(page)).savedProducts.find(row => row.shopify);
+  expect(firstSave.savedPrice).toEqual({ priceMinor: lamp.priceMinor, currency: lamp.currency });
+  await page.evaluate(id => {
+    const key = "stillroom.project.v1";
+    const saved = JSON.parse(localStorage.getItem(key));
+    saved.savedProducts.find(row => row.id === id).quantity = 3;
+    localStorage.setItem(key, JSON.stringify(saved));
+  }, firstSave.id);
+  livePrice = 19900;
+  await page.reload();
+  await expect(card).toContainText("Price changed since saving");
+  await page.locator("#back-to-tour").click();
+  await page.locator("#save-room").click();
+  const again = (await project(page)).savedProducts.find(row => row.id === firstSave.id);
+  expect(again.savedPrice).toEqual(firstSave.savedPrice);
+  expect(again.quantity).toBe(3);
+  await page.getByRole("button", { name: "Start checkout" }).click();
+  expect(calls.filter(c => c.endpoint === "checkout").at(-1).body.lines)
+    .toEqual([lineFor({ ...lamp, priceMinor: livePrice }, 3)]);
+});
+
+test("an included variant without a price blocks its merchant until deselected", async ({ page }) => {
+  const { a } = await openSavedMerchants(page, {
+    lookup: ({ refs }) => ({
+      json: { products: refs[0].sellerDomain === ref.sellerDomain ? [lamp, { ...shade, priceMinor: null }] : [rug] },
+    }),
+  });
+  await expect(a.getByText("Price unconfirmed")).toBeVisible();
+  await expect(page.locator("#saved-total")).toContainText("Partial");
+  await expect(a.getByRole("button", { name: "Start checkout" })).toBeDisabled();
+  await a.getByLabel(`Include ${shade.title} in checkout`).uncheck();
+  await expect(a.getByRole("button", { name: "Start checkout" })).toBeEnabled();
+  await expect(page.locator("#saved-total")).not.toContainText("Partial");
+  await expect(page.locator("#saved-total")).toContainText("$567");
+});
+
+test("a merchant lookup outage on reload leaves the other merchant ready", async ({ page }) => {
+  const { a, b, all, calls } = await openSavedMerchants(page, {
+    lookup: ({ refs }) => refs[0].sellerDomain === ref.sellerDomain
+      ? { status: 502, json: { error: "Catalog temporarily unavailable." } }
+      : { json: { products: [rug] } },
+  });
+  await expect(page.getByText(/Catalog temporarily unavailable/)).toBeVisible();
+  await expect(a.getByRole("button", { name: "Start checkout" })).toBeDisabled();
+  await all.click();
+  await expect(b.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", rugCheckout);
+  expect(calls.filter(c => c.endpoint === "checkout").map(c => c.body)).toEqual([{ lines: [lineFor(rug)] }]);
 });

@@ -285,6 +285,86 @@ test("checkout stops for unavailable variants and protects checkout capabilities
   }
 });
 
+const savedLine = (ref, quantity = 1) => ({ ref, quantity, priceMinor: 45_999, currency: "USD" });
+
+test("grouped checkout refreshes both variants, preserves quantities, and accepts reordered confirmations", async () => {
+  const lines = [savedLine(ref, 3), savedLine(otherRef)];
+  const seen = [];
+  const response = await requestApi((_, options) => {
+    const { name, arguments: args } = JSON.parse(options.body).params;
+    seen.push(name);
+    if (name === "get_product") {
+      return toolResponse({ product: catalogProduct(catalogVariant({ id: args.catalog.id })) });
+    }
+    assert.equal(args.shop, ref.sellerDomain);
+    assert.deepEqual(args.checkout.line_items, [
+      { item: { id: ref.variantId }, quantity: 3 },
+      { item: { id: otherRef.variantId }, quantity: 1 },
+    ]);
+    return toolResponse(checkoutDocument({ currency: "USD", line_items: args.checkout.line_items.toReversed() }));
+  }, { route: "checkout", input: { lines } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json.continueUrl, checkoutUrl);
+  assert.deepEqual(seen, ["get_product", "get_product", "create_checkout"]);
+});
+
+test("merchant checkout line price changes are surfaced alongside the final totals", async () => {
+  const result = await requestApi((_, options) => {
+    const { name } = JSON.parse(options.body).params;
+    if (name === "get_product") return toolResponse({ product: catalogProduct(catalogVariant()) });
+    return toolResponse(checkoutDocument({
+      currency: "USD", line_items: [{ item: { id: ref.variantId, price: 50_000 }, quantity: 1 }],
+    }));
+  }, { route: "checkout", input: { lines: [savedLine(ref)] } });
+  assert.equal(result.statusCode, 200);
+  assert.match(result.json.warnings[0].text, /merchant changed the price/);
+  assert.equal(result.json.continueUrl, checkoutUrl);
+});
+
+test("a changed or unconfirmed quote blocks the entire merchant group before checkout creation", async () => {
+  for (const [variant, message] of [
+    [{ price: { amount: 46_000, currency: "USD" } }, /changed/],
+    [{ price: null }, /confirmed the price/],
+    [{ availability: { available: false } }, /in stock/],
+  ]) {
+    const calls = [];
+    const res = await requestApi((_, options) => {
+      const { name, arguments: args } = JSON.parse(options.body).params;
+      calls.push(name);
+      return toolResponse({ product: catalogProduct(catalogVariant({
+        id: args.catalog.id, ...(args.catalog.id === otherRef.variantId ? variant : {}),
+      })) });
+    }, { route: "checkout", input: { lines: [savedLine(ref), savedLine(otherRef)] } });
+    assert.equal(res.statusCode, 409);
+    assert.match(res.json.error, message);
+    assert.equal(res.json.products.length, 2);
+    assert.deepEqual(calls, ["get_product", "get_product"]);
+    assert.equal(res.json.continueUrl, undefined);
+  }
+});
+
+test("grouped checkout rejects mixed merchants, repeated IDs, invalid quantities and incomplete confirmations", async () => {
+  for (const lines of [
+    [savedLine(ref), savedLine({ ...otherRef, sellerDomain: "other.example" })],
+    [savedLine(ref), savedLine(ref)],
+    [savedLine(ref, 0)],
+    [savedLine(ref, 1.5)],
+    [],
+  ]) {
+    const response = await requestApi(() => assert.fail("unexpected upstream request"), { route: "checkout", input: { lines } });
+    assert.equal(response.statusCode, 400);
+  }
+  const result = await requestApi((_, options) => {
+    const { name, arguments: args } = JSON.parse(options.body).params;
+    return name === "get_product"
+      ? toolResponse({ product: catalogProduct(catalogVariant({ id: args.catalog.id })) })
+      : toolResponse(checkoutDocument());
+  }, { route: "checkout", input: { lines: [savedLine(ref, 2), savedLine(otherRef)] } });
+  assert.equal(result.statusCode, 502);
+  assert.equal(result.json.uncertain, true);
+  assert.equal(result.json.continueUrl, undefined);
+});
+
 test("invalid requests and unrelated paths never call Shop MCP", async () => {
   let calls = 0;
   const upstream = () => { calls++; };
