@@ -103,8 +103,8 @@ test("a live Shopify pick survives reload and opens a checkout link for its vari
   expect(saved.savedProducts).toContainEqual(expect.objectContaining({ shopify: ref }));
   expect(calls).toContainEqual({ endpoint: "lookup", body: { refs: [ref] } });
 
-  await page.getByRole("button", { name: "Start checkout" }).click();
-  await expect(page.getByRole("link", { name: "Continue to checkout" }))
+  await page.getByRole("region", { name: ref.sellerDomain }).getByRole("button", { name: "Start checkout" }).click();
+  await expect(page.getByRole("link", { name: "Continue to Shopify checkout" }))
     .toHaveAttribute("href", checkoutUrl);
   expect(calls).toContainEqual({ endpoint: "checkout", body: { lines: [lineFor(lamp)] } });
 });
@@ -144,7 +144,7 @@ test("an unconfirmed Shopify checkout retains the merchant product link", async 
     checkout: () => ({ status: 502, json: { error, uncertain: true } }),
   });
   const card = await addLampAndSaveRoom(page);
-  const merchantLink = card.getByRole("link", { name: `Shop at ${lamp.merchant}` });
+  const merchantLink = card.getByRole("link", { name: `View product at ${lamp.merchant}` });
   const group = page.getByRole("region", { name: ref.sellerDomain });
   const startCheckout = group.getByRole("button", { name: "Start checkout" });
 
@@ -154,7 +154,7 @@ test("an unconfirmed Shopify checkout retains the merchant product link", async 
   await expect(merchantLink).toBeVisible();
   await expect(merchantLink).toHaveAttribute("href", lamp.productUrl);
   await expect(startCheckout).toBeDisabled();
-  await expect(group.getByRole("link", { name: "Continue to checkout" })).toHaveCount(0);
+  await expect(group.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveCount(0);
   expect(calls.filter(({ endpoint }) => endpoint === "checkout")).toEqual([
     { endpoint: "checkout", body: { lines: [lineFor(lamp)] } },
   ]);
@@ -227,7 +227,7 @@ test("a Shopify pick that becomes unavailable stays visible and removable", asyn
   available = false;
   await page.reload();
   await expect(card).toContainText(/unavailable|out of stock|sold out/i);
-  const checkout = page.getByRole("button", { name: "Start checkout" });
+  const checkout = page.getByRole("region", { name: ref.sellerDomain }).getByRole("button", { name: "Start checkout" });
   await expect
     .poll(async () => (await checkout.count()) === 0 || !(await checkout.isEnabled()))
     .toBe(true);
@@ -281,8 +281,8 @@ async function openSavedMerchants(page, handlers = {}) {
 test("whole-home checkout groups duplicate placements and keeps separate merchant links", async ({ page }) => {
   const { calls, a, b, all } = await openSavedMerchants(page);
   await all.click();
-  await expect(a.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", checkoutUrl);
-  await expect(b.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", rugCheckout);
+  await expect(a.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", checkoutUrl);
+  await expect(b.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", rugCheckout);
   expect(calls.filter(c => c.endpoint === "checkout").map(c => c.body)).toEqual(expect.arrayContaining([
     { lines: [lineFor(lamp, 2), lineFor(shade)] }, { lines: [lineFor(rug)] },
   ]));
@@ -290,10 +290,10 @@ test("whole-home checkout groups duplicate placements and keeps separate merchan
   await expect(page.locator("#saved-total")).toContainText("$756");
   await a.getByLabel(`Include ${lamp.title} in checkout`).first().uncheck();
   await expect(page.locator("#saved-total")).toContainText("$567");
-  await expect(a.getByRole("link", { name: "Continue to checkout" })).toHaveCount(0);
-  await expect(b.getByRole("link", { name: "Continue to checkout" })).toBeVisible();
+  await expect(a.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveCount(0);
+  await expect(b.getByRole("link", { name: "Continue to Shopify checkout" })).toBeVisible();
   await a.getByRole("button", { name: "Start checkout" }).click();
-  await expect(a.getByRole("link", { name: "Continue to checkout" })).toBeVisible();
+  await expect(a.getByRole("link", { name: "Continue to Shopify checkout" })).toBeVisible();
   expect(calls.filter(c => c.endpoint === "checkout").at(-1).body.lines).toEqual([lineFor(lamp), lineFor(shade)]);
 });
 
@@ -310,11 +310,11 @@ test("a price change requires another click and leaves the other merchant handof
   });
   await all.click();
   await expect(a.getByText(/price of .* changed/)).toBeVisible();
-  await expect(a.getByRole("link", { name: "Continue to checkout" })).toHaveCount(0);
-  await expect(b.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", rugCheckout);
+  await expect(a.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveCount(0);
+  await expect(b.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", rugCheckout);
   await expect(a.getByText("$199.00", { exact: true }).first()).toBeVisible();
   await a.getByRole("button", { name: "Start checkout" }).click();
-  await expect(a.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", checkoutUrl);
+  await expect(a.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", checkoutUrl);
   expect(calls.filter(c => c.endpoint === "checkout").at(-1).body.lines).toEqual([lineFor(newLamp, 2), lineFor(shade)]);
 });
 
@@ -324,7 +324,7 @@ test("re-saving the same placement keeps the original unit quote and saved quant
     lookup: () => ({ json: { products: [{ ...lamp, priceMinor: livePrice }] } }),
   });
   const card = await addLampAndSaveRoom(page);
-  const firstSave = (await project(page)).savedProducts.find(row => row.shopify);
+  const firstSave = (await project(page)).savedProducts.find(row => row.shopify?.variantId === ref.variantId && row.shopify.sellerDomain === ref.sellerDomain);
   expect(firstSave.savedPrice).toEqual({ priceMinor: lamp.priceMinor, currency: lamp.currency });
   await page.evaluate(id => {
     const key = "living-blueprint.project.v1";
@@ -341,7 +341,7 @@ test("re-saving the same placement keeps the original unit quote and saved quant
   const again = (await project(page)).savedProducts.find(row => row.id === firstSave.id);
   expect(again.savedPrice).toEqual(firstSave.savedPrice);
   expect(again.quantity).toBe(3);
-  await page.getByRole("button", { name: "Start checkout" }).click();
+  await page.getByRole("region", { name: ref.sellerDomain }).getByRole("button", { name: "Start checkout" }).click();
   expect(calls.filter(c => c.endpoint === "checkout").at(-1).body.lines)
     .toEqual([lineFor({ ...lamp, priceMinor: livePrice }, 3)]);
 });
@@ -370,7 +370,7 @@ test("a merchant lookup outage on reload leaves the other merchant ready", async
   await expect(page.getByText(/Catalog temporarily unavailable/)).toBeVisible();
   await expect(a.getByRole("button", { name: "Start checkout" })).toBeDisabled();
   await all.click();
-  await expect(b.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", rugCheckout);
+  await expect(b.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", rugCheckout);
   expect(calls.filter(c => c.endpoint === "checkout").map(c => c.body)).toEqual([{ lines: [lineFor(rug)] }]);
 });
 
@@ -458,4 +458,35 @@ test("merchant geometry loads at scene scale, survives reload and falls back aft
   await page.getByRole("button", { name: "Rotate", exact: true }).click();
   expect((await project(page)).items.find((i) => i.id === item.id).rotation).toBe((item.rotation + 90) % 360);
   expect(errors).toEqual([]);
+});
+
+test("a previously saved catalog layout offers Shopify checkout separately from product details", async ({ page }) => {
+  const sellerDomain = "sundays-company-production.myshopify.com";
+  const variantId = "gid://shopify/ProductVariant/41588406419527";
+  const shopify = { sellerDomain, variantId };
+  const product = { ...shopify, title: "Form Coffee Table", merchant: "Sundays", variantTitle: "American Walnut",
+    productUrl: "https://www.sundays-company.com/products/form-coffee-table-walnut?variant=41588406419527",
+    available: true, currency: "USD", priceMinor: 67500 };
+  const continueUrl = "https://shop.app/checkouts/review-fixture";
+  const calls = await mockShopify(page, {
+    lookup: () => ({ json: { products: [product] } }),
+    checkout: () => ({ json: { continueUrl } }),
+  });
+  await page.goto("/");
+  await page.locator("#whole-home-demo").click();
+  await page.locator("#shop").click();
+  await page.evaluate(() => {
+    const key = "living-blueprint.project.v1";
+    const state = JSON.parse(localStorage.getItem(key));
+    state.savedProducts = [{ id: "saved-table", productId: "walnut-table", quantity: 2 }];
+    localStorage.setItem(key, JSON.stringify(state));
+  });
+  await page.reload();
+  const group = page.getByRole("region", { name: sellerDomain, exact: true });
+  await expect(group.getByRole("link", { name: "View product at Sundays" })).toHaveAttribute("href", product.productUrl);
+  await group.getByRole("button", { name: "Start checkout" }).click();
+  await expect(group.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", continueUrl);
+  expect(calls.filter(call => call.endpoint === "checkout").map(call => call.body)).toEqual([
+    { lines: [{ ref: shopify, quantity: 2, priceMinor: 67500, currency: "USD" }] },
+  ]);
 });

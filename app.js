@@ -44,6 +44,7 @@ import { createHouseholdPage } from "./src/components/persona/household-page.js"
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
 import { createCandidateSession } from "./src/shopify/candidate-session.js";
+import { catalogCheckoutRow } from "./src/shopify/catalog-checkout.js";
 import { createCandidatePlacement, refreshPatchCandidates, savedProductsForPatch, savedShopifyRow } from "./src/shopify/scene-candidate.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
@@ -104,7 +105,8 @@ try {
     saved.style in styles &&
     typeof saved.roomName === "string"
   ) {
-    state = { ...demo, ...saved };
+    state = { ...demo, ...saved, savedProducts: Array.isArray(saved.savedProducts)
+      ? saved.savedProducts.map(row => catalogCheckoutRow(row)) : [] };
     hasProject = true;
     if (state.importedHouse) {
       try {
@@ -1702,7 +1704,8 @@ function savePieces(items, { replaceExisting = false } = {}) {
       });
     }
   }
-  commit({ ...state, savedProducts: [...saved.values()] });
+  const savedProducts = [...saved.values()].map(row => catalogCheckoutRow(row, previous.get(row.id)));
+  commit({ ...state, savedProducts });
   toast(
     items.length === 1
       ? "Piece saved to your shopping list"

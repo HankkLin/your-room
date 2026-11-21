@@ -42,6 +42,8 @@ See the [brief acceptance and demo results](docs/brief-acceptance.md) for the fu
 
 ## Shopify verification
 
+Built-in catalog pieces and live search results use the same merchant checkout. From **Save room & review products**, select your items, choose **Start checkout** for one merchant or **Prepare all merchant checkouts**, then **Continue to Shopify checkout**. The separate **View product at…** link opens the merchant’s product details. Shopify can host the order summary on `shop.app` or the merchant’s Shopify checkout domain. [Sample room’s live checkout](docs/sample-shopify-checkout.png)
+
 From the repository root, install dependencies with `npm ci`. Run these focused tests.
 
 ```sh

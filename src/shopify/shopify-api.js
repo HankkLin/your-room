@@ -257,6 +257,20 @@ function readCheckoutLines({ ref, lines }) {
   });
 }
 
+function checkoutDestination(raw, products) {
+  const url = httpsUrl(raw);
+  if (!url) return null;
+  const { hostname, pathname, port } = new URL(url);
+  if (port) return null;
+  const checkoutPath = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:checkouts?(?:\/|$)|cart\/c\/)/i.test(pathname);
+  if (hostname === "shop.app" || hostname === "pay.shopify.com" || hostname === "checkout.shopify.com") {
+    return checkoutPath || pathname.startsWith("/pay/") ? url : null;
+  }
+  const merchantHost = products.some(product => hostname === product.sellerDomain.toLowerCase() ||
+    (product.productUrl && hostname.replace(/^www\./, "") === new URL(product.productUrl).hostname.replace(/^www\./, "")));
+  return merchantHost && checkoutPath ? url : null;
+}
+
 async function startCheckout(call, input) {
   const lines = readCheckoutLines(input);
   const quotes = await Promise.all(lines.map(({ ref }) => findVariant(call, ref)));
@@ -285,7 +299,7 @@ async function startCheckout(call, input) {
     },
     meta: { "idempotency-key": randomUUID() },
   });
-  const continueUrl = httpsUrl(document.continue_url);
+  const continueUrl = checkoutDestination(document.continue_url, products);
   const currency = validCurrency(document.currency);
   if (!continueUrl || !currency || !Array.isArray(document.line_items) ||
       !["incomplete", "requires_escalation", "ready_for_complete"].includes(document.status) ||

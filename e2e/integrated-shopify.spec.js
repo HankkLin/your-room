@@ -82,6 +82,6 @@ test("a household reviews two live alternatives, reapproves a changed offer, fix
   await expect(failures).toHaveText(["1", "0"]);
   await page.locator("#save-room").click();
   await page.getByRole("button", { name: "Start checkout", exact: true }).click();
-  await expect(page.getByRole("link", { name: "Continue to checkout" })).toHaveAttribute("href", handoff);
+  await expect(page.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", handoff);
   expect(checkouts).toEqual([{ lines: [{ ref, quantity: 1, priceMinor: 14200, currency: "USD" }] }]);
 });
