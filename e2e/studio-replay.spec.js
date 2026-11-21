@@ -147,6 +147,11 @@ test("layout, schedule and floorplan changes discard a proposed or in-flight mov
   releaseReply();
   await replyFinished;
   delayReply = false;
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+  await page.locator("#tour-step").click();
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  expect((await project(page)).personas[0].schedule[1].windowEndMinute).toBe(515);
+  await expect(page.locator("#studio-replay-compare")).toBeDisabled();
   await expect(approve).toBeHidden();
   await expect(suggest).toBeHidden();
 
@@ -157,6 +162,10 @@ test("layout, schedule and floorplan changes discard a proposed or in-flight mov
   await page.locator("#try-sample-floorplan").click();
   await page.locator("#fp-confirm-import").click();
   await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#tour-step").click();
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  await expect(capture).toBeDisabled();
+  await expect(page.locator("#studio-replay-compare")).toBeDisabled();
   await expect(approve).toBeHidden();
   await expect(suggest).toBeHidden();
   expect((await project(page)).items.some(({ id }) => id === sofa.id)).toBe(false);
