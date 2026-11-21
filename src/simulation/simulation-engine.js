@@ -376,12 +376,27 @@ export function runSimulation({
           ? countAgentsTargetingOrInRoom(targetRoomHint, agent.id)
           : 0;
 
+        const occupiedPositions = targetRoomHint
+          ? agents
+              .filter(
+                (other) =>
+                  other.id !== agent.id &&
+                  (other.activeRoute?.targetRoomId ?? other.currentRoomId) ===
+                    targetRoomHint,
+              )
+              .map(
+                (other) =>
+                  other.activeRoute?.path?.at(-1) ?? other.currentPosition,
+              )
+          : [];
+
         const resolvedDest = resolveScheduleDestination(entry.destination, {
           navigation,
           house,
           agentRadius: agent.radiusMeters,
           slotIndex,
           activity: entry.activity,
+          occupiedPositions,
         });
 
         if (!resolvedDest.ok || !resolvedDest.position) {

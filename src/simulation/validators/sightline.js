@@ -181,10 +181,12 @@ export function listSemanticEntities(house) {
       raw.dimensions?.height ?? raw.height ?? fallbackHeight,
     );
 
-    const hasExplicitRotation = raw.rotation != null;
+    const hasExplicitRotation = raw.rotation != null || raw.rotationRadians != null;
     let yawRadians = 0;
     if (Array.isArray(raw.rotation)) {
       yawRadians = Number(raw.rotation[1]) || 0;
+    } else if (Array.isArray(raw.rotationRadians)) {
+      yawRadians = Number(raw.rotationRadians[1]) || 0;
     } else if (typeof raw.rotation === "number") {
       yawRadians = defaultDegRotation
         ? (raw.rotation * Math.PI) / 180
