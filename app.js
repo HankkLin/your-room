@@ -142,6 +142,11 @@ const studioReplay = createStudioReplayPanel($("#studio-replay-panel"), {
     personas: state.personas,
     rooms: listPersonaRooms(state),
   }),
+  commitEnvironment(snapshot) {
+    const key = state.importedHouse ? "importedHouse" : "house";
+    const house = state[key];
+    if (house) commit({ ...state, [key]: { ...house, environment: { ...house.environment, snapshot } } });
+  },
   commitItems: (items) => commit({ ...state, items }),
 });
 const householdPage = createHouseholdPage($("#household-page"), {
