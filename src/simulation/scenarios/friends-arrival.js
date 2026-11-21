@@ -31,15 +31,24 @@ const FRIEND_NAMES = [
   "Nina",
   "Ethan",
   "Aria",
+  "Noah",
+  "Maya-J",
+  "Owen",
+  "Ruby",
+  "Caleb",
+  "Iris",
 ];
+
+export const SUPPORTED_FRIEND_COUNTS = Object.freeze([4, 6, 8, 12, 16]);
 
 /**
  * Create staged friend arrival waves (`Wave 1`, `Wave 2`, `Wave 3`) at the front entry:
  * - Wave 1 (`17:02`): early pair arrives at entry -> living room -> kitchen snacks
- * - Wave 2 (`17:06`): main group of 3–4 arrives together -> clusters in entry/hallway -> living room -> kitchen
+ * - Wave 2 (`17:06`): main group arrives together -> clusters in entry/hallway -> living room -> kitchen
  * - Wave 3 (`17:11`): final group arrives -> entry -> kitchen snacks -> living room
  *
- * Configurable `friendCount` (`6`, `8`, `10+`), combining with the 4-person family for `10–14` total occupants.
+ * Configurable `friendCount` (`4`, `6`, `8`, `12`, `16+`), combining with the 4-person family
+ * without creating separate hard-coded scenarios for every number.
  */
 export function createFriendsArrivalWaves({
   house,
@@ -76,9 +85,9 @@ export function createFriendsArrivalWaves({
     findRoomByPreference(rooms, ["hallway", "entry"], ["hallway", "living"]);
   const hasExteriorExit = Boolean(exitTarget);
 
-  const count = Math.max(4, Math.floor(Number(friendCount) || 8));
-  const wave1Count = Math.max(2, Math.round(count * 0.25));
-  const wave2Count = Math.max(2, Math.round(count * 0.4));
+  const count = Math.max(1, Math.min(24, Math.floor(Number(friendCount) || 8)));
+  const wave1Count = Math.max(1, Math.round(count * 0.25));
+  const wave2Count = Math.max(1, Math.round(count * 0.4));
   const friends = [];
 
   for (let i = 0; i < count; i += 1) {
@@ -96,7 +105,7 @@ export function createFriendsArrivalWaves({
       withinWaveIdx * 0.5;
     const snackMinute = 1036 + (i % 3) * 3;
     const hangoutMinute = 1054 + (i % 4) * 2;
-    const departMinute = 1072 + i * 0.8;
+    const departMinute = Math.min(1082, 1068 + i * 0.75);
 
     const isTeenFriend = i % 2 === 0;
     const heightMeters = isTeenFriend

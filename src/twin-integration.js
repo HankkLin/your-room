@@ -171,7 +171,7 @@ export function resolveValidHouseholdForHouse(state, house) {
 }
 
 /**
- * Build a deterministic playback dataset for any of the 7 UI scenarios:
+ * Build a deterministic, non-mock playback dataset for any of the 7 UI scenarios:
  * - `morning-routine`
  * - `normal-day`
  * - `grandparents-visit`
@@ -247,7 +247,7 @@ export function runTwinScenario(scenarioId, { house, items, state, comparisonRun
       type: STRESS_SCENARIO_TYPES.FRIENDS_ARRIVAL,
       house: capturedHouse,
       household: simulationHousehold,
-      friendCount: Number(friendCount) || 8,
+      friendCount: Number(friendCount ?? state?.friendCount) || 8,
     });
     const evaluation = evaluateHouseholdExperience({
       house: capturedHouse,

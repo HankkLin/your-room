@@ -482,5 +482,7 @@ export function createFurniture(item, mats) {
   group.userData.itemId = item.id;
   group.userData.locked = Boolean(item.locked || item.type === 'fixed');
   group.userData.dimensions = { w, d, h };
+  group.userData.assetRepresentation = 'procedural_approximation';
+  group.userData.dimensionSource = item.dimensionSource || item.dimensionsSource || 'estimated';
   return group;
 }

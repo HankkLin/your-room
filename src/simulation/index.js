@@ -91,10 +91,35 @@ export {
   createVisitingGrandparents,
 } from "./scenarios/grandparents-visit.js";
 export {
+  SUPPORTED_FRIEND_COUNTS,
   createFriendsArrivalScenario,
   createFriendsArrivalWaves,
 } from "./scenarios/friends-arrival.js";
 export { runStressScenario } from "./scenarios/run-stress-scenario.js";
+
+export {
+  ASSET_REPRESENTATION_TIERS,
+  REPRESENTATIVE_MODEL_KINDS,
+  productCandidateToSceneObject,
+  resolveProduct3DRepresentation,
+} from "../spatial/product-scene-object.js";
+
+export {
+  OWNED_KIND_DEFAULTS,
+  buildOwnedCandidatesFromDetections,
+  createOwnedFurnitureCandidate,
+  ownedCandidateToSceneObject,
+  updateOwnedFurnitureDimensions,
+} from "../spatial/owned-furniture.js";
+
+export {
+  createRegionSelection,
+  runScopedRegionRedesign,
+  summarizeArchitecturalAccessibilityLimits,
+  validateScopedRegionPatch,
+} from "../spatial/region-selection.js";
+
+export { designEmptyHouse } from "../spatial/spatial-design-engine.js";
 
 export {
   formatHouseholdExperienceReport,

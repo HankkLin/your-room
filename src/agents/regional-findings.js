@@ -29,6 +29,9 @@ const schemas = {
     maxSafeDistanceMeters: nonnegative, maxSafeSeconds: nonnegative },
   EVACUATION_BOTTLENECK: { exitDoorId: text, exitDoorWidthMeters: nonnegative, convergingAgentCount: nonnegative,
     collisionCountNearExit: nonnegative, estimatedQueueDelaySeconds: nonnegative },
+  ACCESSIBILITY_CLEARANCE_FAIL: { measuredWidthMeters: nonnegative, requiredWidthMeters: nonnegative, wheelchairWidthMeters: nonnegative },
+  ACCESSIBILITY_TURN_RADIUS_FAIL: { measuredTurnDiameterMeters: nonnegative, requiredTurnDiameterMeters: nonnegative },
+  ACCESSIBILITY_ROUTE_BLOCKED: { wheelchairWidthMeters: nonnegative },
 };
 const screenSize = { modeledTvWidthMeters: nonnegative, apparentScreenAngleDegrees: nonnegative, minScreenAngleDegrees: nonnegative };
 const optional = {
@@ -43,6 +46,9 @@ const optional = {
   NO_EVACUATION_PATH: { fromRoomId: text, candidateExitDoorIds: strings },
   LONG_EVACUATION_ROUTE: { fromRoomId: text },
   EVACUATION_BOTTLENECK: { agentIds: strings },
+  ACCESSIBILITY_CLEARANCE_FAIL: { doorId: text, agentIds: strings },
+  ACCESSIBILITY_TURN_RADIUS_FAIL: { roomId: text, agentIds: strings },
+  ACCESSIBILITY_ROUTE_BLOCKED: { fromRoomId: text, toRoomId: text, exitDoorId: text, blockingDoorId: text, reason: text, ableBodiedReachable: boolean, agentIds: strings },
 };
 
 export function isRegionFinding(finding, [left, top, right, bottom], roomIds) {

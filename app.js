@@ -1,3 +1,4 @@
+import { applyScenePatch } from "./src/redesign/apply-scene-patch.js";
 import { createStudioReplayPanel } from "./src/components/simulation/studio-replay-panel.js";
 import {
   ROOM,
@@ -61,7 +62,21 @@ import {
   createSimulationPlaybackController,
   sampleTimelineAt,
 } from "./src/components/simulation/playback-controller.js";
-import { getSimulationSnapshotAt } from "./src/simulation/index.js";
+import {
+  ASSET_REPRESENTATION_TIERS,
+  createOwnedFurnitureCandidate,
+  createRegionSelection,
+  designEmptyHouse,
+  getSimulationSnapshotAt,
+  ownedCandidateToSceneObject,
+  productCandidateToSceneObject,
+  resolveProduct3DRepresentation,
+  runScopedRegionRedesign,
+  summarizeArchitecturalAccessibilityLimits,
+  updateOwnedFurnitureDimensions,
+  validateScopedRegionPatch,
+} from "./src/simulation/index.js";
+import { buildDeterministicFurnishingPlan } from "./src/spatial/spatial-design-engine.js";
 import { captureStudioLayout, runStudioReplay } from "./src/simulation/studio-replay.js";
 import {
   describeApprovedHouseholdReplay,
@@ -1135,41 +1150,36 @@ $("#objectbar").onclick = (e) => {
 function styleActiveState(baseState, overrides = {}) {
   const house = activeHouse(baseState);
   if (!house) return autoStyle(baseState, overrides);
-  const { style, budget, skipKinds, prioritizeKinds } = resolveBrief(baseState, overrides);
-  const primaryRoomId =
-    house.rooms.find((r) => r.kind === "living")?.id ||
-    house.rooms[0]?.id ||
-    "living-room";
-  const kept = mergeHouseFixturesIntoItems(
-    house,
-    baseState.items.filter((i) => i.owned || isObjectLocked(i)),
+  const { style, budget } = resolveBrief(baseState, overrides);
+  const rawHouse = structuredClone(baseState.importedHouse || baseState.house);
+  const ownedAndLockedMovable = baseState.items.filter(
+    (i) => !i.fromHouseFixture && i.type !== "fixed" && (i.owned || isObjectLocked(i)),
   );
-  const items = [...kept];
-  let remaining = budget;
-  const kinds = [...new Set([...prioritizeKinds, "sofa", "table", "chair", "rug", "lamp", "plant"])];
-  for (const kind of kinds) {
-    if (
-      skipKinds.includes(kind) ||
-      items.some((i) => !isObjectLocked(i) && i.roomId === primaryRoomId && i.kind === kind)
-    ) {
-      continue;
-    }
-    const options = catalog.filter((p) => p.kind === kind && p.price <= remaining);
-    const product = options.find((p) => p.style === style) ?? options.sort((a, b) => a.price - b.price)[0];
-    if (!product) continue;
-    const placed = fitItemInHouse(
-      { ...createItem(product, { id: `suggested-${kind}` }), locked: false, type: "shopify" },
-      house,
-      items,
-      primaryRoomId,
+  rawHouse.objects = ownedAndLockedMovable;
+  const effectivePersonas = resolveValidHouseholdForHouse(baseState, house).displayPersonas;
+  const hasWheelchairNeed =
+    /wheelchair|accessible|accessibility|step-free/i.test(baseState.brief || "") ||
+    effectivePersonas.some(
+      (p) => Boolean(p?.usesWheelchair || p?.wheelchair) || Number(p?.needs?.accessibility ?? 0) >= 0.75,
     );
-    if (placed) {
-      items.push(placed);
-      remaining -= placed.price;
-    }
-  }
-  const added = items.length - kept.length;
-  const notes = `${added} ${added === 1 ? "suggestion" : "suggestions"} in ${style.toLowerCase()}. Fixed fixtures and owned pieces kept.`;
+  const liveCandidates = furnishingCandidatesFromSession(candidateSession.read());
+  const candidateLookupList = getCandidateProducts({ candidateSnapshot: candidateSession.read() });
+  const planned = buildDeterministicFurnishingPlan({
+    house: rawHouse,
+    normalizedHouse: house,
+    styleBrief: { style, budget, brief: baseState.brief || "" },
+    personas: effectivePersonas,
+    existingObjects: ownedAndLockedMovable,
+    productCandidates: liveCandidates,
+    candidateLookupList,
+    hasWheelchairNeed,
+  });
+  const designedHouse = applyScenePatch(rawHouse, planned.patch, {
+    candidateProducts: candidateLookupList,
+  });
+  const items = mergeHouseFixturesIntoItems(house, designedHouse.objects || []);
+  const added = planned.patch.operations.length;
+  const notes = `${added} ${added === 1 ? "suggestion" : "suggestions"} in ${style.toLowerCase()} across ${house.rooms.length} rooms. Fixed fixtures and owned pieces kept.`;
   return { ...baseState, items, style, budget, spent: getSpend(items), notes };
 }
 $("#styles").onclick = (e) => {
@@ -2062,14 +2072,29 @@ window.__livingBlueprint = {
       playbackController.setPauseOnCheckpoints(flag),
     runScenario: (scenarioId, opts = {}) => {
       demoControls.selectScenario(scenarioId);
+      if (opts.friendCount) demoControls.selectFriendCount(opts.friendCount);
       if (opts.speed) demoControls.selectSpeed(opts.speed);
       demoControls.triggerRun();
       return playbackController.getCheckpoints();
     },
+    setFriendCount: (count) => demoControls.selectFriendCount(count),
   },
   captureStudioLayout: (house = activeHouse(), items = state.items) =>
     captureStudioLayout(house, items),
   runStudioReplay,
+  spatialDesign: {
+    ASSET_REPRESENTATION_TIERS,
+    productCandidateToSceneObject,
+    resolveProduct3DRepresentation,
+    designEmptyHouse,
+    createOwnedFurnitureCandidate,
+    updateOwnedFurnitureDimensions,
+    ownedCandidateToSceneObject,
+    createRegionSelection,
+    validateScopedRegionPatch,
+    summarizeArchitecturalAccessibilityLimits,
+    runScopedRegionRedesign,
+  },
   getCandidateProducts: () => getCandidateProducts({ candidateSnapshot: candidateSession.read() }),
   proposeRedesign: (scenarioId = demoControls.getState().scenarioId) =>
     handleProposeRedesign(scenarioId),

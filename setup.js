@@ -20,6 +20,7 @@ import { openFloorplanImporter } from "./floorplan-import-ui.js";
 import { toSceneObject } from "./src/contracts/scene.js";
 import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
 import { confirmImportedHouse, importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
+import { OWNED_KIND_DEFAULTS, createOwnedFurnitureCandidate } from "./src/spatial/owned-furniture.js";
 import { createBlockedRouteDemo } from "./src/simulation/studio-replay-demo.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
@@ -554,21 +555,21 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
             esc(i.id) +
             '" maxlength="65"></label>' +
             '<div class="owned-dims-row" aria-label="Edit dimensions">' +
-            '<label class="field">W (m)<input type="number" min="0.05" max="10" step="any" value="' +
+            '<label class="field">W (m)<input type="number" min="0.05" max="10" step="0.01" value="' +
             Number(i.width || 0.8).toFixed(2) +
             '" data-kept-dim="width" data-kept-id="' +
             esc(i.id) +
             '"></label>' +
-            '<label class="field">D (m)<input type="number" min="0.05" max="10" step="any" value="' +
+            '<label class="field">D (m)<input type="number" min="0.05" max="10" step="0.01" value="' +
             Number(i.depth || 0.8).toFixed(2) +
             '" data-kept-dim="depth" data-kept-id="' +
             esc(i.id) +
             '"></label>' +
-            '<label class="field">H (m)<input type="number" min="0.05" max="10" step="any" value="' +
+            '<label class="field">H (m)<input type="number" min="0.05" max="10" step="0.01" value="' +
             Number(i.height || 0.85).toFixed(2) +
             '" data-kept-dim="height" data-kept-id="' +
             esc(i.id) +
-            '"></label></div></div><button class="icon-btn" data-remove-kept="' + +
+            '"></label></div></div><button class="icon-btn" data-remove-kept="' +
             esc(i.id) +
             '" aria-label="Remove ' +
             esc(i.name) +
@@ -578,8 +579,13 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
         )
         .join("") +
       draft.additions
-        .map(
-          (i) =>
+        .map((i) => {
+          const def = OWNED_KIND_DEFAULTS[i.kind] || OWNED_KIND_DEFAULTS.chair;
+          const wVal = Number(i.customWidth ?? def.width).toFixed(2);
+          const dVal = Number(i.customDepth ?? def.depth).toFixed(2);
+          const hVal = Number(i.customHeight ?? def.height).toFixed(2);
+          const srcLabel = i.userCorrectedDims ? "Corrected" : "Estimated";
+          return (
             '<div class="review-entry" data-draft="' +
             esc(i.id) +
             '"><div class="owned-card-head"><span class="bp-owned-badge">Owned</span><span class="bp-kind-label">' +
@@ -588,7 +594,19 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
             selectOptions(i.kind) +
             '</select></label><label class="field">Name<input maxlength="65" value="' +
             esc(i.name) +
-            '" data-name></label><label class="field">Qty<input type="number" min="1" max="8" step="1" value="' +
+            '" data-name></label><label class="field">W (m)<input type="number" min="0.2" max="4.5" step="0.01" value="' +
+            wVal +
+            '" data-dim-w title="' +
+            srcLabel +
+            ' width in meters"></label><label class="field">D (m)<input type="number" min="0.2" max="4.5" step="0.01" value="' +
+            dVal +
+            '" data-dim-d title="' +
+            srcLabel +
+            ' depth in meters"></label><label class="field">H (m)<input type="number" min="0.2" max="4.5" step="0.01" value="' +
+            hVal +
+            '" data-dim-h title="' +
+            srcLabel +
+            ' height in meters"></label><label class="field">Qty<input type="number" min="1" max="8" step="1" value="' +
             i.count +
             '" data-count></label><button class="icon-btn" data-remove-draft="' +
             esc(i.id) +
@@ -596,8 +614,9 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
             esc(i.name) +
             '">' +
             icon("close") +
-            "</button></div></div>",
-        )
+            "</button></div></div>"
+          );
+        })
         .join("");
     return (
       '<div class="setup-grid setup-review-grid"><section class="setup-photo-pane">' +
@@ -790,27 +809,61 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
               ". Enlarge the room or reduce the furniture list.",
           );
         const hint = piece.positions?.[n];
-        let placed = item;
-        if (Number.isFinite(hint?.x) && Number.isFinite(hint?.y)) {
-          placed =
+        const ownedCand = createOwnedFurnitureCandidate({
+          kind: piece.kind,
+          name: piece.name || kinds[piece.kind],
+          color: hint?.color,
+          aspectRatio: hint?.aspectRatio,
+            ...(piece.userCorrectedDims
+              ? {
+                  dimensions: {
+                    width: piece.customWidth ?? item.width,
+                    depth: piece.customDepth ?? item.depth,
+                    height: piece.customHeight ?? item.height,
+                  },
+                  dimensionSource: "user_corrected",
+                }
+              : {}),
+          });
+          const targetWidth = piece.userCorrectedDims
+            ? ownedCand.dimensions.width
+            : Number.isFinite(hint?.aspectRatio) && hint.aspectRatio > 0
+              ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
+              : item.width;
+          const targetDepth = piece.userCorrectedDims
+            ? ownedCand.dimensions.depth
+            : item.depth;
+          const targetHeight = piece.userCorrectedDims
+            ? ownedCand.dimensions.height
+            : item.height;
+
+          let placed =
             fitItem(
               {
                 ...item,
-                // A single view estimates the front silhouette. Keep depth at the furniture-type estimate.
-                width: Number.isFinite(hint.aspectRatio) && hint.aspectRatio > 0
-                  ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
-                  : item.width,
-                x: (clamp(hint.x, 0, 1) - 0.5) * draft.room.width,
-                z: (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth,
-              },
-              draft.room,
-              items,
-            ) ?? item;
-        }
+                width: targetWidth,
+                depth: targetDepth,
+                height: targetHeight,
+              x: Number.isFinite(hint?.x)
+                ? (clamp(hint.x, 0, 1) - 0.5) * draft.room.width
+                : item.x,
+              z: Number.isFinite(hint?.y)
+                ? (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth
+                : item.z,
+            },
+            draft.room,
+            items,
+          ) ?? item;
+
+        const dimSource = piece.userCorrectedDims ? "user_corrected" : "estimated";
         items.push({
           ...placed,
+          owned: true,
+          price: 0,
           color: hint?.color ?? placed.color,
-          ...(piece.detected && hint ? { photoPreview: true, dimensionsSource: "estimated" } : {}),
+          dimensionSource: dimSource,
+          dimensionsSource: dimSource,
+          ...(piece.detected && hint ? { photoPreview: true } : {}),
           name: piece.name || kinds[piece.kind],
           id: uid(),
         });
@@ -1017,7 +1070,11 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
     }
     if (node.dataset.keptDim && node.dataset.keptId && node.validity.valid && node.value) {
       const target = draft.items.find((i) => i.id === node.dataset.keptId);
-      if (target) target[node.dataset.keptDim] = clamp(Number(node.value), 0.2, 4.5);
+      if (target) {
+        target[node.dataset.keptDim] = clamp(Number(node.value), 0.2, 4.5);
+        target.dimensionSource = "user_corrected";
+        target.dimensionsSource = "user_corrected";
+      }
     }
     const row = node.closest("[data-draft]");
     if (!row) return;
@@ -1026,8 +1083,31 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       item.kind = node.value;
       item.name = kinds[item.kind];
       row.querySelector("[data-name]").value = item.name;
+      const def = OWNED_KIND_DEFAULTS[item.kind] || OWNED_KIND_DEFAULTS.chair;
+      delete item.customWidth;
+      delete item.customDepth;
+      delete item.customHeight;
+      item.userCorrectedDims = false;
+      const wIn = row.querySelector("[data-dim-w]");
+      const dIn = row.querySelector("[data-dim-d]");
+      const hIn = row.querySelector("[data-dim-h]");
+      if (wIn) wIn.value = def.width.toFixed(2);
+      if (dIn) dIn.value = def.depth.toFixed(2);
+      if (hIn) hIn.value = def.height.toFixed(2);
     }
     if (node.matches("[data-name]")) item.name = node.value;
+    if (node.matches("[data-dim-w]") && node.validity.valid && node.value) {
+      item.customWidth = Number(node.value);
+      item.userCorrectedDims = true;
+    }
+    if (node.matches("[data-dim-d]") && node.validity.valid && node.value) {
+      item.customDepth = Number(node.value);
+      item.userCorrectedDims = true;
+    }
+    if (node.matches("[data-dim-h]") && node.validity.valid && node.value) {
+      item.customHeight = Number(node.value);
+      item.userCorrectedDims = true;
+    }
     if (node.matches("[data-count]") && node.validity.valid && node.value)
       item.count = Math.floor(Number(node.value));
   };

@@ -2,6 +2,7 @@ import {
   DEMO_SCENARIOS,
   SCORE_CATEGORIES,
   SIMULATION_SPEEDS,
+  SUPPORTED_FRIEND_COUNTS,
   normalizeSimulationViewState,
 } from "../../contracts/simulation.js";
 import { formatFindingEvidenceChips } from "../avatar/simulation-scene-layer.js";
@@ -70,7 +71,7 @@ const PRIMARY_SCENARIO_CARDS = Object.freeze([
   },
 ]);
 
-const FRIEND_PRESETS = Object.freeze([4, 8, 12, 16]);
+const FRIEND_PRESETS = SUPPORTED_FRIEND_COUNTS;
 
 function summarizePersona(persona) {
   if (Array.isArray(persona?.preferences) && persona.preferences.length > 0) {
@@ -779,6 +780,9 @@ export function createDemoControlsController({
       emit();
       return state;
     },
+    selectFriendCount(count) {
+      return this.setFriendCount(count);
+    },
     seekTimeline(second) {
       const numeric = Number(second);
       if (!Number.isFinite(numeric)) return state;
@@ -914,6 +918,8 @@ export function mountDemoControls({
   function handleControlChange(event) {
     if (event.target?.id === "sim-scenario") {
       controller.selectScenario(event.target.value);
+    } else if (event.target?.id === "sim-friend-count") {
+      controller.selectFriendCount(Number(event.target.value));
     } else if (event.target?.id === "sim-toggle-routes") {
       controller.toggleShowAllRoutes(event.target.checked);
     }
