@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 import { createPersonaApiMiddleware, createPersonaGenerator } from "./src/agents/persona-api.js";
 import { createReplaySuggestionApiMiddleware, createReplaySuggestionGenerator } from "./src/agents/replay-suggestion-api.js";
+import { createFurnishingMiddleware } from "./src/agents/furnishing-api.js";
 import { createShopifyApiMiddleware } from "./src/shopify/shopify-api.js";
 import { createFloorplanApiMiddleware } from "./src/spatial/floorplan-vite-middleware.js";
 
@@ -18,6 +19,7 @@ export default defineConfig(({ command, mode }) => {
 
   function configure(server) {
     server.middlewares.use(personaMiddleware);
+    server.middlewares.use(createFurnishingMiddleware({ apiKey: env.GEMINI_API_KEY }));
     server.middlewares.use(replayMiddleware);
     server.middlewares.use("/api/floorplan/analyze", floorplanMiddleware);
     server.middlewares.use(shopifyMiddleware);

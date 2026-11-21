@@ -16,7 +16,7 @@ function checkResponse(response) {
 
 export function createGeminiJsonGenerator({ apiKey, fetchImpl = fetch, timeoutMs = 25_000 } = {}) {
   const key = apiKey?.trim();
-  return async ({ input, systemInstruction, schema }) => {
+  return async ({ input, systemInstruction, schema, image }) => {
     if (!key) throw new GeminiJsonError(503, "unconfigured");
     const headers = { "x-goog-api-key": key };
     const signal = AbortSignal.timeout(timeoutMs);
@@ -37,7 +37,7 @@ export function createGeminiJsonGenerator({ apiKey, fetchImpl = fetch, timeoutMs
         signal,
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents: [{ role: "user", parts: [{ text: JSON.stringify(input) }] }],
+          contents: [{ role: "user", parts: [{ text: JSON.stringify(input) }, ...(image ? [{ inlineData: image }] : [])] }],
           generationConfig: { responseMimeType: "application/json", responseJsonSchema: schema },
         }),
       });

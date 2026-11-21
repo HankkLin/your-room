@@ -36,6 +36,8 @@ import {
 } from "./house-model.js";
 import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
+import { prepareFurnishing } from "./src/persona/furnishing.js";
+import { mountFurnishingPanel } from "./src/components/persona/furnishing-panel.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { createStudioReplayPanel } from "./src/components/simulation/studio-replay-panel.js";
 import { validatePersonas } from "./src/contracts/persona.js";
@@ -122,6 +124,21 @@ const shopifyQuotes = createShopifyQuotes(() => {
   if (stage === "shop") shoppingList.render();
   if (stage === "tour") render();
 });
+const furnishingPanel = $("#household-furnishing");
+const resetFurnishing = mountFurnishingPanel(furnishingPanel, {
+  getContext: () => prepareFurnishing({
+    project: state, style: draftStyle, brief: $("#brief").value.trim(), budget: $("#budget").valueAsNumber,
+    reference, getQuote: (ref) => shopifyQuotes.get(ref),
+  }),
+  onApprove(additions, input) {
+    commit({ ...state, items: [...state.items, ...additions], style: input.style, budget: input.budgetMinor / 100,
+      reference, brief: input.brief, hasLayout: true });
+    syncForm();
+    navigate("tour");
+    toast("Household furnishing applied");
+  },
+});
+$("#style-form").addEventListener("input", resetFurnishing);
 const shoppingList = createShoppingList({
   root: $("#saved-products"),
   intro: $("#shop-intro"),
@@ -194,6 +211,7 @@ function syncForm() {
   renderDraft();
 }
 function renderDraft() {
+  resetFurnishing();
   $("#styles").innerHTML = Object.entries(palettes)
     .map(
       ([label, colors]) =>
@@ -726,6 +744,8 @@ function updateWalkControls() {
       : "Select furniture in the room to move, rotate, replace, or save it.";
 }
 function markStage(next) {
+  resetFurnishing();
+  furnishingPanel.hidden = next !== "design" || !state.personas?.length;
   if (stage === "household" && next !== "household") householdPage.close();
   if (stage === "shop" && next !== "shop") shoppingList.close();
   if (next !== stage) quoteRefresh?.abort();
