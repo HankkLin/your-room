@@ -665,6 +665,7 @@ export function createOwnedItems(text, existingItems = [], room = ROOM) {
 export function initialState() {
   return autoStyle({
     roomName: "Brooklyn living room",
+    personas: [],
     style: "Warm minimal",
     budget: 2700,
     brief: "A soft rug and a reading corner.",

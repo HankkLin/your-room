@@ -30,6 +30,7 @@ test("custom room flows through the brief, furnished tour and saved Shopify vari
   await page.locator("#add-owned").click();
   await page.locator("[data-name]").fill("My green sofa");
   await page.locator("#setup-next").click();
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   const before = await project(page);
   expect(before.room).toMatchObject({
@@ -41,6 +42,7 @@ test("custom room flows through the brief, furnished tour and saved Shopify vari
   });
   expect(before.room.openings).toHaveLength(3);
   expect(owned(before).map((i) => i.name)).toEqual(["My green sofa"]);
+  expect(before.personas).toEqual([]);
   await page
     .locator("#brief")
     .fill("A reading corner with a lamp and no rug under $550");
@@ -82,6 +84,7 @@ test("a real room photo produces reviewable owned furniture on mobile", async ({
     .evaluateAll((nodes) => nodes.map((node) => node.value));
   expect(kinds).toContain("sofa");
   await page.locator("#setup-next").click();
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
   const initial = await project(page);
   expect(initial.roomPhoto).toMatch(/^data:image/);
   expect(owned(initial).some((i) => i.kind === "sofa")).toBe(true);
