@@ -61,6 +61,7 @@ test("custom room flows through the brief, furnished tour and saved Shopify vari
     .fill("A reading corner with a lamp and no rug under $550");
   await page.getByRole("button", { name: "Soft modern", exact: true }).click();
   await page.locator("#generate").click();
+  await expect(page.locator("#restyle-tour-result")).toContainText("Layout updated");
   await expect(page.locator("#view-label")).toHaveText("Interior view");
   const styled = await project(page);
   expect(styled.spent).toBeGreaterThan(0);
