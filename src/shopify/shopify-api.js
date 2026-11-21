@@ -171,13 +171,14 @@ function productsFrom(document) {
   return document.products;
 }
 
-async function searchProducts(call, { query: rawQuery }) {
+async function searchProducts(call, { query: rawQuery, modelsOnly }) {
   const query = textValue(rawQuery);
   if (!query || query.length > maxQueryLength) {
     throw new ShopifyApiError(400, `Enter a product search of 1 to ${maxQueryLength} characters.`);
   }
   const document = await call("search_catalog", {
-    catalog: { query, context, pagination: { limit: searchLimit } },
+    catalog: { query, context, pagination: { limit: searchLimit },
+      ...(modelsOnly === true ? { filters: { media: [{ type: "model_3d" }] } } : {}) },
   });
   const uniqueProducts = new Map();
   for (const item of productsFrom(document)) {

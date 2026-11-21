@@ -97,6 +97,7 @@ export async function detectFurnishings(file, onStatus = () => {}) {
       x: Math.max(0, Math.min(1, (left + width / 2) / photo.width)),
       y: Math.max(0, Math.min(1, (top + height) / photo.height)),
       color,
+      aspectRatio: width / height,
     };
     const group = grouped.get(furnishing.kind) ?? {
       ...furnishing,

@@ -87,12 +87,15 @@ test("a real room photo produces reviewable owned furniture on mobile", async ({
   await page.getByRole("button", { name: "Skip", exact: true }).click();
   const initial = await project(page);
   expect(initial.roomPhoto).toMatch(/^data:image/);
-  expect(owned(initial).some((i) => i.kind === "sofa")).toBe(true);
+  const sofa = owned(initial).find((item) => item.kind === "sofa");
+  expect(sofa).toMatchObject({ photoPreview: true, dimensionsSource: "estimated" });
+  expect(sofa.width).toBeGreaterThan(0);
   await page.locator("#inspiration").setInputFiles(photo);
   await expect(page.locator(".reference-preview")).toBeVisible();
   await page.locator("#budget").fill("0");
   await page.locator("#generate").click();
   expect(owned(await project(page))).toEqual(owned(initial));
+  await expect(page.locator("[data-item]").filter({ hasText: "Photo-derived 3D preview" }).first()).toContainText("Estimated dimensions");
   expect((await project(page)).spent).toBe(0);
   expect(
     await page.evaluate(
@@ -100,6 +103,19 @@ test("a real room photo produces reviewable owned furniture on mobile", async ({
     ),
   ).toBe(false);
 });
+test("photo detection failure keeps manual owned furniture usable", async ({ page }) => {
+  await page.route("**/assets/detector/model.json", (route) => route.fulfill({ status: 503, body: "Unavailable" }));
+  await page.goto("/");
+  await page.locator("#room-photo-upload").setInputFiles(photo);
+  await page.locator("#setup-next").click();
+  await expect(page.locator("#detect-status")).toContainText("could not finish", { timeout: 30000 });
+  await page.locator("#owned-kind").selectOption("chair");
+  await page.locator("#add-owned").click();
+  await page.locator("#setup-next").click();
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
+  expect(owned(await project(page)).some((item) => item.kind === "chair" && !item.photoPreview)).toBe(true);
+});
+
 test("tour exploration, object edits, room commands and undo", async ({
   page,
 }) => {

@@ -167,6 +167,31 @@ test("variant refresh requires the same variant and seller and allows missing op
   assert.match(mismatch.json.error, /exact variant/);
 });
 
+test("merchant GLBs and physical dimensions follow the matched variant", async () => {
+  const modelUrl = "https://cdn.shopify.com/3d/models/walnut.glb";
+  const model = { type: "model_3d", url: "https://cdn.shopify.com/stool.usdz", sources: [{ url: modelUrl }] };
+  const exact = catalogVariant({ dimensions: { width: 50, height: 80, depth: 45, unit: "cm" } });
+  const product = { ...catalogProduct(exact), media: [model] };
+  const search = await requestApi((_, options) => {
+    assert.deepEqual(JSON.parse(options.body).params.arguments.catalog.filters, { media: [{ type: "model_3d" }] });
+    return toolResponse({ products: [product] });
+  }, { input: { query: "wood stool", modelsOnly: true } });
+  assert.equal(search.json.products[0].modelUrl, modelUrl);
+  assert.equal(search.json.products[0].modelScope, "product");
+  assert.deepEqual(search.json.products[0].dimensions, { width: 0.5, height: 0.8, depth: 0.45 });
+  assert.equal(search.json.products[0].dimensionsSource, "merchant");
+
+  product.variants.push(catalogVariant({ id: otherRef.variantId, media: [model] }));
+  async function refresh() {
+    return (await requestApi(() => toolResponse({ product }), { route: "variant", input: { ref } })).json.product;
+  }
+  assert.equal((await refresh()).modelUrl, undefined);
+  exact.media = [model];
+  assert.equal((await refresh()).modelScope, "variant");
+  exact.media = [{ type: "model_3d", url: "https://cdn.shopify.com/broken.usdz" }];
+  assert.equal((await refresh()).modelUrl, undefined);
+});
+
 test("lookup returns only exact, same-seller variant matches in saved order", async () => {
   const featured = catalogVariant({
     id: otherRef.variantId,

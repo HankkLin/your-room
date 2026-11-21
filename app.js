@@ -45,6 +45,7 @@ import { createCandidateSession } from "./src/shopify/candidate-session.js";
 import { createCandidatePlacement } from "./src/shopify/scene-candidate.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
+import { dimensionLabel } from "./src/shopify/product-assets.js";
 import { formatShopifyMoney } from "./src/components/catalog/shopify-ui.js";
 import { createShopifyQuotes, shopifyRequest } from "./src/shopify/shopify-client.js";
 import { showParsedGeometryModal } from "./floorplan-import-ui.js";
@@ -308,9 +309,12 @@ function render() {
               : i.owned
                 ? "Already owned"
                 : i.shopify
-                  ? "Approximate 3D preview"
+                  ? (i.modelUrl ? "Shopify piece" : "Approximate 3D preview")
                   : "Suggested piece";
-        const sub = roomLabel ? `${escape(roomLabel)} · ${kindTag}` : kindTag;
+        const sub = [roomLabel && escape(roomLabel), kindTag,
+          i.photoPreview && "Photo-derived 3D preview",
+          (i.shopify || i.photoPreview) && dimensionLabel(i),
+        ].filter(Boolean).join(" · ");
         return `<button class="item-row" data-item="${escape(i.id)}" data-locked="${Boolean(isObjectLocked(i))}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(itemName(i))}<small>${sub}</small></span><span class="price">${inventoryPrice(i)}</span></button>`;
       })
       .join("") ||

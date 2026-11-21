@@ -59,7 +59,11 @@ function createResult(product, label, onSelect) {
     actions.append(link);
   }
 
-  content.append(title, details, offer, size, actions);
+  const preview = document.createElement("p");
+  preview.className = "muted";
+  preview.textContent = [product.modelUrl ? "Merchant 3D model" : "Furniture type preview",
+    product.dimensionsSource === "merchant" ? "Merchant dimensions" : "Estimated dimensions"].join(" · ");
+  content.append(title, details, offer, size, preview, actions);
   card.append(content);
   return [card, place];
 }
@@ -79,7 +83,7 @@ export function mountShopifyPicker(root, {
     '<label class="field">Search Shopify<input type="search" placeholder="Compact walnut side table" required></label>' +
     '<button class="primary" type="submit">Search</button>' +
     '<label class="field shopify-picker-kind">Preview type<select></select></label>' +
-    '</form>' +
+    '<label><input type="checkbox" name="modelsOnly"> With 3D models</label></form>' +
     '<button type="button" class="secondary" data-recommend hidden>Ask Gemini to choose</button>' +
     '<p class="shopify-picker-status muted" role="status"></p><div data-shopify-warnings hidden></div>' +
     '<ul class="shopify-picker-results"></ul></div>';
@@ -287,7 +291,7 @@ export function mountShopifyPicker(root, {
     renderShopifyWarnings(warningTarget, []);
     showStatus("Searching Shopify…");
     try {
-      const data = await shopifyRequest("search", { query }, { signal: controller.signal });
+      const data = await shopifyRequest("search", { query, ...(form.elements.modelsOnly.checked ? { modelsOnly: true } : {}) }, { signal: controller.signal });
       if (!isCurrent(controller)) return;
       products = data.products;
       searchWarnings = data.warnings ?? [];
