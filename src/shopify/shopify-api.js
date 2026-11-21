@@ -279,27 +279,77 @@ async function lookupProducts(call, { refs: rawRefs }) {
   return { products, warnings: warningsFrom(document) };
 }
 
-async function startCheckout(call, ref) {
-  const { product, warnings } = await findVariant(call, ref);
-  if (product.available !== true) {
-    throw new ShopifyApiError(409, "Shopify could not confirm that this variant is in stock.", { warnings });
+function readCheckoutLines({ ref, lines }) {
+  // Older callers submit a single reference with an implicit quantity of one.
+  if (lines === undefined) return [{ ref: readRef(ref), quantity: 1 }];
+  if (!Array.isArray(lines) || !lines.length || lines.length > maxLookupRefs) {
+    throw new ShopifyApiError(400, `Choose between 1 and ${maxLookupRefs} variants per merchant checkout.`);
   }
+  const seen = new Set();
+  let merchant;
+  return lines.map((line) => {
+    const reference = readRef(line?.ref);
+    const domain = reference.sellerDomain.toLowerCase();
+    if ((merchant && domain !== merchant) || seen.has(reference.variantId)) {
+      throw new ShopifyApiError(400, "Group each merchant’s variants and combine repeated quantities.");
+    }
+    const { quantity, priceMinor, currency } = line;
+    if (!Number.isSafeInteger(quantity) || quantity < 1 ||
+        !Number.isSafeInteger(priceMinor) || priceMinor < 0 || !validCurrency(currency)) {
+      throw new ShopifyApiError(400, "Each variant needs a positive quantity and a confirmed price.");
+    }
+    seen.add(reference.variantId);
+    merchant = domain;
+    return { ref: reference, quantity, priceMinor, currency };
+  });
+}
+
+async function startCheckout(call, input) {
+  const lines = readCheckoutLines(input);
+  const quotes = await Promise.all(lines.map(({ ref }) => findVariant(call, ref)));
+  const warnings = quotes.flatMap((quote) => quote.warnings);
+  const products = quotes.map((quote) => quote.product);
+  for (const [index, product] of products.entries()) {
+    const label = [product.title, product.variantTitle].filter(Boolean).join(" · ");
+    const details = { warnings, products };
+    if (product.available !== true) {
+      throw new ShopifyApiError(409, `Shopify could not confirm that ${label} is in stock.`, details);
+    }
+    if (product.priceMinor === null || !product.currency) {
+      throw new ShopifyApiError(409, `The merchant has not confirmed the price of ${label}.`, details);
+    }
+    const expected = lines[index];
+    if (expected.currency && (expected.currency !== product.currency || expected.priceMinor !== product.priceMinor)) {
+      throw new ShopifyApiError(409, `The price of ${label} changed. Review the updated price and start checkout again.`, details);
+    }
+  }
+  const expectedLines = new Map(lines.map((line, index) => [line.ref.variantId, { ...line, product: products[index] }]));
   const document = await call("create_checkout", {
-    shop: product.sellerDomain,
+    shop: products[0].sellerDomain,
     checkout: {
-      line_items: [{ item: { id: product.variantId }, quantity: 1 }],
+      line_items: lines.map(({ ref, quantity }) => ({ item: { id: ref.variantId }, quantity })),
       context: { address_country: context.address_country },
     },
     meta: { "idempotency-key": randomUUID() },
   });
   const continueUrl = httpsUrl(document.continue_url);
   const currency = validCurrency(document.currency);
-  const line = Array.isArray(document.line_items) && document.line_items.length === 1 ? document.line_items[0] : null;
-  if (!continueUrl || !currency || line?.item?.id !== product.variantId || line.quantity !== 1 ||
+  if (!continueUrl || !currency || !Array.isArray(document.line_items) ||
       !["incomplete", "requires_escalation", "ready_for_complete"].includes(document.status) ||
       !Array.isArray(document.totals)) {
     throw checkoutFailure();
   }
+  for (const line of document.line_items) {
+    const id = line?.item?.id;
+    const expected = expectedLines.get(id);
+    if (!expected || expected.quantity !== line.quantity) throw checkoutFailure();
+    if (expected.currency && (expected.currency !== currency ||
+        (line.item.price !== undefined && line.item.price !== expected.priceMinor))) {
+      warnings.push({ text: `The merchant changed the price or currency for ${expected.product.title} while creating checkout. Review the merchant totals before continuing.` });
+    }
+    expectedLines.delete(id);
+  }
+  if (expectedLines.size) throw checkoutFailure();
   const totals = document.totals.map((total) => {
     const label = textValue(total?.display_text) ?? (Object.hasOwn(totalLabels, total?.type) ? totalLabels[total.type] : null);
     if (!label || !Number.isSafeInteger(total.amount)) throw checkoutFailure();
@@ -346,7 +396,7 @@ export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_0
     [`${apiPrefix}search`, searchProducts],
     [`${apiPrefix}variant`, (call, { ref }) => findVariant(call, readRef(ref))],
     [`${apiPrefix}lookup`, lookupProducts],
-    [`${apiPrefix}checkout`, (call, { ref }) => startCheckout(call, readRef(ref))],
+    [`${apiPrefix}checkout`, startCheckout],
   ]);
 
   return async (request, response, next) => {
