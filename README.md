@@ -38,6 +38,8 @@ For manual comparison, capture a baseline, move, rotate, or remove furniture, th
 
 The Vite development and preview API at `POST /api/replay/suggest-fix` sends a measured finding and nearby geometry to Gemini. The response contains an explanation and a `scenePatch` with one move in `[x, y, z]` meters. The app checks locks and whole-home placement before showing the preview, then checks them again before saving the move. The new replay measures whether the trip improved.
 
+See the [brief acceptance and demo results](docs/brief-acceptance.md) for the full product checklist and screenshots.
+
 ## Shopify verification
 
 From the repository root, install dependencies with `npm ci`. Run these focused tests.
