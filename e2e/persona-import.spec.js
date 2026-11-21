@@ -59,6 +59,43 @@ test("an imported agent export stays a draft through room reassignment, malforme
   expect(requests).toEqual([]);
 });
 
+test("a failed import cancels pending generation and clears its progress message", async ({ page }) => {
+  await openImport(page);
+  await page.locator("#sample-household").click();
+  const name = page.getByLabel("Name", { exact: true }).first();
+  const draftName = await name.inputValue();
+  let release;
+  const holdResponse = new Promise((resolve) => { release = resolve; });
+  await page.route("**/api/personas/generate", async (route) => {
+    await holdResponse;
+    await route.fulfill({ json: { personas: [member] } }).catch(() => {});
+  });
+  try {
+    for (const source of ["paste", "file"]) {
+      await page.getByLabel("Household description").fill("Lee works in the morning.");
+      const pending = page.waitForRequest((request) => request.url().endsWith("/api/personas/generate"));
+      await page.locator("#generate-household").click();
+      await pending;
+      await expect(page.locator("#household-status")).toContainText("Generating");
+      if (source === "paste") {
+        await page.getByLabel("Agent export JSON").fill("{invalid");
+        await page.getByRole("button", { name: "Review pasted JSON" }).click();
+      } else {
+        await page.getByLabel("Open JSON file").setInputFiles({
+          name: "invalid.json", mimeType: "application/json", buffer: Buffer.from("{invalid"),
+        });
+      }
+      await expect(page.locator("#household-import-status")).toContainText("Could not read");
+      await expect(page.locator("#household-status")).toBeEmpty();
+      await expect(page.locator("#generate-household")).toBeEnabled();
+      await expect(name).toHaveValue(draftName);
+      expect(await saved(page)).toEqual([]);
+    }
+  } finally {
+    release();
+  }
+});
+
 test("a local JSON file imports without sending it or applying it before approval", async ({ page }) => {
   await openImport(page);
   await page.getByLabel("Open JSON file").setInputFiles({

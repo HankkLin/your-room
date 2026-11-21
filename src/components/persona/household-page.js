@@ -257,8 +257,12 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
   }
 
   function close() {
-    activeRequest?.abort();
-    activeRequest = null;
+    if (activeRequest) {
+      activeRequest.abort();
+      activeRequest = null;
+      announce(generationStatus);
+      announce(importStatus);
+    }
   }
 
   function open({ personas, rooms: availableRooms }) {
