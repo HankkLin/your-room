@@ -98,7 +98,20 @@ The **Add grouped Shopify checkout** chat recorded live buyer-visible order summ
 
 ## Verification and environment
 
-On November 21, 2026, `npm test` passed all 157 unit and middleware tests. `npm run test:e2e` passed all 54 tests in Chrome, including the non-Mercer empty-house flow and the existing whole-home checkout. `npm run build` completed with Vite’s existing bundle-size and dynamic-import warnings.
+### IKEA Step 7 checkout
+
+PR #8 was exercised together with Kevin’s `feat/ikea-like-ux-redesign` at `fd5e614` in a separate integration checkout. The regression clicked **Review products & checkout** in the planner tray, reloaded, returned to the planner, and clicked its **Step 7** navigation button. Each entry saved the same four eligible placements with their room labels and quantities. The lamp retained its original unit quote and saved suggestion reason.
+
+With controlled Shopify responses, the lighting merchant received three lamps and one shade. The other merchant received one rug in a separate checkout, even though its variant ID matched the lamp’s ID at the first merchant. A lamp price change from $189 to $199 required another click for lighting only. The rug checkout stayed available throughout. A second case covered legacy items with missing prices or incomplete Shopify references. It showed a partial subtotal and allowed checkout for the confirmed merchant. [Step 7 screenshot after the price was accepted](ikea-step-7-checkout.png)
+
+To repeat the Step 7 check in the combined planner, set `PLAYWRIGHT_PLANNER=ikea` and run `npm run test:e2e -- e2e/shopify.spec.js -g "whole-home review"`. The same tests use the standard review button on the commerce branch. When integrating the planner, route both entry points through `saveRoomAndGoToShop()`. Call `savedProductForPlacement(item, { previous, quote, roomLabel, suggestedReason })` from `src/shopify/scene-candidate.js` and render each placement’s room and reason once.
+
+Both source trees were tested on November 21, 2026. The Chrome suite includes the empty-house design flow, whole-home checkout, and a legacy shopping list with missing prices.
+
+| Source tested | Unit and middleware | Chrome | Production build |
+|---|---:|---:|---|
+| PR #8 code at `ba19958` | 158 passed | 56 passed | Passed |
+| PR #8 with Kevin’s IKEA redesign at `fd5e614`, local integration commit `338e674` | 160 passed | 57 passed | Passed |
 
 The branch comparison found overlapping edits on desktop in `app.js`, `package.json` and `e2e/twin-golden-path.spec.js`. On laptop the overlaps are `app.js`, `index.html`, `src/components/catalog/shopping-list.js` and the same golden-path test. Each teammate branch remains separate for review.
 
