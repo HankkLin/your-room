@@ -3,7 +3,7 @@ import { previewFurnishing } from "../../persona/furnishing.js";
 
 const money = (minor) => (minor / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-export function mountFurnishingPanel(root, { getContext, onApprove }) {
+export function mountFurnishingPanel(root, { getContext, refreshRetained, refreshSelected, onApprove }) {
   const requestButton = root.querySelector("[data-propose]");
   const status = root.querySelector("[role=status]");
   const preview = root.querySelector("[data-preview]");
@@ -17,6 +17,7 @@ export function mountFurnishingPanel(root, { getContext, onApprove }) {
     pending = undefined;
     review = undefined;
     requestButton.disabled = false;
+    approve.disabled = false;
     preview.hidden = true;
     status.textContent = "";
     list.replaceChildren();
@@ -31,6 +32,8 @@ export function mountFurnishingPanel(root, { getContext, onApprove }) {
     pending = controller;
     requestButton.disabled = true;
     try {
+      await refreshRetained(controller.signal);
+      if (pending !== controller) return;
       const context = getContext();
       status.textContent = "Preparing a proposal for your household…";
       const response = await fetch(furnishingPath, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -60,15 +63,28 @@ export function mountFurnishingPanel(root, { getContext, onApprove }) {
       }
     }
   };
-  approve.onclick = () => {
-    if (!review) return;
+  approve.onclick = async () => {
+    if (!review || pending) return;
+    const controller = new AbortController();
+    pending = controller;
+    approve.disabled = true;
+    requestButton.disabled = true;
     try {
       const context = getContext();
-      const result = previewFurnishing(context, review.proposal);
-      if (signature(context, result) !== review.signature) throw new Error("The room or brief changed. Request a fresh proposal.");
+      const proposed = previewFurnishing(context, review.proposal);
+      if (signature(context, proposed) !== review.signature) throw new Error("The room or brief changed. Request a fresh proposal.");
+      status.textContent = "Checking the current proposal…";
+      await refreshRetained(controller.signal);
+      if (pending !== controller) return;
+      await refreshSelected(proposed.additions.map(({ item }) => item), controller.signal);
+      if (pending !== controller) return;
+      const fresh = getContext();
+      const result = previewFurnishing(fresh, review.proposal);
+      if (signature(fresh, result) !== review.signature) throw new Error("The room, prices, or brief changed. Request a fresh proposal.");
       reset();
-      onApprove(result.additions.map(({ item }) => item), context.input);
+      onApprove(result.additions.map(({ item }) => item), fresh.input);
     } catch (error) {
+      if (pending !== controller) return;
       reset();
       status.textContent = error.message;
     }

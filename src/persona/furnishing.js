@@ -1,4 +1,6 @@
-import { catalog, createItem, createShopifyPreview, fitItem, furniturePreviewKinds, ROOM } from "../../model.js";
+import { productCandidateId } from "../contracts/product.js";
+import { createCandidatePlacement } from "../shopify/scene-candidate.js";
+import { catalog, createItem, fitItem, furniturePreviewKinds, ROOM } from "../../model.js";
 import { fitItemInHouse, mergeHouseFixturesIntoItems, normalizeHouse } from "../../house-model.js";
 import { listPersonaRooms } from "./rooms.js";
 import { validateFurnishingInput, validateFurnishingProposal } from "../agents/furnishing-contract.js";
@@ -11,20 +13,11 @@ export function furnishingCandidatesFromSession(snapshot, now = Date.now()) {
 }
 
 function liveOption(candidate) {
-  const { sellerDomain, variantId, priceMinor, dimensions } = candidate;
-  if (!sellerDomain || !variantId || !candidate.title || candidate.available !== true || candidate.currency !== "USD" ||
-      !Number.isSafeInteger(priceMinor) || priceMinor < 0) return null;
-  const { kind } = candidate;
-  if (!furniturePreviewKinds.includes(kind)) return null;
-  const id = variantId + "|" + sellerDomain.toLowerCase();
-  const item = createShopifyPreview(kind, { sellerDomain, variantId }, {});
-  item.name = candidate.title;
-  item.productId = candidate.productId ?? null;
-  if (dimensions && ["width", "height", "depth"].every((key) => Number.isFinite(dimensions[key]) && dimensions[key] > 0)) {
-    for (const key of ["width", "depth", "height"]) item[key] = dimensions[key];
-    item.dimensionsSource = candidate.dimensionsSource === "merchant" ? "merchant" : "estimated";
-  }
-  return { id, item, priceMinor, source: "Shopify" };
+  if (candidate.currency !== "USD" || !candidate.title || !furniturePreviewKinds.includes(candidate.kind)) return null;
+  const item = createCandidatePlacement(candidate, candidate.kind, {});
+  if (!item) return null;
+  return { id: productCandidateId(candidate), item, priceMinor: candidate.priceMinor, source: "Shopify",
+    merchant: candidate.merchant || candidate.sellerDomain, variant: candidate.variantTitle, deliveryEstimate: candidate.deliveryEstimate };
 }
 
 export function prepareFurnishing({ project, style, brief, budget, reference = null, liveCandidates = [], getQuote = () => null }) {
@@ -50,8 +43,9 @@ export function prepareFurnishing({ project, style, brief, budget, reference = n
     const option = liveOption(candidate);
     if (option) options.set(option.id, option);
   }
-  const candidates = Array.from(options.values(), ({ id, item, priceMinor, source, style: productStyle }) => ({
+  const candidates = Array.from(options.values(), ({ id, item, priceMinor, source, merchant, variant, deliveryEstimate, style: productStyle }) => ({
     id, name: item.name, kind: item.kind, priceMinor, source, style: productStyle,
+    ...(merchant ? { merchant, variant, deliveryEstimate, dimensionsSource: item.dimensionsSource } : {}),
     dimensions: { width: item.width, height: item.height, depth: item.depth },
   }));
   const input = { personas: project.personas, rooms, style, brief, budgetMinor: Math.round(budget * 100),

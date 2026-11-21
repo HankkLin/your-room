@@ -1,7 +1,7 @@
 import { createGeminiJsonGenerator, GeminiJsonError } from "./gemini-json.js";
 import { furnishingPath, furnishingSchema, validateFurnishingInput, validateFurnishingProposal } from "./furnishing-contract.js";
 
-const instruction = "Propose additions to furnish this household. Keep every existing piece. Select only supplied candidate IDs and available room IDs. Use the household's needs, preferences and schedule, the selected style, the brief and the inspiration photo if provided. For each addition, identify the person and need it serves and explain the choice in one sentence including its relation to the design. Existing costs and candidate prices are in US cents. Stay within the total budget. The application computes and validates placement. Return only the requested add operations.";
+const instruction = "Propose additions to furnish this household. Keep every existing piece. Prefer relevant Shopify offers when the household has searched for live alternatives. Select only supplied candidate IDs and available room IDs. Use the household's needs, preferences and schedule, the selected style, the brief and the inspiration photo if provided. For each addition, identify the person and need it serves and explain the choice in one sentence including its relation to the design. Existing costs and candidate prices are in US cents. Stay within the total budget. The application computes and validates placement. Return only the requested add operations.";
 
 export function createFurnishingMiddleware({ apiKey, fetchImpl } = {}) {
   const generate = createGeminiJsonGenerator({ apiKey, fetchImpl });

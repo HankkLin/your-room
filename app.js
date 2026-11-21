@@ -36,7 +36,9 @@ import {
 } from "./house-model.js";
 import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
-import { prepareFurnishing } from "./src/persona/furnishing.js";
+import { furnishingCandidatesFromSession, prepareFurnishing } from "./src/persona/furnishing.js";
+import { refreshFurnishingOffers } from "./src/persona/furnishing-offers.js";
+import { savedShopifyRow } from "./src/shopify/scene-candidate.js";
 import { mountFurnishingPanel } from "./src/components/persona/furnishing-panel.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { validatePersonas } from "./src/contracts/persona.js";
@@ -144,16 +146,33 @@ const furnishingPanel = $("#household-furnishing");
 const resetFurnishing = mountFurnishingPanel(furnishingPanel, {
   getContext: () => prepareFurnishing({
     project: state, style: draftStyle, brief: $("#brief").value.trim(), budget: $("#budget").valueAsNumber,
-    reference, getQuote: (ref) => shopifyQuotes.get(ref),
+    reference, liveCandidates: furnishingCandidatesFromSession(candidateSession.read()), getQuote: (ref) => shopifyQuotes.get(ref),
   }),
+  refreshRetained: (signal) => shopifyQuotes.refresh(
+    state.items.filter((item) => !item.owned && item.shopify).map((item) => item.shopify), { signal },
+  ),
+  refreshSelected: (items, signal) => refreshFurnishingOffers(items, candidateSession, shopifyQuotes, shopifyRequest, signal),
   onApprove(additions, input) {
-    commit({ ...state, items: [...state.items, ...additions], style: input.style, budget: input.budgetMinor / 100,
+    const saved = new Map((state.savedProducts ?? []).map((row) => [row.id, row]));
+    for (const item of additions) {
+      if (item.shopify) saved.set(item.id, savedShopifyRow(item, saved.get(item.id), shopifyQuotes.get(item.shopify)));
+    }
+    commit({ ...state, savedProducts: [...saved.values()], items: [...state.items, ...additions], style: input.style, budget: input.budgetMinor / 100,
       reference, brief: input.brief, hasLayout: true });
     syncForm();
     navigate("tour");
     toast("Household furnishing applied");
   },
 });
+$("#furnishing-shopify").onclick = () => {
+  resetFurnishing();
+  modal("Shopify alternatives for this design", "");
+  clearCatalog = mountShopifyPicker($("#modal-body"), {
+    browseOnly: true, candidateSession, shopifyRequest, initialKind: "desk",
+    kinds: furniturePreviewKinds.map((kind) => ({ value: kind, label: kind[0].toUpperCase() + kind.slice(1) })),
+  });
+  $("#modal-body input").focus();
+};
 $("#style-form").addEventListener("input", resetFurnishing);
 const shoppingList = createShoppingList({
   root: $("#saved-products"),
