@@ -69,6 +69,7 @@ export function mountDesignSearch(root, { getContext, session, onChange }) {
         const [card] = createResult(product, "", null);
         if (product.placed) {
           const tag = document.createElement("p");
+          tag.className = "shopify-picker-room";
           tag.textContent = "In this room";
           card.append(tag);
         }

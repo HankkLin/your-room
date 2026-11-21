@@ -16,13 +16,17 @@ test("an empty whole home browses room-specific variants and recovers from an in
       budget: { amount: input.budgetOverride ?? 12000, currency: "USD" },
       roomIntents: { [room]: [{ kind: "table", query: "warm oak coffee table" }] } } } });
   });
+  const thumbnail = "https://catalog.example/table.jpg";
+  await page.route(thumbnail, route => route.fulfill({ path: "public/assets/sample-room.jpg", contentType: "image/jpeg" }));
   const searches = [];
   await page.route("**/api/shopify/search", route => {
     searches.push(route.request().postDataJSON());
     return route.fulfill({ json: { products: [1, 2, 3].map(n => ({
       sellerDomain: "oak.myshopify.com", merchant: "Oak Studio", variantId: "gid://shopify/ProductVariant/" + n,
-      productId: "oak-" + n, title: ["Round oak coffee table", "Oak nesting tables", "Premium table"][n - 1],
-      variantTitle: "Warm oak", available: true, priceMinor: [24000, 34500, 69900][n - 1], currency: "USD",
+      productId: "oak-" + n, title: ["Round oak coffee table with a sculpted pedestal base", "Oak nesting tables", "Premium table"][n - 1],
+      imageUrl: n === 1 ? thumbnail : null,
+      variantTitle: n === 1 ? "Natural white oak / hand-finished / large" : "Warm oak",
+      available: n !== 2, priceMinor: [24000, 34500, 69900][n - 1], currency: "USD",
       productUrl: "https://oak.myshopify.com/products/table-" + n + "?variant=" + n,
     })), warnings: [] } });
   });
@@ -45,7 +49,29 @@ test("an empty whole home browses room-specific variants and recovers from an in
   expect(inputs[0].rooms.map(item => item.id)).toContain(room);
   expect(searches[0]).toMatchObject({ maxPriceMinor: 40000 });
   expect(await project()).toEqual(before);
-  await panel.screenshot({ path: testInfo.outputPath("style-shortlist.png") });
+  const cards = panel.locator(".shopify-picker-card");
+  const image = cards.first().locator("img");
+  await image.scrollIntoViewIfNeeded();
+  await image.evaluate(img => img.decode());
+  await expect(cards.first()).toContainText("In stock");
+  await expect(cards.last()).toContainText("Unavailable");
+  for (const width of [1440, 744, 390, 320]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 });
+    const layout = await panel.evaluate(root => {
+      const { left, right } = root.getBoundingClientRect();
+      const elements = Array.from(root.querySelectorAll("input, select, button, a, h3, .shopify-picker-card, .shopify-picker-card p"))
+        .filter(el => el.getClientRects().length);
+      return {
+        fits: left >= 0 && right <= window.innerWidth && elements.every(el => {
+          const box = el.getBoundingClientRect();
+          return box.left >= left - 1 && box.right <= right + 1 && el.scrollWidth <= el.clientWidth + 1;
+        }),
+        touchTargets: elements.filter(el => el.matches("input, select, button, a")).every(el => el.getBoundingClientRect().height >= 44),
+      };
+    });
+    expect(layout, "Discovery at " + width + "px").toEqual({ fits: true, touchTargets: true });
+    if (width === 1440 || width === 390) await panel.screenshot({ path: testInfo.outputPath("style-shortlist-" + width + ".png") });
+  }
   malformed = true;
   await panel.getByRole("button", { name: "Find furniture for this brief" }).click();
   await expect(panel.getByRole("status")).toContainText("invalid");

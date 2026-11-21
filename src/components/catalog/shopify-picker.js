@@ -13,6 +13,8 @@ function readCandidates(value) {
 export function createResult(product, label, onSelect) {
   const card = document.createElement("li");
   card.className = "shopify-picker-card";
+  const heading = document.createElement("div");
+  heading.className = "shopify-picker-card-heading";
   const imageUrl = shopifyHttpsUrl(product.imageUrl);
   if (imageUrl) {
     const image = document.createElement("img");
@@ -20,25 +22,38 @@ export function createResult(product, label, onSelect) {
     image.alt = "";
     image.loading = "lazy";
     image.referrerPolicy = "no-referrer";
-    card.append(image);
+    image.addEventListener("error", () => image.remove(), { once: true });
+    heading.append(image);
   }
 
   const content = document.createElement("div");
-  content.className = "shopify-picker-card-body";
+  content.className = "shopify-picker-identity";
   const title = document.createElement("h3");
   title.textContent = product.title;
   const details = document.createElement("p");
   details.className = "muted";
   const variant = product.variantTitle !== product.title ? product.variantTitle : "";
   details.textContent = [product.merchant, variant].filter(Boolean).join(" · ");
+  content.append(title, details);
+  heading.append(content);
+
   const offer = document.createElement("p");
   offer.className = "shopify-picker-offer";
   const price = formatShopifyMoney(product.priceMinor, product.currency);
-  const stock = product.available == null ? "Stock unknown" : product.available ? "In stock" : "Unavailable";
-  offer.textContent = [price ?? "Price unavailable", stock, product.deliveryEstimate ? "Delivery " + product.deliveryEstimate : "Delivery unknown"].join(" · ");
+  const amount = document.createElement("strong");
+  amount.textContent = price ?? "Price unavailable";
+  const stock = document.createElement("span");
+  stock.className = "shopify-picker-stock";
+  stock.dataset.available = String(product.available === true);
+  stock.textContent = product.available == null ? "Stock unknown" : product.available ? "In stock" : "Unavailable";
+  offer.append(amount, " ", stock);
+
+  const specs = document.createElement("div");
+  specs.className = "shopify-picker-specs muted";
+  const delivery = document.createElement("p");
+  delivery.textContent = product.deliveryEstimate ? "Delivery " + product.deliveryEstimate : "Delivery unknown";
 
   const size = document.createElement("p");
-  size.className = "muted";
   const dimensions = product.dimensions;
   if (dimensions && product.dimensionsSource === "merchant") {
     const meters = (value) => Number(value.toPrecision(6)).toString();
@@ -69,10 +84,9 @@ export function createResult(product, label, onSelect) {
   } else actions.append(document.createTextNode("Product link unverified"));
 
   const preview = document.createElement("p");
-  preview.className = "muted";
   preview.textContent = product.modelUrl ? "Merchant 3D model" : "Furniture type preview";
-  content.append(title, details, offer, size, preview, actions);
-  card.append(content);
+  specs.append(delivery, size, preview);
+  card.append(heading, offer, specs, actions);
   return [card, place];
 }
 
