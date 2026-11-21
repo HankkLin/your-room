@@ -4,7 +4,7 @@ Stillroom turns a room photo or a custom floor plan into an editable, shoppable 
 
 ## Run
 
-Use Node.js 22.12 or newer. Run `npm ci` and `npm run dev`, then open the local address printed by Vite.
+Use Node.js 22.12 or newer. Run `npm ci` and `npm run dev`, then open the local address printed by Vite..
 
 ## The four steps
 
