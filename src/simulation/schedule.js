@@ -170,7 +170,14 @@ export function normalizeSchedule(rawSchedule = []) {
  */
 export function resolveScheduleDestination(
   destination,
-  { navigation, house, agentRadius, slotIndex = 0, activity = "" },
+  {
+    navigation,
+    house,
+    agentRadius,
+    slotIndex = 0,
+    activity = "",
+    occupiedPositions = [],
+  },
 ) {
   if (!destination || typeof destination !== "object") {
     return { ok: false, reason: "INVALID_DESTINATION", roomId: null, position: null };
@@ -224,6 +231,7 @@ export function resolveScheduleDestination(
     agentRadius,
     activity,
     house,
+    occupiedPositions,
   });
 
   if (!resolved) {

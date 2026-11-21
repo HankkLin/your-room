@@ -3,6 +3,7 @@ import {
   createPersonaApiMiddleware,
   createPersonaGenerator,
 } from "./src/agents/persona-api.js";
+import { createRedesignApiMiddleware } from "./src/agents/redesign-agent.js";
 import { createFloorplanApiMiddleware } from "./src/spatial/floorplan-vite-middleware.js";
 
 export default defineConfig(({ command, mode }) => {
@@ -14,8 +15,10 @@ export default defineConfig(({ command, mode }) => {
   });
   const personaMiddleware = createPersonaApiMiddleware(generatePersonas);
   const floorplanMiddleware = createFloorplanApiMiddleware(env);
+  const redesignMiddleware = createRedesignApiMiddleware(env);
   const configure = (server) => {
     server.middlewares.use("/api/floorplan/analyze", floorplanMiddleware);
+    server.middlewares.use(redesignMiddleware);
     server.middlewares.use(personaMiddleware);
   };
 
