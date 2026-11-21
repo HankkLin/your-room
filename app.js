@@ -38,7 +38,6 @@ import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
 import { furnishingCandidatesFromSession, prepareFurnishing } from "./src/persona/furnishing.js";
 import { refreshFurnishingOffers } from "./src/persona/furnishing-offers.js";
-import { savedShopifyRow } from "./src/shopify/scene-candidate.js";
 import { mountFurnishingPanel } from "./src/components/persona/furnishing-panel.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { validatePersonas } from "./src/contracts/persona.js";
