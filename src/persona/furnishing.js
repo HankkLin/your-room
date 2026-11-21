@@ -8,8 +8,9 @@ import { validateFurnishingInput, validateFurnishingProposal } from "../agents/f
 /** Supply liveCandidates: furnishingCandidatesFromSession(candidateSession.read()) at the design boundary. */
 export function furnishingCandidatesFromSession(snapshot, now = Date.now()) {
   if (!snapshot || (snapshot.expiresAt != null && snapshot.expiresAt <= now) ||
-      !furniturePreviewKinds.includes(snapshot.kind) || !Array.isArray(snapshot.products)) return [];
-  return snapshot.products.map((product) => ({ ...product, kind: snapshot.kind }));
+      !Array.isArray(snapshot.products)) return [];
+  return snapshot.products.map(product => ({ ...product, kind: product.kind ?? snapshot.kind }))
+    .filter(product => furniturePreviewKinds.includes(product.kind));
 }
 
 function liveOption(candidate) {
@@ -20,7 +21,7 @@ function liveOption(candidate) {
     merchant: candidate.merchant || candidate.sellerDomain, variant: candidate.variantTitle, deliveryEstimate: candidate.deliveryEstimate };
 }
 
-export function prepareFurnishing({ project, style, brief, budget, reference = null, liveCandidates = [], getQuote = () => null }) {
+export function prepareFurnishing({ project, style, brief, styleBrief, budget, reference = null, liveCandidates = [], getQuote = () => null }) {
   const rooms = listPersonaRooms(project);
   const rawHouse = project.importedHouse || project.house;
   const house = rawHouse ? normalizeHouse(rawHouse) : null;
@@ -48,7 +49,8 @@ export function prepareFurnishing({ project, style, brief, budget, reference = n
     ...(merchant ? { merchant, variant, deliveryEstimate, dimensionsSource: item.dimensionsSource } : {}),
     dimensions: { width: item.width, height: item.height, depth: item.depth },
   }));
-  const input = { personas: project.personas, rooms, style, brief, budgetMinor: Math.round(budget * 100),
+  const input = { personas: project.personas, rooms, style, brief, ...(styleBrief ? { styleBrief } : {}),
+    budgetMinor: Math.round((styleBrief?.budget?.amount ?? budget) * 100),
     retainedMinor, reference, candidates, existingPieces: items.map(({ name, kind, roomId, locked, owned }) => ({ name, kind, roomId, locked, owned })) };
   validateFurnishingInput(input);
   if (retainedMinor > input.budgetMinor) throw new Error("The existing furniture already exceeds this budget.");

@@ -25,7 +25,7 @@ function catalogVariant(overrides = {}) {
   return {
     id: ref.variantId,
     title: "Natural Oak",
-    seller: { domain: ref.sellerDomain, name: "Oak & Co." },
+    seller: { domain: ref.sellerDomain, name: "Oak & Co.", url: "https://oak.example" },
     price: { amount: 45_999, currency: "USD" },
     availability: { available: true },
     media: [{ type: "image", url: imageUrl }],
@@ -50,6 +50,7 @@ async function requestApi(fetchImpl, {
   method = "POST",
   headers = {},
   timeoutMs,
+  probe = async () => ({ status: 200 }),
 } = {}) {
   const request = Readable.from([Buffer.from(rawBody)]);
   Object.assign(request, {
@@ -68,7 +69,7 @@ async function requestApi(fetchImpl, {
     setHeader(name, value) { this.headers[name] = value; },
     end(body) { this.body = body; },
   };
-  await createShopifyApiMiddleware({ fetchImpl, timeoutMs })(request, response, () => { response.calledNext = true; });
+  await createShopifyApiMiddleware({ fetchImpl, timeoutMs, probe })(request, response, () => { response.calledNext = true; });
   if (response.body) response.json = JSON.parse(response.body);
   return response;
 }
@@ -111,6 +112,8 @@ test("search sends an anonymous Shop MCP request and preserves merchant attribut
       title: "Oak Coffee Table",
       variantTitle: "Natural Oak",
       merchant: "Oak & Co.",
+      merchantId: null, storefrontUrl: "https://oak.example", price: 459.99, availableForSale: true,
+      source: "shopify", imageUrls: [imageUrl], dimensionSource: null, checkoutUrl: null, modelUrl: null,
       priceMinor: 45_999,
       currency: "USD",
       available: true,
@@ -153,6 +156,8 @@ test("variant refresh requires the same variant and seller and allows missing op
     title: "Oak Coffee Table",
     variantTitle: "Oil / Small",
     merchant: "Oak & Co.",
+    merchantId: null, storefrontUrl: "https://oak.example", price: null, availableForSale: false,
+    source: "shopify", imageUrls: [imageUrl], dimensionSource: null, checkoutUrl: null, modelUrl: null,
     priceMinor: null,
     currency: null,
     available: false,
@@ -185,11 +190,11 @@ test("merchant GLBs and physical dimensions follow the matched variant", async (
   async function refresh() {
     return (await requestApi(() => toolResponse({ product }), { route: "variant", input: { ref } })).json.product;
   }
-  assert.equal((await refresh()).modelUrl, undefined);
+  assert.equal((await refresh()).modelUrl, null);
   exact.media = [model];
   assert.equal((await refresh()).modelScope, "variant");
   exact.media = [{ type: "model_3d", url: "https://cdn.shopify.com/broken.usdz" }];
-  assert.equal((await refresh()).modelUrl, undefined);
+  assert.equal((await refresh()).modelUrl, null);
 });
 
 test("lookup returns only exact, same-seller variant matches in saved order", async () => {
@@ -288,6 +293,9 @@ test("checkout stops for unavailable variants and protects checkout capabilities
   assert.deepEqual(tools, ["get_product"]);
 
   const badResponses = [
+    () => toolResponse(checkoutDocument({ continue_url: "https://shop.app/checkouts/test", seller: { domain: "wrong.myshopify.com" } })),
+    () => toolResponse(checkoutDocument({ line_items: [{ item: { id: ref.variantId, seller: { domain: "wrong.myshopify.com" } }, quantity: 1 }] })),
+    () => toolResponse(checkoutDocument(), { _meta: { "com.shopify/shop": "wrong.myshopify.com" } }),
     () => toolResponse(checkoutDocument({ line_items: [{ item: { id: otherRef.variantId }, quantity: 1 }] })),
     () => toolResponse(checkoutDocument({ status: "completed" })),
     () => toolResponse(checkoutDocument({ continue_url: productUrl })),
@@ -457,4 +465,67 @@ test("Shop Pay and verified merchant checkouts can be shared with the buyer", as
     assert.equal(result.statusCode, 200);
     assert.equal(result.json.continueUrl, continue_url);
   }
+});
+
+test("commerce URLs bind the merchant and exact variant at each HTTP hop", async () => {
+  const canonical = "https://oak.example/collections/new/products/table?variant=12345";
+  for (const [next, verified] of [[canonical, true], [canonical.replace("12345", "54321"), false],
+    [canonical.replace("/table?", "/different-product?"), false],
+    ["https://unrelated.example/products/table?variant=12345", false], [productUrl, false], ["http://oak.example/products/table?variant=12345", false]]) {
+    const visited = [];
+    const probe = async url => {
+      visited.push(url);
+      return url === productUrl ? { status: 302, location: next } : { status: 200 };
+    };
+    const res = await requestApi(() => toolResponse({ products: [catalogProduct(catalogVariant())] }), { probe });
+    assert.equal(res.json.products[0].productUrl, verified ? productUrl : null);
+    assert.deepEqual(visited, verified ? [productUrl, canonical] : [productUrl]);
+  }
+  const probes = [];
+  const res = await requestApi((_, options) => JSON.parse(options.body).params.name === "get_product"
+    ? toolResponse({ product: catalogProduct(catalogVariant({ url: "https://unrelated.example/products/table?variant=12345" })) })
+    : toolResponse(checkoutDocument({ continue_url: "https://unrelated.example/checkouts/test" })),
+  { route: "checkout", input: { ref }, probe: async url => { probes.push(url); return { status: 200 }; } });
+  assert.equal(res.statusCode, 502);
+  assert.deepEqual(probes, []);
+});
+
+test("the confirmed checkout suppresses a redirect to another merchant and a rate-limited final page", async () => {
+  const start = "https://shop.app/checkouts/r/issued";
+  const summary = "https://shop.app/checkouts/uc/buyer-summary";
+  const connected = [];
+  const hosted = await requestApi((_, options) => JSON.parse(options.body).params.name === "get_product"
+    ? toolResponse({ product: catalogProduct(catalogVariant()) }) : toolResponse(checkoutDocument({ continue_url: start, links: [] })),
+  { route: "checkout", input: { ref }, probe: async url => {
+    connected.push(url);
+    return url === start ? { status: 302, location: summary } : { status: 200, contentType: "text/html" };
+  } });
+  assert.deepEqual(connected, [start, summary]);
+  assert.equal(hosted.json.continueUrl, start);
+  for (const outcome of [{ status: 302, location: "https://other.example/checkouts/new" }, { status: 429 }]) {
+    const probed = [];
+    const res = await requestApi((_, options) => JSON.parse(options.body).params.name === "get_product"
+      ? toolResponse({ product: catalogProduct(catalogVariant()) }) : toolResponse(checkoutDocument()),
+    { route: "checkout", input: { ref }, probe: async url => { probed.push(url); return outcome; } });
+    assert.equal(res.statusCode, 502);
+    assert.equal(res.json.uncertain, true);
+    assert.equal(res.json.continueUrl, undefined);
+    assert.deepEqual(probed, [checkoutUrl]);
+  }
+});
+
+test("catalog buy links retain the exact variant and disclosure fields retain merchant provenance", async () => {
+  const buy = "https://oak.example/buy/12345:1?attribution=returned";
+  const product = catalogProduct(catalogVariant({ checkout_url: buy, seller_product_id: "875",
+    media: [{ type: "image", url: imageUrl }, { type: "image", url: "https://oak.example/oak2.png" }] }));
+  const res = await requestApi(() => toolResponse({ products: [product], messages: [
+    { ...warning, url: "https://unrelated.example/buy" }] }), { probe: async (url, method) => {
+    assert.notEqual(new URL(url).hostname, "unrelated.example");
+    assert.notEqual(url, buy, "Discovery must not initiate a purchase session");
+    return { status: 200 };
+  } });
+  assert.equal(res.json.products[0].checkoutUrl, buy);
+  assert.deepEqual(res.json.products[0].imageUrls, [imageUrl, "https://oak.example/oak2.png"]);
+  assert.equal(res.json.products[0].productId, "875");
+  assert.deepEqual(res.json.warnings[0].links, []);
 });

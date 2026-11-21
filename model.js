@@ -229,7 +229,7 @@ export const catalog = [
   },
 ].map((preview) => ({ ...preview, ...offers[preview.id] }));
 
-const kindWords = {
+export const kindWords = {
   sofa: "sofas?|couch(?:es)?|sectionals?",
   bookcase: "bookcases?|bookshel(?:f|ves)|shelving|shelves",
   rug: "rugs?|carpets?|flatweaves?",

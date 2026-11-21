@@ -249,6 +249,18 @@
               </section>
               <p class="design-summary muted" id="notes" role="status"></p>
             </form>
+            <section id="design-discovery" aria-label="Find furniture for your design">
+              <label class="field">Room<select data-design-room></select></label>
+              <button type="button" class="secondary" data-search-brief>Find furniture for this brief</button>
+              <p class="muted" data-intent></p>
+              <form>
+                <label class="field">Search by item<input type="search" data-item-query maxlength="200" placeholder="Warm oak coffee table under $400" required></label>
+                <label class="field">Furniture type<select data-design-kind><option value="">From search</option></select></label>
+                <button type="submit" class="secondary">Search products</button>
+              </form>
+              <p class="muted" role="status"></p><div data-notices hidden></div>
+              <ul class="shopify-picker-results"></ul>
+            </section>
           </section>
           <section id="tour-panel" class="panel" hidden>
             <p class="eyebrow">In the room</p>

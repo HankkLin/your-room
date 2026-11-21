@@ -82,7 +82,7 @@ export function mountFurnishingPanel(root, { getContext, refreshRetained, refres
       const result = previewFurnishing(fresh, review.proposal);
       if (signature(fresh, result) !== review.signature) throw new Error("The room, prices, or brief changed. Request a fresh proposal.");
       reset();
-      onApprove(result.additions.map(({ item }) => item), fresh.input);
+      onApprove(result.additions.map(({ item, operation }) => ({ ...item, suggestedReason: operation.reason })), fresh.input);
     } catch (error) {
       if (pending !== controller) return;
       reset();

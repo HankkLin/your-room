@@ -8,8 +8,8 @@ export function createCandidateSession(now = Date.now) {
       if (snapshot && now() >= snapshot.expiresAt) snapshot = null;
       return snapshot;
     },
-    remember({ query, kind, products, warnings }, expiresAt = now() + resultLifetimeMs) {
-      snapshot = { query, kind, products: [...products], warnings: [...warnings], expiresAt };
+    remember({ query, kind, products, warnings, source }, expiresAt = now() + resultLifetimeMs) {
+      snapshot = { query, kind, products: [...products], warnings: [...warnings], expiresAt, ...(source ? { source } : {}) };
       return snapshot;
     },
     clear() { snapshot = null; },

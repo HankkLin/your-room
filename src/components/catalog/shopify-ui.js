@@ -1,4 +1,5 @@
 import { shopifyHttpsUrl } from "../../contracts/product.js";
+import { merchantInfoDestination } from "../../shopify/destinations.js";
 export { shopifyHttpsUrl };
 
 export function formatShopifyMoney(amountMinor, currency) {
@@ -10,7 +11,7 @@ export function formatShopifyMoney(amountMinor, currency) {
   return formatter.format(amountMinor / 10 ** fractionDigits);
 }
 
-export function renderShopifyWarnings(container, warnings = []) {
+export function renderShopifyWarnings(container, warnings = [], sellers = []) {
   const list = document.createElement("ul");
   list.className = "shopify-warnings";
   for (const warning of warnings ?? []) {
@@ -18,7 +19,7 @@ export function renderShopifyWarnings(container, warnings = []) {
     const item = document.createElement("li");
     item.textContent = warning.text;
     for (const link of warning.links ?? []) {
-      const href = shopifyHttpsUrl(link?.url);
+      const href = sellers.some(seller => merchantInfoDestination(link?.url, seller)) ? link.url : null;
       if (!href || !link.label) continue;
       const anchor = document.createElement("a");
       anchor.href = href;

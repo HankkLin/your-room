@@ -8,6 +8,16 @@
 
 .shopify-picker-form .field { margin: 0; }
 
+#design-discovery {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+#design-discovery form { display: grid; gap: 8px; }
+#design-discovery p:empty, #design-discovery ul:empty { display: none; }
+
 .shopify-picker-kind { grid-column: 1 / -1; }
 
 .shopify-picker-status:not(:empty) { margin-top: 10px; }

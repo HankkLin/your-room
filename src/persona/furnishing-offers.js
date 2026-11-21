@@ -22,7 +22,10 @@ export async function refreshFurnishingOffers(items, session, quotes, request, s
   for (const { product } of refreshed) quotes.remember(product);
   session.remember({
     ...snapshot,
-    products: snapshot.products.map((product) => byId.get(productCandidateId(product)) ?? product),
+    products: snapshot.products.map(previous => {
+      const product = byId.get(productCandidateId(previous));
+      return product ? { ...product, ...(previous.kind ? { kind: previous.kind, placed: previous.placed } : {}) } : previous;
+    }),
     warnings: refreshed.flatMap(({ warnings }) => warnings ?? []),
   }, snapshot.expiresAt);
 

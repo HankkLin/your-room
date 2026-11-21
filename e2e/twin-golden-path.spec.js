@@ -5,6 +5,14 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
 }) => {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  // The saved catalog row receives its link only after an exact merchant refresh.
+  await page.route("**/api/shopify/lookup", route => {
+    const products = route.request().postDataJSON().refs.filter(ref => ref.variantId.endsWith("/41588406419527"))
+      .map(ref => ({ ...ref, title: "Form Coffee Table, Small, American Walnut", merchant: "Sundays",
+        storefrontUrl: "https://www.sundays-company.com", available: true, priceMinor: 67500, currency: "USD",
+        productUrl: "https://www.sundays-company.com/products/form-coffee-table-walnut?variant=41588406419527" }));
+    return route.fulfill({ json: { products } });
+  });
 
   let redesignCallCount = 0;
   await page.route("**/api/redesign/propose", async (route) => {

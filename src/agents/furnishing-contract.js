@@ -1,4 +1,6 @@
 import { validatePersonas } from "../contracts/persona.js";
+import { validateStyleBrief } from "./style-brief.js";
+import { itemLimit } from "../shopify/budget.js";
 
 export const furnishingPath = "/api/furnishing/propose";
 export const furnishingNeeds = ["quiet", "privacy", "daylight", "social", "accessibility"];
@@ -12,6 +14,10 @@ export function validateFurnishingInput(input) {
   if (!text(input.style, 80) || typeof input.brief !== "string" || input.brief.length > 1200 ||
       !money(input.budgetMinor) || input.budgetMinor > 10000000 || !money(input.retainedMinor)) {
     throw new Error("Check the design brief and furniture budget.");
+  }
+  if (input.styleBrief != null) {
+    validateStyleBrief(input.styleBrief, input.rooms);
+    if (input.styleBrief.budget && input.styleBrief.budget.currency !== "USD") throw new Error("Furnishing budgets must be in USD.");
   }
   if (!Array.isArray(input.candidates) || !input.candidates.length || input.candidates.length > 100 ||
       input.candidates.some((item) => !text(item?.id, 512) || !text(item.name, 500) || !money(item.priceMinor)) ||
@@ -51,6 +57,11 @@ export function validateFurnishingProposal(proposal, input) {
         !input.personas.some(({ id }) => id === operation.personaId) ||
         !furnishingNeeds.includes(operation.need) || !text(operation.reason, 400)) {
       throw new Error("The proposal includes an unsupported change or an unknown piece, room, or household need.");
+    }
+    const intents = input.styleBrief?.roomIntents[operation.roomId] ?? [];
+    if (intents.some(intent => intent.kind === candidate.kind &&
+        candidate.priceMinor > Math.min(intent.maxPriceMinor ?? Infinity, itemLimit(intent.query)))) {
+      throw new Error("This piece exceeds the item budget for the room.");
     }
     totalMinor += candidate.priceMinor;
   }

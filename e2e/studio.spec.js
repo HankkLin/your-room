@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import offers from "../offers.json" with { type: "json" };
 const project = (p) =>
   p.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 const owned = (s) => s.items.filter((i) => i.owned);
@@ -13,6 +14,16 @@ test("custom room flows through the brief, furnished tour and saved Shopify vari
 }) => {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await page.route("**/api/shopify/lookup", route => {
+    const products = route.request().postDataJSON().refs.flatMap(ref => {
+      const offer = Object.values(offers).find(item =>
+        "gid://shopify/ProductVariant/" + new URL(item.url).searchParams.get("variant") === ref.variantId);
+      return offer ? [{ ...ref, title: offer.name, merchant: offer.store, variantTitle: offer.variant,
+        available: true, priceMinor: Math.round(offer.price * 100), currency: "USD",
+        storefrontUrl: new URL(offer.url).origin, productUrl: offer.url }] : [];
+    });
+    return route.fulfill({ json: { products } });
+  });
   await page.goto("/");
   await expect(page).toHaveTitle("Living Blueprint · Room studio");
   await expect(page.getByRole("link", { name: "Living Blueprint", exact: true })).toBeVisible();

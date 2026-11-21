@@ -14,6 +14,8 @@ export function catalogCheckoutRow(row, previous) {
   const offer = Object.hasOwn(offers, row.productId) ? offers[row.productId] : null;
   const url = shopifyHttpsUrl(row.url ?? offer?.url);
   if (!url) return row;
+  if (offer && (extractVariantIdFromProductUrl(url) !== extractVariantIdFromProductUrl(offer.url) ||
+      new URL(url).hostname !== new URL(offer.url).hostname)) return row;
   const page = new URL(url);
   const sellerDomain = shops.get(page.hostname.replace(/^www\./, ""));
   const variantId = extractVariantIdFromProductUrl(url);
