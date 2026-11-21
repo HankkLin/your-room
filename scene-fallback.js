@@ -366,6 +366,14 @@ export function createPlanScene(host, { onSelect, onMove }) {
     setView() { draw(); },
     zoom(delta) { zoom = Math.max(.65, Math.min(2, zoom + delta * .15)); draw(); },
     reset() { zoom = 1; draw(); },
+    projectScreenToFloor(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+      const pt = pointer({ clientX, clientY });
+      return [pt.x, pt.z];
+    },
+    setDragPreview() {},
+    setLivePlaybackFindings() {},
     setPlaybackFrame({ snapshots = [], visibleRoutes = [], agentMeta = new Map() } = {}) {
       playbackSnapshots = [...snapshots];
       playbackRoutes = [...visibleRoutes];

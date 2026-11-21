@@ -554,6 +554,200 @@ function createNameLabelSprite(nameText, accentColor, activityText = "At home") 
   return { sprite, texture, material, canvas, ctx, lastKey: initialKey };
 }
 
+const POPUP_TOTAL_MS = 2800;
+const POPUP_FADE_MS = 650;
+const POPUP_COOLDOWN_MS = 5200;
+
+export function formatLiveFindingPopupSpec(finding, context = {}) {
+  if (!finding || typeof finding !== "object") return null;
+  const type = String(finding.type || "").toUpperCase();
+  const ev = finding.evidence || {};
+  const locObj =
+    typeof finding.rawLocation === "object" && finding.rawLocation
+      ? finding.rawLocation
+      : typeof finding.location === "object"
+        ? finding.location
+        : null;
+  const roomId =
+    finding.roomId ||
+    locObj?.roomId ||
+    (typeof finding.location === "string" ? finding.location : null) ||
+    ev.receiverRoomId ||
+    null;
+  const roomObj =
+    roomId && Array.isArray(context?.house?.rooms)
+      ? context.house.rooms.find(
+          (r) =>
+            r.id === roomId ||
+            r.name?.toLowerCase() === String(roomId).toLowerCase(),
+        )
+      : null;
+  const roomLabel =
+    roomObj?.name ||
+    (roomId
+      ? String(roomId)
+          .replace(/[-_]+/g, " ")
+          .replace(/\b\w/g, (c) => c.toUpperCase())
+      : "");
+
+  let text = "⚠ Spatial issue";
+  let bg = "#a64026";
+
+  if (type === "CONGESTION") {
+    text = roomLabel
+      ? `⚠ ${roomLabel} congestion`
+      : "⚠ Congestion";
+    bg = "#c45724";
+  } else if (type === "NOISE_CONFLICT") {
+    text = "🔊 Noise conflict";
+    bg = "#9e4d28";
+  } else if (type === "PRIVACY_SIGHTLINE") {
+    text = "👁 Privacy issue";
+    bg = "#9c3b4c";
+  } else if (type.startsWith("ACCESSIBILITY_") || type === "NO_PATH") {
+    text =
+      type === "ACCESSIBILITY_TURN_RADIUS_FAIL"
+        ? "♿ Tight turn space"
+        : "♿ Path blocked";
+    bg = "#255d83";
+  } else if (
+    type === "EVACUATION_BOTTLENECK" ||
+    type === "NO_EVACUATION_PATH" ||
+    type === "LONG_EVACUATION_ROUTE"
+  ) {
+    text =
+      type === "NO_EVACUATION_PATH"
+        ? "⚠ Exit blocked"
+        : "⚠ Exit bottleneck";
+    bg = "#b53324";
+  } else if (
+    type === "TV_OCCLUDED" ||
+    type === "TV_BAD_ANGLE" ||
+    type === "TV_TOO_FAR"
+  ) {
+    text = "📺 Poor TV view";
+    bg = "#9e6b24";
+  } else if (type === "SUN_GLARE") {
+    text = "☀ Glare on desk";
+    bg = "#b0741e";
+  } else if (type === "LONG_PATH") {
+    text = "⚠ Detour route";
+    bg = "#8d5c2c";
+  } else {
+    return null;
+  }
+
+  return { text, bg, roomId: roomObj?.id || roomId || null };
+}
+
+function createLivePopupSprite(text, bgColor) {
+  if (typeof document === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = 416;
+  canvas.height = 88;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = bgColor || "#b84426";
+  ctx.beginPath();
+  ctx.roundRect(12, 10, canvas.width - 24, canvas.height - 20, 34);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(255, 252, 244, 0.85)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(12, 10, canvas.width - 24, canvas.height - 20, 34);
+  ctx.stroke();
+
+  ctx.fillStyle = "#fffefa";
+  ctx.font = "700 25px system-ui, -apple-system, Segoe UI, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(text).slice(0, 26), canvas.width / 2, canvas.height / 2 + 1);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 1,
+    depthTest: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(1.48, 0.31, 1);
+  sprite.renderOrder = 12;
+  return { sprite, texture, material };
+}
+
+function isFindingActiveAtSecond(finding, sec, snapshotsById, context) {
+  const type = String(finding?.type || "").toUpperCase();
+  const ev = finding?.evidence || {};
+
+  if (
+    Number.isFinite(Number(ev.startTimestamp)) &&
+    Number.isFinite(Number(ev.endTimestamp))
+  ) {
+    return sec >= Number(ev.startTimestamp) - 1 && sec <= Number(ev.endTimestamp) + 3;
+  }
+
+  if (
+    Array.isArray(ev.overlapWindowMinutes) &&
+    ev.overlapWindowMinutes.length >= 2
+  ) {
+    const s = Number(ev.overlapWindowMinutes[0]) * 60;
+    const e = Number(ev.overlapWindowMinutes[1]) * 60;
+    if (Number.isFinite(s) && Number.isFinite(e)) {
+      return sec >= s && sec <= e;
+    }
+  }
+
+  if (Number.isFinite(Number(ev.timestampSeconds))) {
+    const t = Number(ev.timestampSeconds);
+    return sec >= t - 1 && sec <= t + 20;
+  }
+
+  if (
+    type === "EVACUATION_BOTTLENECK" ||
+    type === "NO_EVACUATION_PATH" ||
+    type === "LONG_EVACUATION_ROUTE"
+  ) {
+    return sec >= 1.5;
+  }
+
+  const overlay = mapFindingToOverlaySpec(finding, context);
+  const targetRoomId = finding?.roomId || overlay?.roomId || null;
+
+  if (type.startsWith("ACCESSIBILITY_")) {
+    for (const snap of snapshotsById.values()) {
+      if (!snap.usesWheelchair && !/grand|wheelchair/i.test(String(snap.name || ""))) continue;
+      if (snap.moving || (targetRoomId && snap.roomId === targetRoomId)) {
+        return true;
+      }
+      if (overlay?.position && isPoint2D(snap.position)) {
+        if (
+          Math.hypot(
+            snap.position[0] - overlay.position[0],
+            snap.position[1] - overlay.position[1],
+          ) < 2.2
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  if (targetRoomId) {
+    for (const snap of snapshotsById.values()) {
+      if (snap.roomId === targetRoomId) return true;
+    }
+    return false;
+  }
+
+  return false;
+}
+
 /**
  * Lightweight Three.js Avatar, Path, Finding Evidence & Redesign Transition Layer.
  * Reuses geometries and avatar meshes across frames with clean disposal.
@@ -565,7 +759,8 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
   const routesGroup = new THREE.Group();
   const findingsGroup = new THREE.Group();
   const patchGroup = new THREE.Group();
-  root.add(routesGroup, findingsGroup, patchGroup, avatarsGroup);
+  const popupsGroup = new THREE.Group();
+  root.add(routesGroup, findingsGroup, patchGroup, avatarsGroup, popupsGroup);
   scene.add(root);
 
   // Shared unit geometries (allocated once, reused for up to 12+ avatars & wheelchairs)
@@ -605,7 +800,191 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
   let focusedAgentIds = new Set();
   let cachedFindings = [];
   let cachedContext = {};
+  let liveFindings = [];
+  let liveFindingsContext = {};
+  const activePopups = new Map();
+  const popupDedupe = new Map();
+  let popupTickRaf = 0;
   let disposed = false;
+
+  function stopPopupTicker() {
+    if (popupTickRaf && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(popupTickRaf);
+    }
+    popupTickRaf = 0;
+  }
+
+  function removePopupEntry(dedupeKey) {
+    const entry = activePopups.get(dedupeKey);
+    if (!entry) return;
+    entry.sprite.removeFromParent();
+    entry.texture?.dispose?.();
+    entry.material?.dispose?.();
+    activePopups.delete(dedupeKey);
+  }
+
+  function clearPopups() {
+    stopPopupTicker();
+    for (const key of [...activePopups.keys()]) removePopupEntry(key);
+    popupDedupe.clear();
+  }
+
+  function tickPopups(nowMs = performance.now()) {
+    let changed = false;
+    for (const [key, entry] of [...activePopups.entries()]) {
+      const elapsed = nowMs - entry.bornAtMs;
+      if (elapsed >= POPUP_TOTAL_MS) {
+        removePopupEntry(key);
+        changed = true;
+        continue;
+      }
+      if (entry.agentId) {
+        const avatarRec = avatarRecords.get(entry.agentId);
+        if (avatarRec) {
+          const baseY = avatarRec.usesWheelchair
+            ? 2.02
+            : Math.max(1.92, 1.38 * (avatarRec.heightMeters / 1.72) + 0.9);
+          entry.sprite.position.set(
+            avatarRec.group.position.x,
+            baseY + Math.min(0.08, (elapsed / POPUP_TOTAL_MS) * 0.08),
+            avatarRec.group.position.z,
+          );
+          changed = true;
+        }
+      }
+      const fadeStart = POPUP_TOTAL_MS - POPUP_FADE_MS;
+      const nextOpacity =
+        elapsed <= fadeStart
+          ? 1
+          : Math.max(0, 1 - (elapsed - fadeStart) / POPUP_FADE_MS);
+      if (Math.abs(entry.material.opacity - nextOpacity) > 0.01) {
+        entry.material.opacity = nextOpacity;
+        changed = true;
+      }
+    }
+    if (changed) invalidate();
+    if (activePopups.size > 0 && !disposed && typeof requestAnimationFrame === "function") {
+      if (!popupTickRaf) {
+        popupTickRaf = requestAnimationFrame((ts) => {
+          popupTickRaf = 0;
+          tickPopups(ts);
+        });
+      }
+    } else {
+      stopPopupTicker();
+    }
+  }
+
+  function setLiveFindings(findings = [], context = {}) {
+    liveFindings = Array.isArray(findings) ? [...findings] : [];
+    liveFindingsContext = context || {};
+    clearPopups();
+  }
+
+  function updateLivePopups(snapshots = [], timestampSeconds = 0) {
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (!liveFindings.length) {
+      tickPopups(nowMs);
+      return;
+    }
+
+    const snapshotsById = new Map();
+    for (const snap of snapshots) {
+      if (snap?.agentId) snapshotsById.set(snap.agentId, snap);
+    }
+
+    for (let i = 0; i < liveFindings.length; i += 1) {
+      const finding = liveFindings[i];
+      const findingKey = String(finding.id || `${finding.type || "finding"}-${i}`);
+      const isActive = isFindingActiveAtSecond(
+        finding,
+        timestampSeconds,
+        snapshotsById,
+        liveFindingsContext,
+      );
+
+      const ev = finding?.evidence || {};
+      const candidateIds = new Set();
+      if (Array.isArray(ev.agentIds)) {
+        for (const id of ev.agentIds) if (id) candidateIds.add(String(id));
+      }
+      if (finding?.agentId) candidateIds.add(String(finding.agentId));
+      if (ev.workerAgentId) candidateIds.add(String(ev.workerAgentId));
+      if (ev.sourceAgentId) candidateIds.add(String(ev.sourceAgentId));
+
+      // Keep only agentIds that are currently present in the room/scene
+      const presentAgentIds = [...candidateIds].filter((id) => avatarRecords.has(id));
+      const targets =
+        presentAgentIds.length > 0
+          ? presentAgentIds.slice(0, 2).map((id) => ({ kind: "agent", agentId: id }))
+          : [{ kind: "location", agentId: null }];
+
+      for (const target of targets) {
+        const dedupeKey = `${findingKey}|${target.agentId || "@hotspot"}`;
+        const stateRec = popupDedupe.get(dedupeKey) || {
+          wasActive: false,
+          lastShownMs: -Infinity,
+        };
+
+        if (!isActive) {
+          if (stateRec.wasActive) {
+            popupDedupe.set(dedupeKey, { ...stateRec, wasActive: false });
+          }
+          continue;
+        }
+
+        const cooldownElapsed = nowMs - stateRec.lastShownMs >= POPUP_COOLDOWN_MS;
+        if (!stateRec.wasActive && cooldownElapsed && !activePopups.has(dedupeKey)) {
+          const spec = formatLiveFindingPopupSpec(finding, liveFindingsContext);
+          if (spec) {
+            let worldX = null;
+            let worldZ = null;
+            let worldY = 1.95;
+            if (target.agentId) {
+              const av = avatarRecords.get(target.agentId);
+              if (av) {
+                worldX = av.group.position.x;
+                worldZ = av.group.position.z;
+                worldY = av.usesWheelchair
+                  ? 2.02
+                  : Math.max(1.92, 1.38 * (av.heightMeters / 1.72) + 0.9);
+              }
+            } else {
+              const overlay = mapFindingToOverlaySpec(finding, liveFindingsContext);
+              if (overlay?.position) {
+                worldX = overlay.position[0];
+                worldZ = overlay.position[1];
+                worldY = 1.75;
+              }
+            }
+
+            if (worldX !== null && worldZ !== null) {
+              const popupObj = createLivePopupSprite(spec.text, spec.bg);
+              if (popupObj) {
+                popupObj.sprite.position.set(worldX, worldY, worldZ);
+                popupsGroup.add(popupObj.sprite);
+                activePopups.set(dedupeKey, {
+                  ...popupObj,
+                  agentId: target.agentId,
+                  findingKey,
+                  text: spec.text,
+                  bornAtMs: nowMs,
+                });
+                popupDedupe.set(dedupeKey, {
+                  wasActive: true,
+                  lastShownMs: nowMs,
+                });
+              }
+            }
+          }
+        } else if (!stateRec.wasActive) {
+          popupDedupe.set(dedupeKey, { ...stateRec, wasActive: true });
+        }
+      }
+    }
+
+    tickPopups(nowMs);
+  }
 
   function clearGroup(group) {
     while (group.children.length > 0) {
@@ -1064,6 +1443,8 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
     focusedFindingId = null;
     focusedAgentIds = new Set();
     cachedFindings = [];
+    liveFindings = [];
+    clearPopups();
     for (const id of [...avatarRecords.keys()]) removeAvatar(id);
     clearGroup(routesGroup);
     clearGroup(findingsGroup);
@@ -1087,9 +1468,12 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
     routesGroup,
     findingsGroup,
     patchGroup,
+    popupsGroup,
     updateAvatars,
     updateRoutes,
     setFindings,
+    setLiveFindings,
+    updateLivePopups,
     focusFinding,
     showPatchTransition,
     clear,
@@ -1099,5 +1483,12 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
     getAvatarStatuses: () =>
       [...avatarRecords.values()].map((r) => ({ ...r.currentStatus })),
     getOverlayCount: () => findingsGroup.children.length,
+    getActivePopups: () =>
+      [...activePopups.values()].map((p) => ({
+        agentId: p.agentId,
+        findingKey: p.findingKey,
+        text: p.text,
+        opacity: p.material.opacity,
+      })),
   };
 }

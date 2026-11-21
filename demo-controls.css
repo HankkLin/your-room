@@ -2088,3 +2088,52 @@
   color: var(--bp-ink);
   white-space: nowrap;
 }
+
+.bp-rail-add-card {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.bp-rail-add-card:active {
+  cursor: grabbing;
+}
+
+body.bp-dragging-furniture,
+body.bp-dragging-furniture * {
+  user-select: none !important;
+  cursor: grabbing !important;
+}
+
+.bp-drag-cursor-pill {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(30, 68, 102, 0.94);
+  color: #ffffff;
+  font: 640 11.5px/1.2 var(--sans);
+  box-shadow: 0 6px 18px rgba(18, 32, 48, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bp-drag-cursor-pill[data-drop-state="valid"] {
+  background: rgba(31, 107, 59, 0.95);
+}
+
+.bp-drag-cursor-pill[data-drop-state="invalid"] {
+  background: rgba(179, 48, 34, 0.95);
+}
+.bp-drag-cursor-pill[data-drop-state="invalid"]::before {
+  content: "✕ Can't place · ";
+  font-weight: 700;
+}
+.bp-drag-cursor-pill[data-drop-state="valid"]::before {
+  content: "✓ Drop here · ";
+  font-weight: 700;
+}

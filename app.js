@@ -418,6 +418,12 @@ function startPlaybackFromDataset(dataset, { preserveRedesign = false } = {}) {
     walkingSimSecondsPerRealSecond: dataset.walkingSimSecondsPerRealSecond,
     speedRates: dataset.speedRates || null,
   });
+  if (Array.isArray(dataset.findings)) {
+    scene?.setLivePlaybackFindings?.(dataset.findings, {
+      house: previewLayoutHouse || activeHouse(),
+      items: previewLayoutItems || state.items,
+    });
+  }
   if (dataset.showFindingsImmediately && Array.isArray(dataset.findings)) {
     scene?.setPlaybackFindings?.(dataset.findings, {
       house: previewLayoutHouse || activeHouse(),
@@ -997,7 +1003,70 @@ function findSafeRoomPlacement(sceneObj, house, occupiedItems, targetRoomId) {
   return null;
 }
 
-function addLibraryCandidateToRoom(candidateKey) {
+function resolveDropPlacementNearPoint(baseObj, dropX, dropZ, house, occupiedItems) {
+  if (!house) {
+    const room = state.room || ROOM;
+    const offsets = [[0, 0]];
+    for (const r of [0.16, 0.32, 0.48]) {
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+        offsets.push([r * Math.cos(a), r * Math.sin(a)]);
+      }
+    }
+    for (const rot of [0, 90]) {
+      for (const [ox, oz] of offsets) {
+        const trial = bounded(
+          {
+            ...baseObj,
+            x: dropX + ox,
+            z: dropZ + oz,
+            rotation: rot,
+            rotationDegrees: rot,
+            position: [dropX + ox, Number(baseObj.elevation ?? baseObj.y) || 0, dropZ + oz],
+            rotationRadians: [0, (rot * Math.PI) / 180, 0],
+          },
+          room,
+        );
+        if (canPlaceItem(trial, room, occupiedItems, 0.06)) {
+          return trial;
+        }
+      }
+    }
+    return null;
+  }
+
+  const dropRoom = getRoomAtPoint(house, dropX, dropZ);
+  if (!dropRoom) return null;
+  const offsets = [[0, 0]];
+  for (const r of [0.16, 0.32, 0.5]) {
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+      offsets.push([r * Math.cos(a), r * Math.sin(a)]);
+    }
+  }
+  for (const rot of [0, 90]) {
+    const yawRad = (rot * Math.PI) / 180;
+    for (const [ox, oz] of offsets) {
+      const tx = Math.round((dropX + ox) * 100) / 100;
+      const tz = Math.round((dropZ + oz) * 100) / 100;
+      if (getRoomAtPoint(house, tx, tz)?.id !== dropRoom.id) continue;
+      const trial = {
+        ...baseObj,
+        x: tx,
+        z: tz,
+        rotation: rot,
+        rotationDegrees: rot,
+        position: [tx, Number(baseObj.elevation ?? baseObj.y) || 0, tz],
+        rotationRadians: [0, yawRad, 0],
+        roomId: dropRoom.id,
+      };
+      if (canPlaceInHouse(trial, house, occupiedItems, 0.08)) {
+        return trial;
+      }
+    }
+  }
+  return null;
+}
+
+function addLibraryCandidateToRoom(candidateKey, explicitDropPoint = null) {
   const candidate = railCandidateLookup.get(candidateKey);
   if (!candidate) return false;
   if (previewLayoutItems) return false;
@@ -1022,21 +1091,32 @@ function addLibraryCandidateToRoom(candidateKey) {
   }
 
   const house = activeHouse();
-  const targetRoomId = resolveActiveRoomIdForPlacement(house);
+  const targetRoomId = explicitDropPoint && house
+    ? getRoomAtPoint(house, explicitDropPoint[0], explicitDropPoint[1])?.id || null
+    : resolveActiveRoomIdForPlacement(house);
   const baseObj = productCandidateToSceneObject(candidate, {
     id: `added-${candidate.kind || "item"}-${crypto.randomUUID().slice(0, 8)}`,
     kind: candidate.kind,
     roomId: targetRoomId,
+    ...(explicitDropPoint ? { position: [explicitDropPoint[0], 0, explicitDropPoint[1]] } : {}),
   });
 
-  const placedObj = findSafeRoomPlacement(
-    baseObj,
-    house,
-    state.items,
-    targetRoomId,
-  );
+  const placedObj = explicitDropPoint
+    ? resolveDropPlacementNearPoint(
+        baseObj,
+        explicitDropPoint[0],
+        explicitDropPoint[1],
+        house,
+        state.items,
+      )
+    : findSafeRoomPlacement(
+        baseObj,
+        house,
+        state.items,
+        targetRoomId,
+      );
   if (!placedObj) {
-    toast("No clear space in this room.");
+    toast(explicitDropPoint ? "Can't place here" : "No clear space in this room.");
     return false;
   }
 
@@ -1534,7 +1614,129 @@ $("#furniture-rail")?.addEventListener("mouseleave", () => {
     syncProductPreviewCard();
   }
 });
+let activeRailDrag = null;
+let suppressNextRailClick = false;
+
+function cleanupRailDrag() {
+  if (!activeRailDrag) return;
+  activeRailDrag.badgeEl?.remove();
+  activeRailDrag = null;
+  scene?.setDragPreview?.(null);
+  document.body.classList.remove("bp-dragging-furniture");
+}
+
+$("#furniture-rail")?.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || previewLayoutItems) return;
+  const candBtn = e.target.closest("[data-rail-candidate]");
+  if (!candBtn) return;
+  const candidateKey = candBtn.dataset.railCandidate;
+  const candidate = railCandidateLookup.get(candidateKey);
+  if (!candidate) return;
+
+  const basePreviewObj = productCandidateToSceneObject(candidate, {
+    id: "drag-ghost-preview",
+    kind: candidate.kind,
+  });
+  const details = resolveItemProductDetails(candidate);
+
+  activeRailDrag = {
+    pointerId: e.pointerId,
+    candidateKey,
+    candidate,
+    basePreviewObj,
+    startX: e.clientX,
+    startY: e.clientY,
+    dragging: false,
+    badgeEl: null,
+    dropPoint: null,
+    validPlacement: null,
+    overScene: false,
+    title: details?.name || candidate.name || "Furniture",
+  };
+});
+
+window.addEventListener("pointermove", (e) => {
+  if (!activeRailDrag || e.pointerId !== activeRailDrag.pointerId) return;
+  const dist = Math.hypot(
+    e.clientX - activeRailDrag.startX,
+    e.clientY - activeRailDrag.startY,
+  );
+  if (!activeRailDrag.dragging && dist >= 6) {
+    activeRailDrag.dragging = true;
+    previewHoverSource = null;
+    syncProductPreviewCard();
+    document.body.classList.add("bp-dragging-furniture");
+    const badge = document.createElement("div");
+    badge.className = "bp-drag-cursor-pill";
+    badge.textContent = activeRailDrag.title;
+    document.body.append(badge);
+    activeRailDrag.badgeEl = badge;
+  }
+  if (!activeRailDrag.dragging) return;
+
+  if (activeRailDrag.badgeEl) {
+    activeRailDrag.badgeEl.style.left = `${e.clientX + 14}px`;
+    activeRailDrag.badgeEl.style.top = `${e.clientY + 14}px`;
+  }
+
+  const floorPt = scene?.projectScreenToFloor?.(e.clientX, e.clientY) || null;
+  activeRailDrag.dropPoint = floorPt;
+  activeRailDrag.overScene = Boolean(floorPt);
+
+  if (!floorPt) {
+    activeRailDrag.validPlacement = null;
+    scene?.setDragPreview?.(null);
+    activeRailDrag.badgeEl?.removeAttribute("data-drop-state");
+    return;
+  }
+
+  const house = activeHouse();
+  const validObj = resolveDropPlacementNearPoint(
+    activeRailDrag.basePreviewObj,
+    floorPt[0],
+    floorPt[1],
+    house,
+    state.items,
+  );
+  activeRailDrag.validPlacement = validObj;
+
+  if (validObj) {
+    scene?.setDragPreview?.(validObj, { valid: true });
+    activeRailDrag.badgeEl?.setAttribute("data-drop-state", "valid");
+  } else {
+    scene?.setDragPreview?.(
+      { ...activeRailDrag.basePreviewObj, x: floorPt[0], z: floorPt[1] },
+      { valid: false },
+    );
+    activeRailDrag.badgeEl?.setAttribute("data-drop-state", "invalid");
+  }
+});
+
+function finishRailPointer(e, canceled = false) {
+  if (!activeRailDrag || e.pointerId !== activeRailDrag.pointerId) return;
+  const dragState = activeRailDrag;
+  const wasDragging = dragState.dragging;
+  cleanupRailDrag();
+  if (!wasDragging || canceled) return;
+
+  suppressNextRailClick = true;
+  setTimeout(() => {
+    suppressNextRailClick = false;
+  }, 80);
+
+  if (!dragState.overScene || !dragState.dropPoint) return;
+  addLibraryCandidateToRoom(dragState.candidateKey, dragState.dropPoint);
+  $("#scene")?.focus({ preventScroll: true });
+}
+
+window.addEventListener("pointerup", (e) => finishRailPointer(e, false));
+window.addEventListener("pointercancel", (e) => finishRailPointer(e, true));
+
 $("#furniture-rail")?.addEventListener("click", (e) => {
+  if (suppressNextRailClick) {
+    suppressNextRailClick = false;
+    return;
+  }
   const placedBtn = e.target.closest("[data-rail-item]");
   if (placedBtn) {
     previewHoverSource = null;
@@ -1750,6 +1952,7 @@ function changeView(mode) {
     plan: "Top view",
   };
   view = mode;
+  if (mode !== "interior") clearPressedWalkKeys();
   scene?.setView(mode);
   for (const key of Object.keys(labels))
     $("#view-" + key).setAttribute("aria-pressed", String(mode === key));
@@ -2167,6 +2370,63 @@ $(".plan-pins").onclick = (e) => {
 document
   .querySelectorAll("[data-walk]")
   .forEach((b) => (b.onclick = () => walk(b.dataset.walk)));
+const WASD_SPEED_MPS = 1.55;
+const pressedWalkKeys = { w: false, a: false, s: false, d: false };
+let walkRafId = 0;
+let lastWalkMs = 0;
+
+function clearPressedWalkKeys() {
+  pressedWalkKeys.w = false;
+  pressedWalkKeys.a = false;
+  pressedWalkKeys.s = false;
+  pressedWalkKeys.d = false;
+  if (walkRafId) {
+    cancelAnimationFrame(walkRafId);
+    walkRafId = 0;
+  }
+  lastWalkMs = 0;
+}
+
+function tickContinuousWalk(nowMs) {
+  walkRafId = 0;
+  const anyHeld =
+    pressedWalkKeys.w ||
+    pressedWalkKeys.a ||
+    pressedWalkKeys.s ||
+    pressedWalkKeys.d;
+  if (!anyHeld || $("#studio").hidden || view !== "interior" || dialog.open) {
+    lastWalkMs = 0;
+    return;
+  }
+  const dtSeconds =
+    lastWalkMs > 0
+      ? Math.min(0.08, Math.max(0.001, (nowMs - lastWalkMs) / 1000))
+      : 1 / 60;
+  lastWalkMs = nowMs;
+
+  const forward = (pressedWalkKeys.w ? 1 : 0) - (pressedWalkKeys.s ? 1 : 0);
+  const right = (pressedWalkKeys.d ? 1 : 0) - (pressedWalkKeys.a ? 1 : 0);
+
+  if (forward !== 0 || right !== 0) {
+    const moved = scene?.walk?.(forward, right, WASD_SPEED_MPS * dtSeconds);
+    if (moved) {
+      if (!activeHouse()) {
+        $("#spot-label").textContent = "Walking";
+      }
+      document
+        .querySelectorAll("[data-spot]")
+        .forEach((b) => b.setAttribute("aria-pressed", "false"));
+    }
+  }
+  walkRafId = requestAnimationFrame(tickContinuousWalk);
+}
+
+function startContinuousWalkLoop() {
+  if (walkRafId) return;
+  lastWalkMs = 0;
+  walkRafId = requestAnimationFrame(tickContinuousWalk);
+}
+
 window.addEventListener("keydown", (event) => {
   if (
     dialog.open ||
@@ -2177,13 +2437,22 @@ window.addEventListener("keydown", (event) => {
   ) {
     return;
   }
-  const direction = { w: "forward", s: "backward", a: "left", d: "right" }[
-    event.key.toLowerCase()
-  ];
-  if (!$("#studio").hidden && view === "interior" && direction) {
+  const key = event.key.toLowerCase();
+  if (Object.hasOwn(pressedWalkKeys, key) && !$("#studio").hidden && view === "interior") {
     event.preventDefault();
-    walk(direction);
+    pressedWalkKeys[key] = true;
+    startContinuousWalkLoop();
   }
+});
+window.addEventListener("keyup", (event) => {
+  const key = event.key.toLowerCase();
+  if (Object.hasOwn(pressedWalkKeys, key)) {
+    pressedWalkKeys[key] = false;
+  }
+});
+window.addEventListener("blur", clearPressedWalkKeys);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearPressedWalkKeys();
 });
 $("#room-settings").onclick = () => beginSetup(true);
 $("#continue-furniture").onclick = $("#furniture-step").onclick = () => beginSetup(false, 3);

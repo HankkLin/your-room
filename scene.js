@@ -125,6 +125,24 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   const sun = addLighting(scene);
   const outline = selectionOutline();
   scene.add(outline);
+  const dragGhostGroup = new THREE.Group();
+  dragGhostGroup.visible = false;
+  scene.add(dragGhostGroup);
+  let dragGhostItemKey = '';
+  const dragRingGeo = new THREE.RingGeometry(0.46, 0.56, 32);
+  const dragRingMat = new THREE.MeshBasicMaterial({
+    color: '#2e7d4f',
+    transparent: true,
+    opacity: 0.85,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const dragRingMesh = new THREE.Mesh(dragRingGeo, dragRingMat);
+  dragRingMesh.rotation.x = -Math.PI / 2;
+  dragRingMesh.position.y = 0.032;
+  dragRingMesh.visible = false;
+  scene.add(dragRingMesh);
+
   const simLayer = createSimulationSceneLayer({ scene, invalidate });
 
   const oblique = new THREE.PerspectiveCamera(31, 1, 0.1, 90);
@@ -376,11 +394,21 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     return [fromX, fromZ];
   }
 
-  function walk(forward, right) {
+  function walk(forward, right, customDistanceMeters = null) {
     if (currentView !== 'interior') return false;
+    const dist =
+      customDistanceMeters != null && Number.isFinite(Number(customDistanceMeters))
+        ? Math.max(0, Number(customDistanceMeters))
+        : walkingStep;
+    const f = THREE.MathUtils.clamp(Number(forward) || 0, -1, 1);
+    const r = THREE.MathUtils.clamp(Number(right) || 0, -1, 1);
+    const mag = Math.hypot(f, r);
+    if (mag < 1e-4 || dist < 1e-5) return false;
+    const normF = f / Math.max(1, mag);
+    const normR = r / Math.max(1, mag);
     const heading = eye.rotation.y;
-    const stepX = THREE.MathUtils.clamp(Number(right) || 0, -1, 1) * walkingStep;
-    const stepZ = THREE.MathUtils.clamp(Number(forward) || 0, -1, 1) * walkingStep;
+    const stepX = normR * dist;
+    const stepZ = normF * dist;
     const dx = stepX * Math.cos(heading) - stepZ * Math.sin(heading);
     const dz = -stepX * Math.sin(heading) - stepZ * Math.cos(heading);
     const { x, z } = eye.position;
@@ -392,6 +420,89 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     reportPose();
     invalidate();
     return true;
+  }
+
+  function projectScreenToFloor(clientX, clientY) {
+    const bounds = canvas.getBoundingClientRect();
+    if (
+      clientX < bounds.left ||
+      clientX > bounds.right ||
+      clientY < bounds.top ||
+      clientY > bounds.bottom
+    ) {
+      return null;
+    }
+    pointer.set(
+      (2 * (clientX - bounds.left)) / Math.max(1, bounds.width) - 1,
+      1 - (2 * (clientY - bounds.top)) / Math.max(1, bounds.height),
+    );
+    const currentCamera = camera();
+    currentCamera.updateMatrixWorld();
+    ray.setFromCamera(pointer, currentCamera);
+    if (!ray.ray.intersectPlane(plane, hit)) return null;
+    return [hit.x, hit.z];
+  }
+
+  function setDragPreview(previewItem = null, { valid = true } = {}) {
+    if (!previewItem) {
+      if (dragGhostGroup.visible || dragRingMesh.visible) {
+        dragGhostGroup.visible = false;
+        dragRingMesh.visible = false;
+        invalidate();
+      }
+      return;
+    }
+    const key = objectSignature(previewItem);
+    if (key !== dragGhostItemKey) {
+      while (dragGhostGroup.children.length > 0) {
+        const child = dragGhostGroup.children[0];
+        child.removeFromParent();
+        disposeObject(child, sharedMaterials);
+      }
+      const meshObj =
+        furnitureAssets.create(previewItem) ?? createFurniture(previewItem, materials);
+      meshObj.traverse((node) => {
+        if (!node.isMesh) return;
+        node.castShadow = false;
+        const cloneMat = (m) => {
+          const cm = m.clone();
+          cm.transparent = true;
+          cm.opacity = 0.62;
+          return cm;
+        };
+        node.material = Array.isArray(node.material)
+          ? node.material.map(cloneMat)
+          : cloneMat(node.material);
+      });
+      dragGhostGroup.add(meshObj);
+      dragGhostItemKey = key;
+    }
+    const tint = new THREE.Color(valid ? '#f7fbf8' : '#e0533c');
+    dragGhostGroup.traverse((node) => {
+      if (!node.isMesh || !node.material) return;
+      for (const m of Array.isArray(node.material) ? node.material : [node.material]) {
+        if (m.emissive) {
+          m.emissive.copy(valid ? new THREE.Color('#1f5e3b') : new THREE.Color('#a62819'));
+          m.emissiveIntensity = valid ? 0.18 : 0.55;
+        } else if (!valid && m.color) {
+          m.color.lerp(tint, 0.35);
+        }
+        m.opacity = valid ? 0.68 : 0.42;
+      }
+    });
+    const y = Number(previewItem.elevation ?? previewItem.y) || 0;
+    const x = Number(previewItem.x) || 0;
+    const z = Number(previewItem.z) || 0;
+    dragGhostGroup.position.set(x, y, z);
+    dragGhostGroup.rotation.y = THREE.MathUtils.degToRad(Number(previewItem.rotation) || 0);
+    dragGhostGroup.visible = true;
+
+    const span = Math.max(0.45, Math.max(Number(previewItem.width) || 0.7, Number(previewItem.depth) || 0.7) * 0.62);
+    dragRingMat.color.set(valid ? '#2e7d4f' : '#c93b2b');
+    dragRingMesh.scale.setScalar(span / 0.5);
+    dragRingMesh.position.set(x, 0.034, z);
+    dragRingMesh.visible = true;
+    invalidate();
   }
 
   function cast(event) {
@@ -600,6 +711,8 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     },
     goToSpot,
     walk,
+    projectScreenToFloor,
+    setDragPreview,
     getPose: currentPose,
     setEyePose(x, z, yaw = 0) {
       const height = houseLayout ? houseLayout.ceilingHeight : roomLayout.height;
@@ -624,9 +737,16 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
       resetCameras();
       invalidate();
     },
-    setPlaybackFrame({ snapshots = [], visibleRoutes = [], agentMeta = new Map() } = {}) {
+    setPlaybackFrame({ snapshots = [], visibleRoutes = [], agentMeta = new Map(), timestampSeconds = 0 } = {}) {
       simLayer.updateAvatars(snapshots, agentMeta);
       simLayer.updateRoutes(visibleRoutes, agentMeta);
+      simLayer.updateLivePopups(snapshots, timestampSeconds);
+    },
+    setLivePlaybackFindings(findings = [], context = {}) {
+      simLayer.setLiveFindings(findings, {
+        house: context.house ?? houseLayout,
+        items: context.items ?? itemsInScene,
+      });
     },
     setPlaybackFindings(findings = [], context = {}) {
       simLayer.setFindings(findings, {
@@ -648,6 +768,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
         avatarCount: simLayer.getAvatarCount(),
         avatarStatuses: simLayer.getAvatarStatuses(),
         overlayCount: simLayer.getOverlayCount(),
+        activePopups: simLayer.getActivePopups(),
       };
     },
     dispose() {
