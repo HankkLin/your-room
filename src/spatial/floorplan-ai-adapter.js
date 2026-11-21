@@ -1,4 +1,5 @@
-const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-4-carbon";
+export const FALLBACK_GEMINI_MODEL = "gemini-3.8-flash";
 
 export const ALLOWED_FLOORPLAN_MIME_TYPES = Object.freeze([
   "image/png",
@@ -158,6 +159,7 @@ export function buildFloorplanPrompt(imageWidth, imageHeight) {
 function sanitizeErrorMessage(message) {
   return String(message || "Floorplan AI extraction failed.")
     .replace(/AIza[0-9A-Za-z\-_]{20,}/g, "[REDACTED]")
+    .replace(/AQ\.[0-9A-Za-z\-_]{20,}/g, "[REDACTED]")
     .replace(/([?&]key=)[^&\s]+/gi, "$1[REDACTED]");
 }
 
@@ -183,35 +185,46 @@ export async function callGeminiFloorplanApi({
     throw new Error("Fetch implementation is unavailable.");
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const response = await fetchImpl(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey.trim(),
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: buildFloorplanPrompt(imageWidth, imageHeight) },
+  const invokeModel = async (targetModel) =>
+    fetchImpl(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(targetModel)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey.trim(),
+        },
+        body: JSON.stringify({
+          contents: [
             {
-              inlineData: {
-                mimeType,
-                data: base64Data,
-              },
+              role: "user",
+              parts: [
+                { text: buildFloorplanPrompt(imageWidth, imageHeight) },
+                {
+                  inlineData: {
+                    mimeType,
+                    data: base64Data,
+                  },
+                },
+              ],
             },
           ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-        responseSchema: FLOORPLAN_GEMINI_SCHEMA,
+          generationConfig: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+            responseSchema: FLOORPLAN_GEMINI_SCHEMA,
+          },
+        }),
       },
-    }),
-  });
+    );
+
+  let response = await invokeModel(model);
+  if (
+    (response.status === 404 || response.status === 429) &&
+    model !== FALLBACK_GEMINI_MODEL
+  ) {
+    response = await invokeModel(FALLBACK_GEMINI_MODEL);
+  }
 
   if (!response.ok) {
     let detail = `Gemini API returned HTTP ${response.status}`;
