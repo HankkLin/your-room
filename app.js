@@ -44,7 +44,7 @@ import { createHouseholdPage } from "./src/components/persona/household-page.js"
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
 import { createCandidateSession } from "./src/shopify/candidate-session.js";
-import { createCandidatePlacement } from "./src/shopify/scene-candidate.js";
+import { createCandidatePlacement, savedShopifyRow } from "./src/shopify/scene-candidate.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
 import { dimensionLabel } from "./src/shopify/product-assets.js";
@@ -934,7 +934,7 @@ function catalogDialog(swapId = null) {
     selection = item.id;
     const savedProducts = saveApproved ? [
       ...(state.savedProducts ?? []).filter((row) => row.id !== swapId),
-      { id: item.id, name: item.name, shopify: item.shopify },
+      savedShopifyRow(item, null, shopifyQuotes.get(item.shopify)),
     ] : state.savedProducts;
     commit({ ...state, items: [...remaining, item], savedProducts });
     dialog.close();
@@ -1585,25 +1585,12 @@ $(".brand").onclick = (e) => {
   if (stage !== "setup") beginSetup();
 };
 function savePieces(items, { replaceExisting = false } = {}) {
-  const saved = new Map(
-    replaceExisting
-      ? []
-      : (state.savedProducts || []).map((row) => [row.id, row]),
-  );
+  const previous = new Map((state.savedProducts ?? []).map(row => [row.id, row]));
+  const saved = replaceExisting ? new Map() : new Map(previous);
   for (const item of items) {
     if (item.owned || isObjectLocked(item)) continue;
     if (item.shopify) {
-      const previous = saved.get(item.id);
-      const sameVariant = previous?.shopify?.variantId === item.shopify.variantId &&
-        previous.shopify.sellerDomain.toLowerCase() === item.shopify.sellerDomain.toLowerCase();
-      const row = { ...(sameVariant ? previous : {}), id: item.id, name: item.name, shopify: item.shopify };
-      if (!Number.isSafeInteger(row.savedPrice?.priceMinor) || !row.savedPrice.currency) {
-        const quote = shopifyQuotes.get(item.shopify);
-        if (quote?.currency && Number.isSafeInteger(quote.priceMinor)) {
-          row.savedPrice = { priceMinor: quote.priceMinor, currency: quote.currency };
-        }
-      }
-      saved.set(item.id, row);
+      saved.set(item.id, savedShopifyRow(item, previous.get(item.id), shopifyQuotes.get(item.shopify)));
     } else if (item.productId) {
       saved.set(item.id, {
         id: item.id,

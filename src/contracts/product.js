@@ -1,3 +1,5 @@
+import { productAssetFields } from "../shopify/product-assets.js";
+
 // Shopify returns money in minor currency units. Scene dimensions are always in meters.
 const variantPattern = /^gid:\/\/shopify\/ProductVariant\/[A-Za-z0-9_-]{1,128}$/;
 const domainPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
@@ -22,13 +24,6 @@ export function shopifyHttpsUrl(value) {
 function productImage(media) {
   if (!Array.isArray(media)) return null;
   return media.map((item) => shopifyHttpsUrl(item?.type === "image" ? item.url : item?.preview?.url)).find(Boolean) ?? null;
-}
-
-function dimensionsInMeters(dimensions) {
-  const factor = { m: 1, cm: 0.01, mm: 0.001, in: 0.0254, ft: 0.3048 }[dimensions?.unit];
-  const axes = ["width", "height", "depth"];
-  if (!Number.isFinite(factor) || !axes.every((axis) => Number.isFinite(dimensions[axis]) && dimensions[axis] > 0)) return null;
-  return Object.fromEntries(axes.map((axis) => [axis, dimensions[axis] * factor]));
 }
 
 function deliveryEstimate(variant) {
@@ -61,7 +56,7 @@ export function createProductCandidate(product, variant) {
   const variantTitle = textValue(variant.title);
   const currency = typeof variant.price?.currency === "string" && /^[A-Z]{3}$/.test(variant.price.currency) ? variant.price.currency : null;
   const amount = variant.price?.amount;
-  const dimensions = dimensionsInMeters(variant.dimensions);
+  const assets = productAssetFields(product, variant);
   return {
     id, productId: textValue(variant.seller_product_id) ?? textValue(product.id),
     ...ref, title, variantTitle: options.join(" / ") || (variantTitle !== title ? variantTitle : null),
@@ -69,11 +64,27 @@ export function createProductCandidate(product, variant) {
     priceMinor: currency && Number.isSafeInteger(amount) && amount >= 0 ? amount : null,
     currency, available: typeof variant.availability?.available === "boolean" ? variant.availability.available : null,
     productUrl: shopifyHttpsUrl(variant.url), imageUrl: productImage(variant.media) ?? productImage(product.media),
-    deliveryEstimate: deliveryEstimate(variant), dimensions, dimensionsSource: dimensions ? "merchant" : null,
+    deliveryEstimate: deliveryEstimate(variant), dimensions: null, dimensionsSource: null, ...assets,
   };
 }
 
 export function canAdoptCandidate(candidate) {
   return Boolean(productCandidateId(candidate) && candidate.available === true && Number.isSafeInteger(candidate.priceMinor) &&
     candidate.priceMinor >= 0 && typeof candidate.currency === "string" && /^[A-Z]{3}$/.test(candidate.currency));
+}
+
+// Only confirmed facts are compared when approving a refreshed offer.
+export function offerSignature(product) {
+  const dimensions = product.dimensions;
+  return JSON.stringify([
+    productCandidateId(product), product.productId ?? null, product.priceMinor, product.currency,
+    product.available, dimensions?.width ?? null, dimensions?.height ?? null, dimensions?.depth ?? null,
+    product.dimensionsSource ?? null, product.deliveryEstimate ?? null, product.modelUrl ?? null, product.modelScope ?? null,
+  ]);
+}
+
+export function validCandidateRow(product) {
+  return Boolean(productCandidateId(product) && typeof product.title === "string" && product.title.trim() &&
+    (product.dimensions == null || ["width", "height", "depth"].every((axis) =>
+      Number.isFinite(product.dimensions[axis]) && product.dimensions[axis] > 0)));
 }

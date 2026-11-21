@@ -22,6 +22,7 @@ import {
 import {
   applyScenePatch,
   lookupCandidateProduct,
+  livePatchError,
   parsePositionTriple,
   parseRotationTriple,
 } from "./apply-scene-patch.js";
@@ -317,6 +318,18 @@ export function validateScenePatch(house, patch, options = {}) {
       return;
     }
 
+    if (opType === "add" || opType === "replace") {
+      const candidate = lookupCandidateProduct(op.productId ?? op.object?.productId, candidateProducts);
+      const message = livePatchError(op, candidate);
+      if (message) {
+        errors.push(patchError(PATCH_ERROR_CODES.INVALID_PATCH, message, index, objectId));
+        return;
+      }
+      if (candidate?.offerSignature && !isValidDimensions(candidate.dimensions, ceilingHeight)) {
+        errors.push(patchError(PATCH_ERROR_CODES.INVALID_DIMENSIONS, "This Shopify product does not fit the home.", index, objectId));
+        return;
+      }
+    }
     if (opType === "add") {
       if (lockedIds.has(objectId) || movableIds.has(objectId)) {
         errors.push(

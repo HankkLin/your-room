@@ -1,3 +1,4 @@
+import { productCandidateId } from "../../contracts/product.js";
 import { shopifyRequest } from "../../shopify/shopify-client.js";
 import { formatShopifyMoney, renderShopifyWarnings, shopifyHttpsUrl } from "./shopify-ui.js";
 
@@ -118,6 +119,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       const input = document.createElement("input");
       input.type = "checkbox";
       input.checked = !excluded.has(row.id);
+      input.disabled = !productCandidateId(row.shopify);
       input.dataset.include = row.id;
       input.setAttribute("aria-label", `Include ${title} in checkout`);
       label.append(input, ` Include · Qty ${row.quantity ?? 1}`);
@@ -194,7 +196,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     const byMerchant = new Map();
     const catalogCards = [];
     for (const entry of saved) {
-      if (!entry.row.shopify) {
+      if (!productCandidateId(entry.row.shopify)) {
         catalogCards.push(makeCard(entry.row, entry.product));
         continue;
       }
@@ -264,7 +266,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     if (!input) return;
     const id = input.dataset.include;
     const row = current?.savedProducts?.find((item) => item.id === id);
-    if (!row?.shopify) return;
+    if (!productCandidateId(row?.shopify)) return;
     if (input.checked) excluded.delete(id);
     else excluded.add(id);
     clearAttempt(row.shopify.sellerDomain.toLowerCase());
@@ -276,7 +278,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     if (remove) {
       const id = remove.dataset.unsave;
       const row = current?.savedProducts?.find((item) => item.id === id);
-      if (row?.shopify) clearAttempt(row.shopify.sellerDomain.toLowerCase());
+      if (productCandidateId(row?.shopify)) clearAttempt(row.shopify.sellerDomain.toLowerCase());
       excluded.delete(id);
       onRemove(id);
       return;

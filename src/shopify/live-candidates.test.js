@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { createShopifyApiMiddleware } from "./shopify-api.js";
 import { createProductCandidate, productCandidateId } from "../contracts/product.js";
-import { toRedesignCandidate } from "./scene-candidate.js";
+import { refreshPatchCandidates, savedProductsForPatch, toRedesignCandidate } from "./scene-candidate.js";
+import { getCandidateProducts } from "./candidate-products.js";
+import { applyScenePatch, createRedesignDemoHouse, validateScenePatch } from "../redesign/index.js";
 
 const shop = "sandbox-merchant.myshopify.com";
 const variant = (n, overrides = {}) => ({
@@ -81,4 +83,63 @@ test("Kevin's candidate list can resolve an unplaced variant by patch productId,
   assert.deepEqual(candidate.shopify, refs[1]);
   assert.deepEqual(candidate.dimensions, source.dimensions);
   assert.equal(toRedesignCandidate({ ...source, available: false }, "lamp"), null);
+});
+
+test("fresh alternatives become exact scene and shopping rows on approval, with previous commerce metadata cleared", async () => {
+  const house = createRedesignDemoHouse();
+  const target = house.objects.find(obj => obj.id === "kitchen-table-1");
+  Object.assign(target, { shopify: refs[0], modelUrl: "https://old.example/old.glb", modelScope: "variant",
+    merchantProduct: "Old offer", deliveryEstimate: "Tomorrow", savedPrice: { priceMinor: 20, currency: "USD" } });
+  const fresh = createProductCandidate(product, walnut);
+  const snapshot = { kind: "table", products: [fresh], expiresAt: Date.now() + 60000 };
+  const candidates = getCandidateProducts({ candidateSnapshot: snapshot });
+  assert.equal(candidates[0].id, fresh.id);
+  assert.equal(getCandidateProducts({ candidateSnapshot: { ...snapshot, expiresAt: 1 } }).some(c => c.id === fresh.id), false);
+  const patch = { id: "switch-table", operations: [
+    { type: "replace", objectId: target.id, productId: fresh.id, position: [7.9, 0, 3.35] },
+    { type: "remove", objectId: "kitchen-chair-1" },
+  ] };
+  const fetchVariant = async (operation, { ref }) => {
+    assert.equal(operation, "variant");
+    assert.deepEqual(ref, refs[1]);
+    return { product: fresh };
+  };
+  const verified = await refreshPatchCandidates(patch, candidates, fetchVariant);
+  assert.equal(validateScenePatch(house, patch, { candidateProducts: verified }).valid, true);
+  const after = applyScenePatch(house, patch, { candidateProducts: verified });
+  const replacement = after.objects.find(obj => obj.id === target.id);
+  assert.deepEqual(replacement.shopify, refs[1]);
+  assert.equal(replacement.productId, fresh.productId);
+  assert.equal(replacement.modelUrl, undefined);
+  assert.equal(replacement.modelScope, undefined);
+  assert.equal(replacement.merchantProduct, undefined);
+  assert.equal(replacement.deliveryEstimate, fresh.deliveryEstimate);
+  assert.deepEqual(replacement.dimensions, fresh.dimensions);
+  assert.equal(replacement.price, 35);
+  const rows = savedProductsForPatch([{ id: target.id, quantity: 3, shopify: refs[0] }, { id: "kitchen-chair-1" }], patch, after.objects);
+  assert.deepEqual(rows, [{ id: target.id, name: fresh.title, shopify: refs[1], savedPrice: { priceMinor: 3500, currency: "USD" } }]);
+  assert.equal(target.modelUrl, "https://old.example/old.glb");
+  for (const changed of [{ priceMinor: 3600 }, { available: false }, { sellerDomain: "other.example" },
+    { modelUrl: "https://other.example/new.glb" }, { deliveryEstimate: "8 days" }]) {
+    await assert.rejects(refreshPatchCandidates(patch, candidates, async () => ({product: { ...fresh, ...changed }})), /changed|unavailable/);
+  }
+});
+
+test("live product patches reject provider-supplied identity, facts, dimensions or checkout data", () => {
+  const house = createRedesignDemoHouse();
+  const candidate = toRedesignCandidate(createProductCandidate(product, walnut), "lamp");
+  const options = { candidateProducts: [candidate] };
+  for (const type of ["add", "replace"]) {
+    const operation = { type, objectId: type === "add" ? "new-lamp" : "kitchen-table-1",
+      productId: candidate.id, position: [7.9, 0, 3.35] };
+    const base = applyScenePatch(house, { operations: [operation] }, options);
+    assert.equal(base.objects.find(obj => obj.id === operation.objectId).productId, walnut.seller_product_id);
+    for (const override of [{ object: { width: 0.05 } }, { object: { price: 1 } }, { object: { shopify: refs[0] } },
+      { object: { id: "other-id" } }, { available: true }, { object: { modelUrl: "https://fake.example/p.glb" } },
+      { productId: refs[0].variantId + "|unregistered.example", object: { kind: "chair" } }]) {
+      const patch = { operations: [{ ...operation, ...override }] };
+      assert.equal(validateScenePatch(house, patch, options).valid, false);
+      assert.throws(() => applyScenePatch(house, patch, options), /Shopify/);
+    }
+  }
 });

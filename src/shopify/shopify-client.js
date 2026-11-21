@@ -1,11 +1,9 @@
+import { productCandidateId, validCandidateRow } from "../contracts/product.js";
+
 const quoteLifetimeMs = 10 * 60 * 1000;
 
 export function shopifyRef(product) {
   return { variantId: product.variantId, sellerDomain: product.sellerDomain };
-}
-
-function refKey(ref) {
-  return JSON.stringify([ref.variantId, ref.sellerDomain.toLowerCase()]);
 }
 
 export async function shopifyRequest(operation, body, { signal } = {}) {
@@ -54,29 +52,29 @@ export function createShopifyQuotes(onExpire) {
   }
 
   function set(product) {
-    quotes.set(refKey(product), { product, expiresAt: Date.now() + quoteLifetimeMs });
+    quotes.set(productCandidateId(product), { product, expiresAt: Date.now() + quoteLifetimeMs });
   }
 
   async function refreshMerchant(refs, signal) {
-    const unique = [...new Map(refs.map((ref) => [refKey(ref), ref])).values()];
+    const unique = [...new Map(refs.map((ref) => [productCandidateId(ref), ref])).values()];
     const warnings = [];
     for (let offset = 0; offset < unique.length; offset += 50) {
       const batch = unique.slice(offset, offset + 50);
-      const previous = batch.map((ref) => quotes.get(refKey(ref)));
+      const previous = batch.map((ref) => quotes.get(productCandidateId(ref)));
       let products = [];
       try {
         const data = await shopifyRequest("lookup", { refs: batch }, { signal });
         if (!Array.isArray(data.products)) throw new Error("Shopify product details are unavailable.");
-        products = data.products;
+        products = data.products.filter(validCandidateRow);
         warnings.push(...(data.warnings ?? []));
       } catch (error) {
         if (signal?.aborted) throw error;
         warnings.push({ text: `${batch[0].sellerDomain} · ${error.message}` }, ...(error.warnings ?? []));
       }
       if (signal?.aborted) return [];
-      const byRef = new Map(products.map((product) => [refKey(product), product]));
+      const byRef = new Map(products.map((product) => [productCandidateId(product), product]));
       batch.forEach((ref, index) => {
-        const key = refKey(ref);
+        const key = productCandidateId(ref);
         if (quotes.get(key) !== previous[index]) return;
         const product = byRef.get(key);
         if (product) set(product);
@@ -90,16 +88,17 @@ export function createShopifyQuotes(onExpire) {
   return {
     get(ref) {
       if (!ref) return null;
-      const quote = quotes.get(refKey(ref));
+      const quote = quotes.get(productCandidateId(ref));
       return quote?.expiresAt > Date.now() ? quote.product : null;
     },
     remember(product) {
+      if (!validCandidateRow(product)) return;
       set(product);
       scheduleExpiry();
     },
     async refresh(refs, { signal } = {}) {
       const merchants = new Map();
-      for (const ref of refs.filter(Boolean)) {
+      for (const ref of refs.filter(ref => productCandidateId(ref))) {
         const domain = ref.sellerDomain.toLowerCase();
         if (!merchants.has(domain)) merchants.set(domain, []);
         merchants.get(domain).push(ref);

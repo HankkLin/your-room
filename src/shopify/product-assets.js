@@ -20,7 +20,6 @@ function models(media) {
 export function productAssetFields(product, variant) {
   const variantModel = models(variant.media)[0];
   const fields = {};
-  if (typeof variant.seller_product_id === "string") fields.productId = variant.seller_product_id;
   if (variantModel) {
     fields.modelUrl = variantModel;
     fields.modelScope = "variant";

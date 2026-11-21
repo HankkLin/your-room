@@ -1,6 +1,13 @@
 import "./shopify-picker.css";
-import { productCandidateId, canAdoptCandidate } from "../../contracts/product.js";
+import { productCandidateId, canAdoptCandidate, offerSignature, validCandidateRow } from "../../contracts/product.js";
 import { formatShopifyMoney, renderShopifyWarnings, shopifyHttpsUrl } from "./shopify-ui.js";
+
+function readCandidates(value) {
+  if (!Array.isArray(value)) throw new Error("Shopify returned invalid product details. Search again.");
+  const products = value.filter(validCandidateRow);
+  if (value.length && !products.length) throw new Error("Shopify returned invalid product details. Search again.");
+  return products;
+}
 
 function createResult(product, label, onSelect) {
   const card = document.createElement("li");
@@ -61,8 +68,7 @@ function createResult(product, label, onSelect) {
 
   const preview = document.createElement("p");
   preview.className = "muted";
-  preview.textContent = [product.modelUrl ? "Merchant 3D model" : "Furniture type preview",
-    product.dimensionsSource === "merchant" ? "Merchant dimensions" : "Estimated dimensions"].join(" · ");
+  preview.textContent = product.modelUrl ? "Merchant 3D model" : "Furniture type preview";
   content.append(title, details, offer, size, preview, actions);
   card.append(content);
   return [card, place];
@@ -70,6 +76,7 @@ function createResult(product, label, onSelect) {
 
 export function mountShopifyPicker(root, {
   swap,
+  browseOnly = false,
   objectId,
   candidateSession,
   initialKind,
@@ -133,13 +140,14 @@ export function mountShopifyPicker(root, {
   }
 
   function renderResults() {
-    recommend.hidden = !products.length;
+    recommend.hidden = browseOnly || !products.length;
     recommend.disabled = Boolean(pending) || !products.some(canAdoptCandidate);
     actions = [];
     results.replaceChildren(...products.map((product, index) => {
       const chosen = Boolean(recommendedId && productCandidateId(product) === recommendedId);
       const label = chosen ? (swap ? "Approve replacement" : "Approve addition") : actionLabel;
       const [card, action] = createResult(product, label, () => selectProduct(index, chosen));
+      action.hidden = browseOnly;
       actions.push(action);
       return card;
     }));
@@ -191,7 +199,7 @@ export function mountShopifyPicker(root, {
       const { product, warnings } = await shopifyRequest("variant", { ref }, { signal: controller.signal });
       if (!isCurrent(controller)) return;
       renderShopifyWarnings(warningTarget, [...searchWarnings, ...(warnings ?? [])]);
-      if (product?.variantId !== ref.variantId || product?.sellerDomain !== ref.sellerDomain) {
+      if (!validCandidateRow(product) || productCandidateId(product) !== productCandidateId(ref)) {
         showStatus("This Shopify variant could not be verified.", true);
         return;
       }
@@ -205,9 +213,7 @@ export function mountShopifyPicker(root, {
         showStatus("Shopify could not confirm the price for this variant.", true);
         return;
       }
-      const changed = product.priceMinor !== selected.priceMinor || product.currency !== selected.currency ||
-        JSON.stringify(product.dimensions ?? null) !== JSON.stringify(selected.dimensions ?? null) ||
-        product.deliveryEstimate !== selected.deliveryEstimate;
+      const changed = offerSignature(product) !== offerSignature(selected);
       if (approved && changed) {
         showStatus("This offer changed. Review the updated details before approving.");
         return;
@@ -251,7 +257,7 @@ export function mountShopifyPicker(root, {
       if (!isCurrent(controller)) return;
       const op = data.scenePatch?.operations?.[0];
       const requested = new Set(products.map(productCandidateId));
-      const fresh = (data.products ?? []).filter((product) => requested.has(productCandidateId(product)));
+      const fresh = readCandidates(data.products).filter((product) => requested.has(productCandidateId(product)));
       if (data.scenePatch?.operations?.length !== 1 || op?.type !== mode || (swap && op.objectId !== objectId) ||
           !fresh.some((product) => canAdoptCandidate(product) && productCandidateId(product) === op.productId)) {
         throw new Error("Gemini could not confirm a matching variant. Choose one directly.");
@@ -293,15 +299,20 @@ export function mountShopifyPicker(root, {
     try {
       const data = await shopifyRequest("search", { query, ...(form.elements.modelsOnly.checked ? { modelsOnly: true } : {}) }, { signal: controller.signal });
       if (!isCurrent(controller)) return;
-      products = data.products;
-      searchWarnings = data.warnings ?? [];
+      products = readCandidates(data.products);
+      searchWarnings = Array.isArray(data.warnings) ? data.warnings : [];
       if (products.length) {
         ({ expiresAt } = candidateSession.remember({ query, kind: kindSelect.value, products, warnings: searchWarnings }));
         expiryTimer = setTimeout(expireResults, expiresAt - Date.now());
       }
       renderShopifyWarnings(warningTarget, searchWarnings);
       renderResults();
-      showStatus(products.length ? "" : "No Shopify matches. Try a different search.");
+      if (browseOnly && products.length) {
+        const count = products.filter(canAdoptCandidate).length;
+        showStatus(count + (count === 1 ? " variant available" : " variants available") + " for a furnishing proposal.");
+      } else {
+        showStatus(products.length ? "" : "No Shopify matches. Try a different search.");
+      }
     } catch (error) {
       if (isCurrent(controller)) showError(error);
     } finally {
@@ -326,6 +337,7 @@ export function mountShopifyPicker(root, {
 
   recommend.addEventListener("click", requestRecommendation);
   kindSelect.addEventListener("change", () => {
+    if (products.length) candidateSession.remember({ query: searchQuery, kind: kindSelect.value, products, warnings: searchWarnings }, expiresAt);
     recommendedId = undefined;
     renderResults();
   });
