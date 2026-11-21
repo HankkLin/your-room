@@ -1,0 +1,200 @@
+{
+  "oat-rug": {
+    "name": "Amalfi Rug, 8x10, Warm Sand",
+    "merchantProduct": "Sundays Amalfi Rug, 8x10, Warm Sand",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 705.5,
+    "url": "https://www.sundays-company.com/collections/8x10-rugs/products/amalfi-rug-8x10-warm-sand?variant=41588592443463",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/RUG-JH-039-021_Amalfi_Variant_Lifestyle_Thumbnail.jpg?v=1780939330"
+  },
+  "blue-rug": {
+    "name": "Peak Rug - Navy/Cream",
+    "merchantProduct": "Floyd Peak Rug - Navy/Cream",
+    "store": "Floyd",
+    "variant": "5' x 8' / Navy/Cream",
+    "price": 595,
+    "url": "https://floydhome.com/products/peak-rug-blue-white?variant=46547343278242",
+    "photo": "https://cdn.shopify.com/s/files/1/0462/1706/8706/products/Peak_Rug_Black_White.png?v=1676296562"
+  },
+  "clay-rug": {
+    "name": "Boardwalk Rug, 8x10",
+    "merchantProduct": "Sundays Boardwalk Rug, 8x10",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 501.5,
+    "url": "https://www.sundays-company.com/collections/8x10-rugs/products/boardwalk-rug-8-x-10?variant=41588248313927",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/RUG-JH-073-034_Variant_silo_resized.jpg?v=1795118648"
+  },
+  "oak-table": {
+    "name": "Form Coffee Table, Small, Oak",
+    "merchantProduct": "Sundays Form Coffee Table, Small, Oak",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 621,
+    "url": "https://www.sundays-company.com/products/form-coffee-table-white-oak?variant=41588223803463",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/COF-BC-004-050_Form_Variant_Lifestyle_Thumbnail.jpg?v=1780941183"
+  },
+  "stone-table": {
+    "name": "Align Coffee Table, Regular, Oak",
+    "merchantProduct": "Sundays Align Coffee Table, Regular, Oak",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 391,
+    "url": "https://www.sundays-company.com/products/align-coffee-table-regular-oak?variant=42113338835015",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/COF-FC-001-126_Align_Variant_Lifestyle_Thumbnail.jpg?v=1780940561"
+  },
+  "walnut-table": {
+    "name": "Form Coffee Table, Small, American Walnut",
+    "merchantProduct": "Sundays Form Coffee Table, Small, American Walnut",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 675,
+    "url": "https://www.sundays-company.com/products/form-coffee-table-walnut?variant=41588406419527",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/COF-BC-004-051_Form_Variant_Lifestyle_Thumbnail.jpg?v=1780942829"
+  },
+  "linen-chair": {
+    "name": "In the Groove Lounge Chair, Almond",
+    "merchantProduct": "Sundays In the Groove Lounge Chair, Almond",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 841.5,
+    "url": "https://www.sundays-company.com/products/in-the-groove-lounge-chair-almond?variant=41588558725191",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/CHA-OA-001-010_InTheGroove_Variant_Lifestyle_Thumbnail.jpg?v=1780944204"
+  },
+  "blue-chair": {
+    "name": "In the Groove Lounge Chair, Paloma",
+    "merchantProduct": "Sundays In the Groove Lounge Chair, Paloma",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 891,
+    "url": "https://www.sundays-company.com/products/in-the-groove-lounge-chair-paloma?variant=42377451176007",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/CHA-OA-001-230_Variant_silo_resized.jpg?v=1795116668"
+  },
+  "olive-chair": {
+    "name": "Frame Lounge Chair, Walnut, Moss",
+    "merchantProduct": "Sundays Frame Lounge Chair, Walnut, Moss",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 1827.5,
+    "url": "https://www.sundays-company.com/products/frame-lounge-chair-walnut-moss?variant=42992213950535",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/CHA-EW-044-288_Frame_Variant_silo.jpg?v=1795115949"
+  },
+  "brass-lamp": {
+    "name": "Montage Modern Floor Lamp",
+    "merchantProduct": "Brightech Montage Modern Floor Lamp",
+    "store": "Brightech",
+    "variant": "Antique Brass",
+    "price": 119,
+    "url": "https://brightech.com/products/montage-modern?variant=8064443711524",
+    "photo": "https://cdn.shopify.com/s/files/1/0013/5230/2628/files/Brightech_MontageModernFloorLamp_Metal_Brass_4f2a4d69-2b19-49eb-9d00-cb8db4e284fd.png?v=1783448276"
+  },
+  "milk-glass-lamp": {
+    "name": "Luna Drop Floor Lamp",
+    "merchantProduct": "Brightech Luna Drop Floor Lamp",
+    "store": "Brightech",
+    "variant": "Default Title",
+    "price": 139,
+    "url": "https://brightech.com/products/luna-drop-floor-lamp?variant=39594967531556",
+    "photo": "https://cdn.shopify.com/s/files/1/0013/5230/2628/products/03_Luna_Drop_Brass_8723d270-dc56-4d6f-a5aa-a4907df377c4.jpg?v=1635528832"
+  },
+  "umber-lamp": {
+    "name": "Carter Floor Lamp",
+    "merchantProduct": "Brightech Carter Floor Lamp",
+    "store": "Brightech",
+    "variant": "Default Title",
+    "price": 144.99,
+    "url": "https://brightech.com/products/carter-floor?variant=7659095162916",
+    "photo": "https://cdn.shopify.com/s/files/1/0013/5230/2628/files/01_carter-floor-lamp-walnut-living-room-brightech.jpg?v=1793993956"
+  },
+  "olive-tree": {
+    "name": "Olive Tree",
+    "merchantProduct": "The Sill Olive Tree",
+    "store": "The Sill",
+    "variant": "Small (1' to 2' tall) / Grow Pot (4\" wide) / Plastic",
+    "price": 39,
+    "url": "https://www.thesill.com/products/olive-tree?variant=40517692260457",
+    "photo": "https://cdn.shopify.com/s/files/1/0150/6262/products/The-Sill_Olive-Tree_Small_Growpot_Variant.jpg?v=1774369803"
+  },
+  "rubber-plant": {
+    "name": "Ficus Burgundy Rubber Tree",
+    "merchantProduct": "The Sill Ficus Burgundy Rubber Tree",
+    "store": "The Sill",
+    "variant": "Large (3-4' tall) / Grow Pot (9.25\" wide) / Plastic",
+    "price": 129,
+    "url": "https://www.thesill.com/products/ficus-burgundy-rubber-tree?variant=43233947582569",
+    "photo": "https://cdn.shopify.com/s/files/1/0150/6262/files/the-sill_Large-Ficus-Burgandy-STD_Large_Growpot_Variant.jpg?v=1778860014"
+  },
+  "bird-of-paradise": {
+    "name": "Bird of Paradise",
+    "merchantProduct": "The Sill Bird of Paradise",
+    "store": "The Sill",
+    "variant": "Medium (12\" to 20\" tall) / Grow Pot (6\" wide) / Plastic",
+    "price": 69,
+    "url": "https://www.thesill.com/products/bird-of-paradise?variant=42063595143273",
+    "photo": "https://cdn.shopify.com/s/files/1/0150/6262/files/the-sill_Medium-Bird-of-Paradise_Medium_Growpot_Variant.jpg?v=1774886444"
+  },
+  "oak-console": {
+    "name": "Building Block x Colapso Studio Cabinet, 2 Drawer, Short, Pale Oak",
+    "merchantProduct": "Sundays Building Block x Colapso Studio Cabinet, 2 Drawer, Short, Pale Oak",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 441,
+    "url": "https://www.sundays-company.com/products/building-block-cabinet-2-drawer-short-pale-oak?variant=43245214990407",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/STO-EF-006-239_ElevatedAI_Variant_silo.jpg?v=1795115167"
+  },
+  "chalk-cubby": {
+    "name": "The Block",
+    "merchantProduct": "Floyd The Block",
+    "store": "Floyd",
+    "variant": "Glacial",
+    "price": 365,
+    "url": "https://floydhome.com/products/the-block?variant=46664495169698",
+    "photo": "https://cdn.shopify.com/s/files/1/0462/1706/8706/files/The_Block_Glacial_horizontal.png?v=1774538986"
+  },
+  "walnut-console": {
+    "name": "Glimpse Cabinet, Walnut",
+    "merchantProduct": "Sundays Glimpse Cabinet, Walnut",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 1645,
+    "url": "https://www.sundays-company.com/products/glimpse-cabinet-walnut?variant=42229645738055",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/SDB-SH-009-198_Variant_silo_resized.jpg?v=1795116668"
+  },
+  "linen-sofa": {
+    "name": "Get Together™ Sofa, 2.5 Seater, Cream Linen",
+    "merchantProduct": "Sundays Get Together™ Sofa, 2.5 Seater, Cream Linen",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 2517.5,
+    "url": "https://www.sundays-company.com/products/get-together%E2%84%A2-sofa-2-5-seater-cream-linen?variant=42039105388615",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/SOF-YJ-015-018_Variant_silo_resized.jpg?v=1795117748"
+  },
+  "oak-desk": {
+    "name": "Everyday Desk, Pale Oak",
+    "merchantProduct": "Sundays Everyday Desk, Pale Oak",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 748,
+    "url": "https://www.sundays-company.com/products/everyday-desk-pale-oak?variant=42992218341447",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/DES-HN-001-221_Everyday_Variant_silo.jpg?v=1795115948"
+  },
+  "cream-bed": {
+    "name": "Cloud Bed, Queen, Cream Boucle",
+    "merchantProduct": "Sundays Cloud Bed, Queen, Cream Boucle",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 1776.5,
+    "url": "https://www.sundays-company.com/products/cloud-bed-queen-boucle?variant=41588582481991",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/BED-RN-003-067-0_Cloud_Variant_Lifestyle_Thumbnail.jpg?v=1780940118"
+  },
+  "union-bookcase": {
+    "name": "Union Bookshelf, White Oak",
+    "merchantProduct": "Sundays Union Bookshelf, White Oak",
+    "store": "Sundays",
+    "variant": "Default Title",
+    "price": 1665,
+    "url": "https://www.sundays-company.com/products/union-bookshelf-oak?variant=41588320370759",
+    "photo": "https://cdn.shopify.com/s/files/1/0054/6596/4615/files/STO-YR-012-024_Union_Variant_Lifestyle_Thumbnail.jpg?v=1780933051"
+  }
+}
