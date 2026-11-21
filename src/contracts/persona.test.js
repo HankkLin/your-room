@@ -3,6 +3,7 @@ import test from 'node:test';
 import { prepareHouseholdReplay, validatePersonaRooms, validatePersonas } from './persona.js';
 import { compareHouseholdLayouts } from '../persona/compare-household-layouts.js';
 import { listPersonaRooms } from '../persona/rooms.js';
+import { parsePersonaImport } from '../persona/import-personas.js';
 import { createSampleHousehold } from '../persona/sample-household.js';
 import { importSampleFloorplan } from '../spatial/floorplan-importer.js';
 
@@ -12,6 +13,34 @@ const singleRoom = listPersonaRooms({ roomName: 'Family room' });
 function flexibleActivity(activity, overrides = {}) {
   return { activity, roomId: 'room-1', windowStartMinute: 510, windowEndMinute: 720, durationMinutes: 45, ...overrides };
 }
+
+test('personal agent import preserves fixed and flexible fields for editable review and excludes unrelated export data', () => {
+  const [member] = createSampleHousehold(rooms);
+  const { id, ...withoutId } = member;
+  withoutId.privateNotes = 'Excluded personal context';
+  withoutId.schedule.push(flexibleActivity('other', { roomId: 'remote-office', windowStartMinute: 1080, windowEndMinute: 1200 }));
+  const [draft] = parsePersonaImport(JSON.stringify({ personas: [withoutId] }), rooms);
+  assert.ok(draft.id);
+  assert.equal(Object.hasOwn(draft, 'privateNotes'), false);
+  assert.deepEqual(draft.schedule, withoutId.schedule);
+  assert.match(validatePersonas([draft], rooms), /available room/);
+  draft.schedule[1].roomId = 'study';
+  assert.equal(validatePersonas([draft], rooms), null);
+  assert.equal(parsePersonaImport(JSON.stringify([member]), rooms)[0].id, id);
+});
+
+test('personal agent import rejects malformed data and validates schedule conflicts even with unmapped rooms', () => {
+  const [member] = createSampleHousehold(rooms);
+  const parse = (data) => parsePersonaImport(JSON.stringify(data), rooms);
+  assert.throws(() => parsePersonaImport('incomplete JSON', rooms), /read the JSON/);
+  assert.throws(() => parse({ personas: [] }), /at least one/);
+  assert.throws(() => parse([null]), /valid ID and name/);
+  assert.throws(() => parse([member, member]), /unique IDs/);
+  assert.throws(() => parse([{ ...member, schedule: [{ activity: 'work', roomId: null, startMinute: 0, endMinute: 1 }] }]), /available room/);
+  member.schedule.push({ activity: 'work', roomId: 'unmapped', startMinute: 545, endMinute: 565 });
+  assert.throws(() => parse([member]), /overlapping/);
+  assert.throws(() => parsePersonaImport(' '.repeat(256 * 1024 + 1), rooms), /256 KB/);
+});
 
 test('the two-room handoff preserves Sam’s destination and the overlap with Alex’s work', () => {
   const personas = createSampleHousehold(rooms);
