@@ -4,6 +4,7 @@ import { prepareHouseholdReplay, validatePersonaRooms, validatePersonas } from '
 import { compareHouseholdLayouts } from '../persona/compare-household-layouts.js';
 import { listPersonaRooms } from '../persona/rooms.js';
 import { createSampleHousehold } from '../persona/sample-household.js';
+import { importSampleFloorplan } from '../spatial/floorplan-importer.js';
 
 const rooms = [{ id: 'study', name: 'Study' }, { id: 'living-room', name: 'Living room' }];
 const singleRoom = listPersonaRooms({ roomName: 'Family room' });
@@ -32,6 +33,49 @@ test('the single-room adapter keeps the same destination after the room is renam
   assert.equal(validatePersonas(createSampleHousehold(original), renamed), null);
   assert.match(validatePersonaRooms([...original, ...renamed]), /unique IDs/);
   assert.equal(validatePersonas([], original), null);
+});
+
+test('imported room IDs survive room edits and reach both replay runs unchanged', async () => {
+  const { house, validation } = importSampleFloorplan();
+  assert.equal(validation.valid, true);
+  const before = { roomName: house.name, room: { width: 5 }, importedHouse: house };
+  const after = { ...before, roomName: 'Updated apartment', room: { width: 6 } };
+  const importedRooms = listPersonaRooms(before);
+  assert.deepEqual(importedRooms, house.rooms.map(({ id, name }) => ({ id, name })));
+  assert.deepEqual(listPersonaRooms(after), importedRooms);
+
+  const [alex] = createSampleHousehold(importedRooms);
+  alex.schedule = [
+    { activity: 'sleep', roomId: 'bedroom', startMinute: 420, endMinute: 510 },
+    flexibleActivity('cook', { roomId: 'kitchen', durationMinutes: 30 }),
+  ];
+  assert.equal(validatePersonas([alex], listPersonaRooms(after)), null);
+  assert.match(validatePersonas([alex], singleRoom), /available room/);
+
+  const expected = [
+    { activity: 'sleep', roomId: 'bedroom', startMinute: 420, endMinute: 510 },
+    { activity: 'cook', roomId: 'kitchen', startMinute: 510, endMinute: 540 },
+  ];
+  const outcomes = await compareHouseholdLayouts({
+    beforeScene: before, afterScene: after, personas: [alex], rooms: importedRooms,
+    simulate(scene, [resident]) {
+      const destinations = new Set(listPersonaRooms(scene).map(({ id }) => id));
+      assert.ok(resident.schedule.every(({ roomId }) => destinations.has(roomId)));
+      return { width: scene.room.width, schedule: resident.schedule };
+    },
+  });
+  assert.deepEqual(outcomes, {
+    before: { width: 5, schedule: expected },
+    after: { width: 6, schedule: expected },
+  });
+});
+
+test('an imported room keeps its canonical ID even when its display name needs shortening', () => {
+  const importedRoom = { id: 'canonical-'.repeat(10), name: 'Reading room '.repeat(8) };
+  const destinations = listPersonaRooms({ importedHouse: { rooms: [importedRoom] } });
+  assert.equal(destinations[0].id, importedRoom.id);
+  assert.equal(destinations[0].name.length, 80);
+  assert.equal(validatePersonaRooms(destinations), null);
 });
 
 test('a schedule can use midnight and adjacent entries regardless of input order', () => {

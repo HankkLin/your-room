@@ -23,6 +23,11 @@ import { icon } from "./icons.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
+import { showParsedGeometryModal } from "./floorplan-import-ui.js";
+import {
+  clearConfirmedImportedHouse,
+  setConfirmedImportedHouse,
+} from "./src/spatial/floorplan-importer.js";
 
 const $ = (selector) => document.querySelector(selector);
 const escape = (value) =>
@@ -58,12 +63,26 @@ try {
     typeof saved.roomName === "string"
   ) {
     state = { ...demo, ...saved };
-    if (validatePersonas(state.personas, listPersonaRooms(state))) state.personas = [];
     hasProject = true;
+    if (state.importedHouse) {
+      try {
+        state.importedHouse = setConfirmedImportedHouse(state.importedHouse);
+      } catch {
+        state.importedHouse = null;
+      }
+    }
+    if (validatePersonas(state.personas, listPersonaRooms(state))) state.personas = [];
   }
 } catch {
   /* A new local project also works with storage disabled. */
 }
+if (!state.importedHouse) clearConfirmedImportedHouse();
+
+export function getConfirmedImportedHouse() {
+  return state.importedHouse ? structuredClone(state.importedHouse) : null;
+}
+window.getConfirmedImportedHouse = getConfirmedImportedHouse;
+
 let selection = null;
 let draftStyle = state.style;
 let pickedStyle = false;
@@ -146,11 +165,14 @@ function itemGlyph(item) {
 function render() {
   $("#room-name").textContent = state.roomName;
   const room = state.room || ROOM;
-  $(".subtitle").textContent = `${room.width} × ${room.depth} m · Living space`;
+  $("#studio .subtitle").textContent = state.importedHouse
+    ? `${state.importedHouse.bounds.width} × ${state.importedHouse.bounds.depth} m · ${state.importedHouse.rooms.length} rooms imported`
+    : `${room.width} × ${room.depth} m · Living space`;
   $("#item-count").textContent = state.items.length;
   $("#shop-count").textContent = state.savedProducts?.length || "";
   $("#undo").disabled = !history.length;
   $("#compare-photo").hidden = !state.roomPhoto;
+  $("#view-house-json").hidden = !state.importedHouse;
   const item = state.items.find((i) => i.id === selection);
   $("#objectbar").innerHTML = item
     ? `<strong>${escape(item.name)}</strong><span class="object-tools"><button data-action="rotate" title="Rotate 90 degrees">${icon("rotate")} Rotate</button>${item.owned ? "" : '<button data-action="save">Save piece</button>'}<button data-action="swap">${icon("swap")} Swap</button><button data-action="remove">${icon("trash")} Remove</button></span>`
@@ -263,6 +285,9 @@ $("#compare-photo").onclick = () =>
     "Room reference",
     `<img class="room-reference-full" alt="Uploaded view of your room" src="${escape(state.roomPhoto)}">`,
   );
+$("#view-house-json").onclick = () => {
+  if (state.importedHouse) showParsedGeometryModal(state.importedHouse);
+};
 $("#objectbar").onclick = (e) => {
   const action = e.target.closest("[data-action]")?.dataset.action;
   const item = state.items.find((i) => i.id === selection);
@@ -524,16 +549,21 @@ function beginSetup(fresh = false) {
     readPhoto,
     onApply(next, { demo: sample = false } = {}) {
       hasProject = true;
+      const importedHouse = sample ? null : (next.importedHouse ?? null);
+      const changedHouse = importedHouse !== (state.importedHouse ?? null);
+      const newProject = fresh || changedHouse;
+      if (!importedHouse && newProject) clearConfirmedImportedHouse();
       commit({
         ...next,
-        personas: fresh ? [] : state.personas,
+        importedHouse,
+        personas: newProject ? [] : state.personas,
         flowVersion: 2,
-        hasLayout: sample || (!fresh && Boolean(next.hasLayout)),
+        hasLayout: sample || (!newProject && Boolean(next.hasLayout)),
       });
-      if (fresh) history = [];
+      if (newProject) history = [];
       selection = null;
       syncForm();
-      const nextStage = sample ? "tour" : fresh ? "household" : "design";
+      const nextStage = sample ? "tour" : newProject ? "household" : "design";
       navigate(nextStage);
       if (scene) {
         changeView($("#view-interior").disabled ? "plan" : "interior");
