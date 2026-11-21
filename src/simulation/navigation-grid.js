@@ -701,7 +701,11 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
   }
 
   const selected = [candidates[0].pos];
-  const desiredSeparation = 0.72;
+  const minRoomSpan = Math.min(rBounds.width, rBounds.depth);
+  const desiredSeparation = Math.max(
+    0.72,
+    Math.min(2.25, minRoomSpan * 0.25),
+  );
   for (let s = 1; s <= slotIndex; s += 1) {
     const next =
       candidates.find((cand) =>
