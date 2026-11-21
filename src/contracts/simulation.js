@@ -1,8 +1,8 @@
 /**
- * Shared Household Life Simulation Contracts (AGENTS.md §3–4).
+ * Shared Household Life Simulation & Spatial Validator Contracts (AGENTS.md §3–4).
  *
  * Pure data structures and constants shared between:
- * - Deterministic spatial simulation (`src/simulation/**`)
+ * - Deterministic spatial simulation & validators (`src/simulation/**`)
  * - Three.js whole-home renderer (`feat/whole-home-scene`)
  * - Gemini explanation & ScenePatch redesign loop (`src/agents/**`, `src/persona/**`)
  */
@@ -27,10 +27,43 @@ export const DEFAULT_CONGESTION_CONFIG = Object.freeze({
 export const DEFAULT_LONG_PATH_METERS = 15.0;
 
 export const FINDING_TYPES = Object.freeze({
+  // Movement & Congestion
   NO_PATH: "NO_PATH",
   LONG_PATH: "LONG_PATH",
   CONGESTION: "CONGESTION",
+
+  // Privacy Sightlines
+  PRIVACY_SIGHTLINE: "PRIVACY_SIGHTLINE",
+
+  // TV & Seating Visibility
+  TV_OCCLUDED: "TV_OCCLUDED",
+  TV_BAD_ANGLE: "TV_BAD_ANGLE",
+  TV_TOO_FAR: "TV_TOO_FAR",
+
+  // Schedule-Aware WFH Acoustics
+  NOISE_CONFLICT: "NOISE_CONFLICT",
+
+  // Fire / Emergency Evacuation
+  NO_EVACUATION_PATH: "NO_EVACUATION_PATH",
+  LONG_EVACUATION_ROUTE: "LONG_EVACUATION_ROUTE",
+  EVACUATION_BOTTLENECK: "EVACUATION_BOTTLENECK",
+
+  // Optional Environmental Glare
+  SUN_GLARE: "SUN_GLARE",
 });
+
+export const STRESS_SCENARIO_TYPES = Object.freeze({
+  FIRE_EVACUATION: "fire-evacuation",
+  DINNER_PARTY: "dinner-party",
+});
+
+export const EXPERIENCE_CATEGORIES = Object.freeze([
+  "movement",
+  "privacy",
+  "noise",
+  "visibility",
+  "safety",
+]);
 
 export const SIMULATION_EVENT_TYPES = Object.freeze({
   SCHEDULE_START: "SCHEDULE_START",
