@@ -270,6 +270,12 @@ export function renderControlPanelMarkup(
         </div>`
       : "";
 
+  const speedIdx = SIMULATION_SPEEDS.indexOf(state.speed);
+  const canStepDown = speedIdx > 0;
+  const canStepUp = speedIdx >= 0 && speedIdx < SIMULATION_SPEEDS.length - 1;
+  const playGlyph = isRunning ? "⏸" : "▶";
+  const playTitle = isRunning ? "Pause simulation" : runLabel;
+
   return `<div class="twin-control-card" aria-label="Household Digital Twin controls">
     <div class="twin-card-head">
       <div>
@@ -295,21 +301,30 @@ export function renderControlPanelMarkup(
       <span class="twin-status-indicator"><span class="twin-dot" aria-hidden="true"></span><span>${escapeHtml(statusText)}</span></span>
       <span class="twin-clock" id="sim-clock">${state.currentTime ? escapeHtml(state.currentTime) : ""}</span>
     </div>
-    <div class="twin-actions">
-      <button type="button" class="primary" id="sim-run-btn" ${isBusy ? "disabled" : ""}>${escapeHtml(runLabel)}</button>
-      <button type="button" class="secondary" id="sim-pause-btn" ${isRunning ? "" : "disabled"}>Pause</button>
-      <button type="button" class="secondary" id="sim-reset-btn" ${hasOutput && !state.redesignPending ? "" : "disabled"}>Reset</button>
-    </div>
-    ${redesignButtonMarkup}
-    <div class="twin-speed-bar">
-      <span class="section-label">Speed</span>
-      <div class="twin-speed-group" role="group" aria-label="Simulation speed">
+    <div class="twin-transport-bar" role="group" aria-label="Playback transport and speed">
+      <div class="twin-transport-controls">
+        <button type="button" class="secondary twin-step-speed" id="sim-speed-dec" aria-label="Decrease speed" title="Slower" ${canStepDown ? "" : "disabled"}>−</button>
+        <button type="button" class="primary twin-play-toggle" id="sim-play-toggle" aria-label="${escapeHtml(playTitle)}" title="${escapeHtml(playTitle)}" ${state.redesignPending ? "disabled" : ""}>
+          <span class="twin-play-glyph" aria-hidden="true">${playGlyph}</span>
+          <span>${isRunning ? "Pause" : escapeHtml(runLabel)}</span>
+        </button>
+        <button type="button" class="secondary twin-step-speed" id="sim-speed-inc" aria-label="Increase speed" title="Faster" ${canStepUp ? "" : "disabled"}>+</button>
+        <button type="button" class="secondary twin-reset-compact" id="sim-reset-btn" ${hasOutput && !state.redesignPending ? "" : "disabled"}>Reset</button>
+      </div>
+      <div class="twin-speed-readout" aria-live="polite">
+        <span class="section-label">Speed</span>
+        <output id="sim-speed-value" data-current-speed="${state.speed}">${state.speed}×</output>
+      </div>
+      <div hidden aria-hidden="true">
+        <button type="button" id="sim-run-btn" ${isBusy ? "disabled" : ""}>${escapeHtml(runLabel)}</button>
+        <button type="button" id="sim-pause-btn" ${isRunning ? "" : "disabled"}>Pause</button>
         ${SIMULATION_SPEEDS.map(
           (mult) =>
             `<button type="button" data-sim-speed="${mult}" aria-pressed="${state.speed === mult}">${mult}×</button>`,
         ).join("")}
       </div>
     </div>
+    ${redesignButtonMarkup}
     ${scrubberMarkup}
     ${renderPersonaQuickViewMarkup(personas)}
   </div>`;
@@ -783,6 +798,17 @@ export function createDemoControlsController({
       emit();
       return state;
     },
+    stepSpeed(delta) {
+      const idx = SIMULATION_SPEEDS.indexOf(state.speed);
+      const safeIdx = idx === -1 ? 0 : idx;
+      const nextIdx = Math.max(0, Math.min(SIMULATION_SPEEDS.length - 1, safeIdx + (delta > 0 ? 1 : -1)));
+      return this.selectSpeed(SIMULATION_SPEEDS[nextIdx]);
+    },
+    togglePlayPause() {
+      if (state.redesignPending) return;
+      if (state.status === "RUNNING") this.triggerPause();
+      else this.triggerRun();
+    },
     selectFriendCount(count) {
       return this.setFriendCount(count);
     },
@@ -907,7 +933,10 @@ export function mountDemoControls({
     }
     const btn = event.target.closest("button");
     if (!btn) return;
-    if (btn.id === "sim-run-btn") controller.triggerRun();
+    if (btn.id === "sim-play-toggle") controller.togglePlayPause();
+    else if (btn.id === "sim-speed-dec") controller.stepSpeed(-1);
+    else if (btn.id === "sim-speed-inc") controller.stepSpeed(1);
+    else if (btn.id === "sim-run-btn") controller.triggerRun();
     else if (btn.id === "sim-pause-btn") controller.triggerPause();
     else if (btn.id === "sim-reset-btn") controller.triggerReset();
     else if (btn.id === "sim-propose-redesign-btn") controller.triggerRedesign();
