@@ -29,11 +29,11 @@ For live household generation, copy `.env.example` to `.env.local` and set `GEMI
 
 Confirmed floor plans supply the canonical room IDs used in Household. Room settings edit the studio preview and preserve the imported geometry and IDs. The studio still renders one primary room. A confirmed replacement floor plan starts a new household.
 
-`compareHouseholdLayouts` in `src/persona/compare-household-layouts.js` resolves the approved activities once and passes the same times and destination IDs to both runs. The tests use imported rooms with a simulator stub. Whole-home rendering, pathfinding, and the measured before/after replay remain open.
+`compareHouseholdLayouts` in `src/persona/compare-household-layouts.js` resolves the approved activities once and passes the same times and destination IDs to both runs. The real simulator in `src/simulation/` tests an imported Bedroom-to-Kitchen trip with a sofa blocking the bedroom door, then reruns the same schedule after moving the sofa. Whole-home rendering and launching replay from the studio remain open.
 
 ## Verification
 
-Run `npm test` for model, floor-plan, contract, and API tests, `npm run test:e2e` for browser flows, and `npm run build` for the production bundle. The automated tests run without Gemini credentials. To try the integrated flow, confirm the sample floor plan, load the sample household, choose a room such as Kitchen for an activity, and save. Edit the project name in Room settings, reload, then open Household to confirm the destination persists. The browser tests use Chrome or the installed Chromium channel selected by `PLAYWRIGHT_CHANNEL`.
+Run `npm test` for model, floor-plan, simulation, contract, and API tests, `npm run test:e2e` for browser flows, and `npm run build` for the production bundle. Run `node --test life-simulation.test.js` to check the real simulator and before/after replay in isolation. The automated tests run without Gemini credentials. To try the integrated Household flow, confirm the sample floor plan, load the sample household, choose a room such as Kitchen for an activity, and save. Edit the project name in Room settings, reload, then open Household to confirm the destination persists. The browser tests use Chrome or the installed Chromium channel selected by `PLAYWRIGHT_CHANNEL`.
 
 [Asset credits](public/assets/CREDITS.md)
 
