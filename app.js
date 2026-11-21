@@ -5,6 +5,8 @@ import {
   catalog,
   styles,
   createItem,
+  createShopifyPreview,
+  furniturePreviewKinds,
   createOwnedItems,
   getSpend,
   canPlaceItem,
@@ -23,6 +25,10 @@ import { icon } from "./icons.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
+import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
+import { createShoppingList } from "./src/components/catalog/shopping-list.js";
+import { formatShopifyMoney } from "./src/components/catalog/shopify-ui.js";
+import { createShopifyQuotes, shopifyRef, shopifyRequest } from "./src/shopify/shopify-client.js";
 
 const $ = (selector) => document.querySelector(selector);
 const escape = (value) =>
@@ -73,7 +79,26 @@ let view = "interior";
 let stage = "setup";
 let toastTimer;
 let scene;
+let clearCatalog;
+let quoteRefresh;
 const dialog = $("#dialog");
+const shopifyQuotes = createShopifyQuotes(() => {
+  if (stage === "shop") shoppingList.render();
+  if (stage === "tour") render();
+});
+const shoppingList = createShoppingList({
+  root: $("#saved-products"),
+  intro: $("#shop-intro"),
+  total: $("#saved-total"),
+  catalog,
+  quotes: shopifyQuotes,
+  formatUsd: currency,
+  onRemove(id) {
+    commit({ ...state, savedProducts: state.savedProducts.filter((row) => row.id !== id) });
+    shoppingList.render(state);
+  },
+  onStockChange: () => void refreshShopifyQuotes(),
+});
 const householdPage = createHouseholdPage($("#household-page"), {
   onSave(personas) {
     state = { ...state, personas };
@@ -143,6 +168,28 @@ function itemGlyph(item) {
     : item.kind;
   return `<span class="item-swatch" style="background:${/^#[\da-f]{3,8}$/i.test(item.color) ? item.color : "#cdc5b6"}">${icon(kind)}</span>`;
 }
+function itemName(item) {
+  return shopifyQuotes.get(item.shopify)?.title || item.name;
+}
+function livePriceUsd(item) {
+  const quote = shopifyQuotes.get(item.shopify);
+  return quote?.currency === "USD" && Number.isSafeInteger(quote.priceMinor)
+    ? quote.priceMinor / 100
+    : null;
+}
+function roomEstimate(items) {
+  const livePrices = items.filter((item) => item.shopify).map(livePriceUsd);
+  return {
+    total: getSpend(items) + livePrices.reduce((sum, price) => sum + (price ?? 0), 0),
+    partial: livePrices.includes(null),
+  };
+}
+function inventoryPrice(item) {
+  if (item.owned) return "Owned";
+  if (!item.shopify) return currency(item.price);
+  const quote = shopifyQuotes.get(item.shopify);
+  return formatShopifyMoney(quote?.priceMinor, quote?.currency) ?? "Price unconfirmed";
+}
 function render() {
   $("#room-name").textContent = state.roomName;
   const room = state.room || ROOM;
@@ -153,18 +200,19 @@ function render() {
   $("#compare-photo").hidden = !state.roomPhoto;
   const item = state.items.find((i) => i.id === selection);
   $("#objectbar").innerHTML = item
-    ? `<strong>${escape(item.name)}</strong><span class="object-tools"><button data-action="rotate" title="Rotate 90 degrees">${icon("rotate")} Rotate</button>${item.owned ? "" : '<button data-action="save">Save piece</button>'}<button data-action="swap">${icon("swap")} Swap</button><button data-action="remove">${icon("trash")} Remove</button></span>`
+    ? `<strong>${escape(itemName(item))}</strong><span class="object-tools"><button data-action="rotate" title="Rotate 90 degrees">${icon("rotate")} Rotate</button>${item.owned ? "" : '<button data-action="save">Save piece</button>'}<button data-action="swap">${icon("swap")} Swap</button><button data-action="remove">${icon("trash")} Remove</button></span>`
     : `<span class="gesture">${icon("move")} ${view === "interior" ? "Drag to look around" : view === "plan" ? "Drag a piece to move" : "Drag to orbit"} <span aria-hidden="true">·</span> Select a piece to edit</span>`;
   $("#inventory").innerHTML =
     state.items
       .map(
         (i) =>
-          `<button class="item-row" data-item="${escape(i.id)}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(i.name)}<small>${i.owned ? "Already owned" : "Suggested piece"}</small></span><span class="price">${i.owned ? "Owned" : currency(i.price)}</span></button>`,
+          `<button class="item-row" data-item="${escape(i.id)}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(itemName(i))}<small>${i.owned ? "Already owned" : i.shopify ? "Approximate 3D preview" : "Suggested piece"}</small></span><span class="price">${inventoryPrice(i)}</span></button>`,
       )
       .join("") ||
     '<p class="muted">Add a piece or auto-style this room to start.</p>';
+  const estimate = roomEstimate(state.items);
   $("#notes").textContent =
-    `${state.items.filter((i) => !i.owned).length} suggested · ${currency(getSpend(state.items))} estimated`;
+    `${state.items.filter((i) => !i.owned).length} suggested · ${currency(estimate.total)} ${estimate.partial ? "partial estimate" : "estimated"}`;
   scene?.update(state.items, selection, state.style, room);
   drawPlanPins();
 }
@@ -196,6 +244,8 @@ $("#scene").addEventListener("keydown", (e) => {
   move(item.id, item.x + dx * 0.1, item.z + dz * 0.1);
 });
 function modal(title, html) {
+  clearCatalog?.();
+  clearCatalog = undefined;
   $("#modal-title").textContent = title;
   $("#modal-body").innerHTML = html;
   if (!dialog.open) dialog.showModal();
@@ -220,35 +270,82 @@ function bounded(item, room = state.room || ROOM) {
 }
 function catalogDialog(swapId = null) {
   const old = state.items.find((i) => i.id === swapId);
+  if (old?.locked) return toast("Unlock this piece before swapping it.");
   const products = [...catalog].sort(
     (a, b) => Number(b.kind === old?.kind) - Number(a.kind === old?.kind),
   );
   modal(
-    old ? "Swap " + old.name : "Add furniture",
-    `<p class="muted">Choose a piece for your room. Prices are estimates.</p><div class="catalog-list">${products.map((p) => `<button class="item-row" data-product="${escape(p.id)}">${itemGlyph(p)}<span class="item-name">${escape(p.name)}<small>${escape(p.kind)}</small></span><span class="price">${currency(p.price)}</span></button>`).join("")}</div>`,
+    old ? "Swap " + itemName(old) : "Add furniture",
+    `<div class="catalog-sources" role="group" aria-label="Furniture source">
+      <button type="button" class="secondary" data-source="studio" aria-pressed="true">Studio catalog</button>
+      <button type="button" class="secondary" data-source="shopify" aria-pressed="false">Shopify</button>
+    </div>
+    <div data-studio-catalog><p class="muted">Choose a piece for your room. Prices are estimates.</p><div class="catalog-list">${products.map((p) => `<button class="item-row" data-product="${escape(p.id)}">${itemGlyph(p)}<span class="item-name">${escape(p.name)}<small>${escape(p.kind)}</small></span><span class="price">${currency(p.price)}</span></button>`).join("")}</div></div>
+    <div data-shopify-catalog hidden></div>`,
   );
-  $("#modal-body").onclick = (e) => {
-    const btn = e.target.closest("[data-product]");
-    if (!btn) return;
-    const p = catalog.find((i) => i.id === btn.dataset.product);
+  const body = $("#modal-body");
+  const studio = body.querySelector("[data-studio-catalog]");
+  const shopify = body.querySelector("[data-shopify-catalog]");
+  let unmountPicker;
+  clearCatalog = () => {
+    unmountPicker?.();
+    body.onclick = null;
+  };
+
+  function place(makeItem) {
+    if (!dialog.open) return false;
+    const current = state.items.find((item) => item.id === swapId);
+    if (swapId && (!current || current.locked)) return false;
     const remaining = state.items.filter((i) => i.id !== swapId);
-    let item = bounded(
-      createItem(p, {
-        id: crypto.randomUUID(),
-        x: old?.x ?? 0,
-        z: old?.z ?? 0,
-        rotation: old?.rotation ?? 0,
-        owned: false,
-      }),
-    );
-    item = fitItem(item, state.room || ROOM, remaining);
+    const candidate = makeItem({
+      id: crypto.randomUUID(),
+      x: current?.x ?? 0,
+      z: current?.z ?? 0,
+      rotation: current?.rotation ?? 0,
+    });
+    const item = candidate && fitItem(bounded(candidate), state.room || ROOM, remaining);
     if (!item) {
       toast("No clear space. Move or remove a piece first.");
-      return;
+      return false;
     }
     selection = item.id;
     commit({ ...state, items: [...remaining, item] });
     dialog.close();
+    return true;
+  }
+
+  body.onclick = (event) => {
+    const source = event.target.closest("[data-source]");
+    if (source) {
+      const useShopify = source.dataset.source === "shopify";
+      if (source.getAttribute("aria-pressed") === "true") return;
+      for (const button of body.querySelectorAll("[data-source]"))
+        button.setAttribute("aria-pressed", String(button === source));
+      studio.hidden = useShopify;
+      shopify.hidden = !useShopify;
+      if (useShopify) {
+        unmountPicker = mountShopifyPicker(shopify, {
+          swap: Boolean(old),
+          initialKind: old?.kind ?? "table",
+          kinds: furniturePreviewKinds.map((kind) => ({
+            value: kind,
+            label: kind[0].toUpperCase() + kind.slice(1),
+          })),
+          shopifyRequest,
+          onQuote: (product) => shopifyQuotes.remember(product),
+          onPlace: (product, kind) =>
+            place((placement) => createShopifyPreview(kind, shopifyRef(product), placement)),
+        });
+        shopify.querySelector("input").focus();
+      } else {
+        unmountPicker?.();
+        unmountPicker = undefined;
+        shopify.replaceChildren();
+      }
+      return;
+    }
+    const product = catalog.find((item) => item.id === event.target.closest("[data-product]")?.dataset.product);
+    if (product) place((placement) => createItem(product, placement));
   };
 }
 $("#inventory").onclick = (e) => {
@@ -320,6 +417,9 @@ $("#undo").onclick = () => {
 $("#add-piece").onclick = () => catalogDialog();
 $("#close-modal").onclick = () => dialog.close();
 dialog.addEventListener("close", () => {
+  if (dialog.open) return;
+  clearCatalog?.();
+  clearCatalog = undefined;
   $("#modal-body").onclick = null;
 });
 async function readPhoto(file) {
@@ -456,6 +556,8 @@ function updateWalkControls() {
 }
 function markStage(next) {
   if (stage === "household" && next !== "household") householdPage.close();
+  if (stage === "shop" && next !== "shop") shoppingList.close();
+  if (next !== stage) quoteRefresh?.abort();
   if (document.body.classList.contains("room-expanded")) toggleExpanded(false);
   stage = next;
   document.body.dataset.stage = next;
@@ -501,7 +603,7 @@ window.addEventListener("keydown", (event) => {
 function navigate(next) {
   markStage(next);
   state = { ...state, flowVersion: 2, screen: next };
-  if (next === "shop") renderShopping();
+  if (next === "shop") shoppingList.render(state);
   else if (next === "household") {
     householdPage.open({ personas: state.personas, rooms: listPersonaRooms(state) });
   } else {
@@ -510,6 +612,7 @@ function navigate(next) {
     if (next === "tour" && !$("#view-interior").disabled)
       changeView("interior");
   }
+  if (next === "tour" || next === "shop") void refreshShopifyQuotes();
   persist();
   window.scrollTo(0, 0);
 }
@@ -656,9 +759,13 @@ function savePieces(items) {
   const saved = new Map(
     (state.savedProducts || []).map((row) => [row.id, row]),
   );
-  for (const item of items)
-    if (!item.owned && item.productId)
+  for (const item of items) {
+    if (item.owned) continue;
+    if (item.shopify)
+      saved.set(item.id, { id: item.id, name: item.name, shopify: item.shopify });
+    else if (item.productId)
       saved.set(item.id, { id: item.id, productId: item.productId });
+  }
   commit({ ...state, savedProducts: [...saved.values()] });
   toast(
     items.length === 1
@@ -670,41 +777,33 @@ $("#save-room").onclick = () => {
   savePieces(state.items.filter((i) => !i.owned));
   navigate("shop");
 };
-function renderShopping() {
-  const saved = (state.savedProducts || [])
-    .map((row) => ({
-      ...row,
-      product: catalog.find((p) => p.id === row.productId),
-    }))
-    .filter((row) => row.product);
-  $("#shop-intro").textContent = saved.length
-    ? "Saved for " +
-      state.roomName +
-      ". Models approximate each piece. Check the selected variant and current price at the store."
-    : "Save a piece while exploring, or save all the suggestions from your layout.";
-  $("#saved-products").innerHTML =
-    saved
-      .map(
-        ({ id, product: p }) =>
-          `<article class="shop-card"><div class="shop-photo"><img src="${escape(p.photo)}" loading="lazy" referrerpolicy="no-referrer" alt="${escape(p.name)}"></div><div class="shop-card-body"><span class="merchant">${escape(p.store)}</span><h2>${escape(p.name)}</h2><p class="variant">${p.variant === "Default Title" ? "" : escape(p.variant)}</p><strong>${currency(p.price)}</strong><div class="shop-card-footer"><a class="primary" target="_blank" rel="noopener noreferrer" href="${escape(p.url)}">Shop at ${escape(p.store)} ↗</a><button class="text-btn" data-unsave="${escape(id)}">Remove</button></div></div></article>`,
-      )
-      .join("") ||
-    '<div class="shop-empty">Your saved products will appear here.</div>';
-  $("#saved-total").textContent =
-    "Estimated subtotal · " +
-    currency(saved.reduce((n, row) => n + row.product.price, 0));
+async function refreshShopifyQuotes() {
+  quoteRefresh?.abort();
+  const shopping = stage === "shop";
+  const rows = shopping ? state.savedProducts ?? [] : state.items;
+  const refs = rows.flatMap((row) => row.shopify ? [row.shopify] : []);
+  if (!refs.length) {
+    if (shopping) shoppingList.showLookupStatus();
+    return;
+  }
+  const controller = new AbortController();
+  quoteRefresh = controller;
+  if (shopping) {
+    shoppingList.showLookupStatus({ loading: true });
+    shoppingList.render(state);
+  }
+  try {
+    const warnings = await shopifyQuotes.refresh(refs, { signal: controller.signal });
+    if (controller.signal.aborted) return;
+    if (shopping) shoppingList.showLookupStatus({ warnings });
+    else if (warnings.length) toast(warnings.map(({ text }) => text).join(" "));
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    if (shopping) shoppingList.showLookupStatus({ error: error.message, warnings: error.warnings });
+  }
+  if (shopping) shoppingList.render(state);
+  else render();
 }
-$("#saved-products").onclick = (e) => {
-  const btn = e.target.closest("[data-unsave]");
-  if (!btn) return;
-  commit({
-    ...state,
-    savedProducts: state.savedProducts.filter(
-      (p) => p.id !== btn.dataset.unsave,
-    ),
-  });
-  renderShopping();
-};
 function updatePiece(candidate) {
   const room = state.room || ROOM;
   if (!canPlaceItem(candidate, room, state.items)) {
@@ -745,23 +844,30 @@ $("#edit-request").onsubmit = (e) => {
     if (!item) message = "Select a piece or name an item in this room.";
     else if (/^(remove|delete)/.test(text)) {
       commit({ ...state, items: state.items.filter((i) => i.id !== item.id) });
-      message = item.name + " removed.";
+      message = itemName(item) + " removed.";
     } else if (/^(rotate|turn)/.test(text)) {
       message = updatePiece(
         bounded({ ...item, rotation: (item.rotation + 90) % 360 }),
       )
-        ? "Rotated " + item.name + "."
+        ? "Rotated " + itemName(item) + "."
         : "Move the piece into a larger space to rotate it.";
     } else {
       const remaining = state.items.filter((i) => i.id !== item.id);
-      const limit = state.budget - getSpend(remaining);
       const cheaper = /cheaper|less expensive|lower price/.test(text);
+      const estimate = roomEstimate(remaining);
+      const currentPrice = item.shopify ? livePriceUsd(item) : item.price;
+      if (estimate.partial || (cheaper && currentPrice === null)) {
+        result.textContent = "Shopify prices are needed to compare pieces against the room budget.";
+        void refreshShopifyQuotes();
+        return;
+      }
+      const limit = state.budget - estimate.total;
       const alternatives = catalog.filter(
         (p) =>
           p.kind === item.kind &&
           p.id !== item.productId &&
           p.price <= limit &&
-          (!cheaper || p.price < item.price),
+          (!cheaper || p.price < currentPrice),
       );
       alternatives.sort((a, b) =>
         cheaper
@@ -786,14 +892,20 @@ $("#edit-request").onsubmit = (e) => {
       if (replacement) {
         selection = replacement.id;
         commit({ ...state, items: [...remaining, replacement] });
-        message = "Replaced " + item.name + " with " + replacement.name + ".";
+        message = "Replaced " + itemName(item) + " with " + replacement.name + ".";
       } else
         message = cheaper
           ? "No lower-priced alternative fits this layout."
           : "No alternative fits this layout and budget.";
     }
   } else if (/^add\b/.test(text) && kind) {
-    const remaining = state.budget - getSpend(state.items);
+    const estimate = roomEstimate(state.items);
+    if (estimate.partial) {
+      result.textContent = "Shopify prices are needed to check the room budget.";
+      void refreshShopifyQuotes();
+      return;
+    }
+    const remaining = state.budget - estimate.total;
     const candidates = catalog
       .filter((p) => p.kind === kind && p.price <= remaining)
       .sort(

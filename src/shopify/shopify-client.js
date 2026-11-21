@@ -1,0 +1,93 @@
+const quoteLifetimeMs = 10 * 60 * 1000;
+
+export function shopifyRef(product) {
+  return { variantId: product.variantId, sellerDomain: product.sellerDomain };
+}
+
+function refKey(ref) {
+  return JSON.stringify([ref.variantId, ref.sellerDomain]);
+}
+
+export async function shopifyRequest(operation, body, { signal } = {}) {
+  const response = await fetch(`/api/shopify/${operation}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal,
+  }).catch((error) => {
+    if (signal?.aborted) throw error;
+    const failure = new Error(operation === "checkout"
+      ? "Shopify could not confirm the checkout. Visit the merchant to continue."
+      : "Shopify is temporarily unavailable.");
+    failure.uncertain = operation === "checkout";
+    throw failure;
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data || typeof data !== "object" || Array.isArray(data)) {
+    const error = new Error(data?.error || "Shopify is temporarily unavailable.");
+    error.status = response.status;
+    error.warnings = data?.warnings;
+    error.retryAfter = data?.retryAfter;
+    error.uncertain = data?.uncertain === true || (operation === "checkout" && !data);
+    throw error;
+  }
+  return data;
+}
+
+export function createShopifyQuotes(onExpire) {
+  const quotes = new Map();
+  let expiryTimer;
+
+  function scheduleExpiry() {
+    clearTimeout(expiryTimer);
+    if (!quotes.size) return;
+    const nextExpiry = Math.min(...Array.from(quotes.values(), (quote) => quote.expiresAt));
+    expiryTimer = setTimeout(() => {
+      const now = Date.now();
+      for (const [key, quote] of quotes)
+        if (quote.expiresAt <= now) quotes.delete(key);
+      scheduleExpiry();
+      onExpire();
+    }, Math.max(0, nextExpiry - Date.now()));
+  }
+
+  function set(product) {
+    quotes.set(refKey(product), { product, expiresAt: Date.now() + quoteLifetimeMs });
+  }
+
+  return {
+    get(ref) {
+      if (!ref) return null;
+      const quote = quotes.get(refKey(ref));
+      return quote?.expiresAt > Date.now() ? quote.product : null;
+    },
+    remember(product) {
+      set(product);
+      scheduleExpiry();
+    },
+    async refresh(refs, { signal } = {}) {
+      const unique = [...new Map(refs.filter(Boolean).map((ref) => [refKey(ref), ref])).values()];
+      const warnings = [];
+      for (let offset = 0; offset < unique.length; offset += 50) {
+        const batch = unique.slice(offset, offset + 50);
+        const previous = batch.map((ref) => quotes.get(refKey(ref)));
+        const data = await shopifyRequest("lookup", { refs: batch }, { signal });
+        if (signal?.aborted) return [];
+        if (!Array.isArray(data.products)) throw new Error("Shopify product details are unavailable.");
+        const byRef = new Map(data.products.map((product) => [refKey(product), product]));
+        batch.forEach((ref, index) => {
+          const key = refKey(ref);
+          const current = quotes.get(key);
+          if (current && current !== previous[index]) return;
+          const product = byRef.get(key);
+          if (product) set(product);
+          else quotes.delete(key);
+        });
+        scheduleExpiry();
+        warnings.push(...(data.warnings ?? []));
+      }
+      return warnings;
+    },
+  };
+}
