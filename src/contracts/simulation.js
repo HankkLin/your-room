@@ -93,8 +93,27 @@ function normalizeScoreMap(scores) {
   return hasAny ? out : null;
 }
 
+function formatLocationLabel(loc, fallbackRoomId = null) {
+  if (typeof loc === "string" && loc.trim()) return loc.trim();
+  if (loc && typeof loc === "object") {
+    if (typeof loc.label === "string" && loc.label.trim()) return loc.label.trim();
+    if (typeof loc.roomId === "string" && loc.roomId.trim()) {
+      return loc.roomId
+        .replace(/[-_]+/g, " ")
+        .replace(/\b\w/g, (ch) => ch.toUpperCase());
+    }
+  }
+  if (typeof fallbackRoomId === "string" && fallbackRoomId.trim()) {
+    return fallbackRoomId
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (ch) => ch.toUpperCase());
+  }
+  return null;
+}
+
 /**
- * Normalize an external simulation state payload for safe UI rendering.
+ * Normalize an external simulation state payload for safe UI rendering,
+ * preserving structured `evidence` and `rawLocation` for 3D overlay mapping.
  * @param {object} [raw]
  */
 export function normalizeSimulationViewState(raw = {}) {
@@ -120,7 +139,16 @@ export function normalizeSimulationViewState(raw = {}) {
         level: resolveFindingLevel(f),
         title: String(f.title || f.type || "Simulation finding"),
         summary: String(f.summary || f.description || ""),
-        location: f.location ? String(f.location) : null,
+        location: formatLocationLabel(f.location, f.roomId),
+        rawLocation:
+          f.rawLocation ?? (typeof f.location === "object" ? f.location : null),
+        roomId:
+          f.roomId ||
+          (typeof f.location === "object" ? f.location?.roomId : null) ||
+          null,
+        agentId: f.agentId || null,
+        evidence:
+          f.evidence && typeof f.evidence === "object" ? { ...f.evidence } : null,
       }))
     : [];
 
@@ -139,11 +167,30 @@ export function normalizeSimulationViewState(raw = {}) {
       ? raw.errorMessage.trim()
       : null;
 
+  const startSecond = Number.isFinite(Number(raw?.startSecond))
+    ? Number(raw.startSecond)
+    : 0;
+  const endSecond = Number.isFinite(Number(raw?.endSecond))
+    ? Number(raw.endSecond)
+    : 0;
+  const currentSecond = Number.isFinite(Number(raw?.currentSecond))
+    ? Number(raw.currentSecond)
+    : startSecond;
+
   return {
     status,
     scenarioId,
     speed,
     currentTime,
+    hasTimeline: Boolean(raw?.hasTimeline && endSecond > startSecond),
+    startSecond,
+    endSecond,
+    currentSecond,
+    showAllRoutes: Boolean(raw?.showAllRoutes),
+    selectedFindingId:
+      typeof raw?.selectedFindingId === "string" ? raw.selectedFindingId : null,
+    hasLayoutToggle: Boolean(raw?.hasLayoutToggle),
+    activeLayoutView: raw?.activeLayoutView === "after" ? "after" : "before",
     findings,
     scores,
     beforeScores,

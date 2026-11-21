@@ -4,6 +4,7 @@ import {
   SIMULATION_SPEEDS,
   normalizeSimulationViewState,
 } from "../../contracts/simulation.js";
+import { formatFindingEvidenceChips } from "../avatar/simulation-scene-layer.js";
 
 const escapeHtml = (value) =>
   String(value ?? "").replace(
@@ -86,6 +87,27 @@ export function renderControlPanelMarkup(
       ? state.errorMessage
       : STATUS_LABELS[state.status] || "Ready";
 
+  const scrubberMarkup = state.hasTimeline
+    ? `<div class="twin-scrubber-bar" id="sim-timeline-wrap">
+        <label class="twin-scrubber-label" for="sim-scrubber">
+          <span class="section-label">Timeline</span>
+          <span class="twin-route-toggle-wrap">
+            <input type="checkbox" id="sim-toggle-routes" ${state.showAllRoutes ? "checked" : ""} />
+            <span>Show all paths</span>
+          </span>
+        </label>
+        <input
+          type="range"
+          id="sim-scrubber"
+          aria-label="Simulation timeline scrubber"
+          min="${state.startSecond}"
+          max="${state.endSecond}"
+          step="1"
+          value="${Math.round(state.currentSecond)}"
+        />
+      </div>`
+    : "";
+
   return `<div class="twin-control-card" aria-label="Household Digital Twin controls">
     <div class="twin-card-head">
       <div>
@@ -120,6 +142,7 @@ export function renderControlPanelMarkup(
         ).join("")}
       </div>
     </div>
+    ${scrubberMarkup}
     <div class="twin-status-row" id="sim-status" data-status="${escapeHtml(state.status)}" role="status" aria-live="polite">
       <span class="twin-status-indicator"><span class="twin-dot" aria-hidden="true"></span><span>${escapeHtml(statusText)}</span></span>
       <span class="twin-clock" id="sim-clock">${state.currentTime ? escapeHtml(state.currentTime) : ""}</span>
@@ -142,7 +165,15 @@ export function renderFindingsMarkup(viewState) {
   return `<div class="twin-findings-list" id="sim-findings-list">${state.findings
     .map((finding) => {
       const glyph = LEVEL_GLYPHS[finding.level] || LEVEL_GLYPHS.info;
-      return `<article class="twin-finding" data-level="${escapeHtml(finding.level)}" data-finding-type="${escapeHtml(finding.type)}">
+      const isSelected = state.selectedFindingId === finding.id;
+      const chips = formatFindingEvidenceChips(finding);
+      const chipsMarkup =
+        chips.length > 0
+          ? `<div class="twin-evidence-chips">${chips
+              .map((c) => `<span class="twin-evidence-chip">${escapeHtml(c)}</span>`)
+              .join("")}</div>`
+          : "";
+      return `<article class="twin-finding twin-finding-interactive" tabindex="0" role="button" aria-pressed="${isSelected}" data-finding-id="${escapeHtml(finding.id)}" data-level="${escapeHtml(finding.level)}" data-finding-type="${escapeHtml(finding.type)}">
         <span class="twin-finding-icon" aria-label="${escapeHtml(finding.level)}">${glyph}</span>
         <div>
           <div class="twin-finding-head">
@@ -150,6 +181,7 @@ export function renderFindingsMarkup(viewState) {
             ${finding.location ? `<span class="twin-finding-loc">${escapeHtml(finding.location)}</span>` : ""}
           </div>
           ${finding.summary ? `<p>${escapeHtml(finding.summary)}</p>` : ""}
+          ${chipsMarkup}
         </div>
       </article>`;
     })
@@ -225,6 +257,13 @@ export function renderRedesignMarkup(redesignActions = []) {
 
 export function renderResultsDeckMarkup(viewState) {
   const state = normalizeSimulationViewState(viewState);
+  const layoutToggleMarkup = state.hasLayoutToggle
+    ? `<div class="twin-layout-toggle" role="group" aria-label="3D layout preview">
+        <button type="button" data-layout-view="before" aria-pressed="${state.activeLayoutView === "before"}">Before layout</button>
+        <button type="button" data-layout-view="after" aria-pressed="${state.activeLayoutView === "after"}">After layout</button>
+      </div>`
+    : "";
+
   return `<div class="twin-results-deck">
     <section class="twin-deck-card" id="sim-findings-panel" aria-labelledby="sim-findings-heading">
       <div class="twin-deck-head">
@@ -243,7 +282,10 @@ export function renderResultsDeckMarkup(viewState) {
           <p class="eyebrow">Measurable impact</p>
           <h3 id="sim-compare-heading">Before / After redesign</h3>
         </div>
-        ${state.isMockData && state.afterScores ? '<span class="twin-mock-badge">Mock preview</span>' : ""}
+        <div class="twin-deck-head-actions">
+          ${layoutToggleMarkup}
+          ${state.isMockData && state.afterScores ? '<span class="twin-mock-badge">Mock preview</span>' : ""}
+        </div>
       </div>
       ${renderBeforeAfterMarkup(state.beforeScores, state.afterScores)}
       ${renderRedesignMarkup(state.redesignActions)}
@@ -262,6 +304,10 @@ export function createDemoControlsController({
   onResetSimulation = () => {},
   onSimulationSpeedChange = () => {},
   onScenarioChange = () => {},
+  onSeekTimeline = () => {},
+  onToggleRoutes = () => {},
+  onSelectFinding = () => {},
+  onSelectLayoutView = () => {},
   onChange = () => {},
 } = {}) {
   let state = normalizeSimulationViewState(initialState);
@@ -310,6 +356,35 @@ export function createDemoControlsController({
       emit();
       return state;
     },
+    seekTimeline(second) {
+      const numeric = Number(second);
+      if (!Number.isFinite(numeric)) return state;
+      state = normalizeSimulationViewState({ ...state, currentSecond: numeric });
+      onSeekTimeline(numeric);
+      return state;
+    },
+    toggleShowAllRoutes(checked) {
+      const flag = Boolean(checked);
+      state = normalizeSimulationViewState({ ...state, showAllRoutes: flag });
+      onToggleRoutes(flag);
+      emit();
+      return state;
+    },
+    selectFinding(findingId) {
+      const finding = state.findings.find((f) => f.id === findingId) || null;
+      const nextId = state.selectedFindingId === findingId ? null : findingId;
+      state = normalizeSimulationViewState({ ...state, selectedFindingId: nextId });
+      onSelectFinding(nextId ? finding : null);
+      emit();
+      return state;
+    },
+    selectLayoutView(mode) {
+      const view = mode === "after" ? "after" : "before";
+      state = normalizeSimulationViewState({ ...state, activeLayoutView: view });
+      onSelectLayoutView(view);
+      emit();
+      return state;
+    },
   };
 }
 
@@ -326,6 +401,10 @@ export function mountDemoControls({
   onResetSimulation = () => {},
   onSimulationSpeedChange = () => {},
   onScenarioChange = () => {},
+  onSeekTimeline = () => {},
+  onToggleRoutes = () => {},
+  onSelectFinding = () => {},
+  onSelectLayoutView = () => {},
 } = {}) {
   let visible = false;
 
@@ -355,6 +434,10 @@ export function mountDemoControls({
     onResetSimulation,
     onSimulationSpeedChange,
     onScenarioChange,
+    onSeekTimeline,
+    onToggleRoutes,
+    onSelectFinding,
+    onSelectLayoutView,
     onChange: renderDOM,
   });
 
@@ -374,15 +457,63 @@ export function mountDemoControls({
   function handleControlChange(event) {
     if (event.target?.id === "sim-scenario") {
       controller.selectScenario(event.target.value);
+    } else if (event.target?.id === "sim-toggle-routes") {
+      controller.toggleShowAllRoutes(event.target.checked);
     }
+  }
+
+  function handleControlInput(event) {
+    if (event.target?.id === "sim-scrubber") {
+      controller.seekTimeline(Number(event.target.value));
+    }
+  }
+
+  function handleResultsClick(event) {
+    const layoutBtn = event.target.closest("[data-layout-view]");
+    if (layoutBtn) {
+      controller.selectLayoutView(layoutBtn.dataset.layoutView);
+      return;
+    }
+    const findingCard = event.target.closest("[data-finding-id]");
+    if (findingCard) {
+      controller.selectFinding(findingCard.dataset.findingId);
+    }
+  }
+
+  function handleResultsKeydown(event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const findingCard = event.target.closest?.("[data-finding-id]");
+    if (!findingCard) return;
+    event.preventDefault();
+    controller.selectFinding(findingCard.dataset.findingId);
   }
 
   controlHost?.addEventListener("click", handleControlClick);
   controlHost?.addEventListener("change", handleControlChange);
+  controlHost?.addEventListener("input", handleControlInput);
+  resultsHost?.addEventListener("click", handleResultsClick);
+  resultsHost?.addEventListener("keydown", handleResultsKeydown);
   renderDOM(controller.getState(), controller.getPersonas());
 
   return {
     ...controller,
+    /**
+     * Fast in-place clock + scrubber update during 60fps animation frames.
+     * Avoids replacing `controlHost.innerHTML` while buttons are being clicked.
+     */
+    updateClockAndProgress({ currentTime, currentSecond, startSecond, endSecond } = {}) {
+      if (!visible || !controlHost) return;
+      const clockEl = controlHost.querySelector("#sim-clock");
+      if (clockEl && typeof currentTime === "string") {
+        clockEl.textContent = currentTime;
+      }
+      const scrubber = controlHost.querySelector("#sim-scrubber");
+      if (scrubber && Number.isFinite(Number(currentSecond))) {
+        if (Number.isFinite(Number(startSecond))) scrubber.min = String(startSecond);
+        if (Number.isFinite(Number(endSecond))) scrubber.max = String(endSecond);
+        scrubber.value = String(Math.round(Number(currentSecond)));
+      }
+    },
     setVisible(nextVisible) {
       const bool = Boolean(nextVisible);
       if (visible === bool) return;
@@ -393,6 +524,9 @@ export function mountDemoControls({
     destroy() {
       controlHost?.removeEventListener("click", handleControlClick);
       controlHost?.removeEventListener("change", handleControlChange);
+      controlHost?.removeEventListener("input", handleControlInput);
+      resultsHost?.removeEventListener("click", handleResultsClick);
+      resultsHost?.removeEventListener("keydown", handleResultsKeydown);
     },
   };
 }

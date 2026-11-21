@@ -45,7 +45,11 @@ import {
   setConfirmedImportedHouse,
 } from "./src/spatial/floorplan-importer.js";
 import { mountDemoControls } from "./src/components/simulation/demo-controls.js";
-import { createMockSimulationAdapter } from "./demo-simulation-mock.js";
+import { createSimulationPlaybackController } from "./src/components/simulation/playback-controller.js";
+import {
+  createMockPlaybackDataset,
+  getMockSimulationSnapshotAt,
+} from "./demo-playback-mock.js";
 
 export { getConfirmedImportedHouse };
 if (typeof window !== "undefined") {
@@ -121,29 +125,184 @@ let toastTimer;
 let scene;
 const dialog = $("#dialog");
 let simulationAdapter = null;
+let activePlaybackDataset = null;
+let previewLayoutItems = null;
+
+const playbackController = createSimulationPlaybackController({
+  onFrame(frame) {
+    scene?.setPlaybackFrame?.(frame);
+  },
+  onTick(tick) {
+    demoControls.updateClockAndProgress(tick);
+  },
+  onStatusChange(pb) {
+    const ds = activePlaybackDataset;
+    if (pb.status === "READY" && !pb.hasTimeline) {
+      previewLayoutItems = null;
+      scene?.clearPlayback?.();
+      demoControls.setState({
+        status: "READY",
+        currentTime: null,
+        hasTimeline: false,
+        selectedFindingId: null,
+        hasLayoutToggle: false,
+        activeLayoutView: "before",
+        findings: [],
+        scores: null,
+        beforeScores: null,
+        afterScores: null,
+        redesignActions: [],
+        errorMessage: null,
+        isMockData: false,
+      });
+      render();
+      return;
+    }
+
+    if (pb.completed && ds) {
+      scene?.setPlaybackFindings?.(ds.findings || [], {
+        house: activeHouse(),
+        items: previewLayoutItems || state.items,
+      });
+      demoControls.setState({
+        status: "COMPLETE",
+        currentTime: pb.currentTime,
+        hasTimeline: pb.hasTimeline,
+        startSecond: pb.startSecond,
+        endSecond: pb.endSecond,
+        currentSecond: pb.currentSecond,
+        showAllRoutes: pb.showAllRoutes,
+        hasLayoutToggle: Boolean(ds.beforeItems && ds.afterItems),
+        activeLayoutView: "before",
+        findings: ds.findings || [],
+        scores: ds.scores ?? ds.beforeScores ?? null,
+        beforeScores: ds.beforeScores ?? null,
+        afterScores: ds.afterScores ?? null,
+        redesignActions: ds.redesignActions ?? [],
+        isMockData: Boolean(ds.isMockData),
+      });
+      return;
+    }
+
+    demoControls.setState({
+      status: pb.status,
+      currentTime: pb.currentTime,
+      hasTimeline: pb.hasTimeline,
+      startSecond: pb.startSecond,
+      endSecond: pb.endSecond,
+      currentSecond: pb.currentSecond,
+      showAllRoutes: pb.showAllRoutes,
+      selectedFindingId: pb.selectedFindingId,
+      isMockData: Boolean(ds?.isMockData),
+    });
+  },
+});
+
+function startPlaybackFromDataset(dataset) {
+  activePlaybackDataset = dataset;
+  previewLayoutItems = null;
+  scene?.clearPlayback?.();
+  playbackController.setSpeed(demoControls.getState().speed);
+  playbackController.load({
+    simulation: dataset.simulation,
+    getSnapshotAt: dataset.getSnapshotAt || getMockSimulationSnapshotAt,
+    agentRoutes: dataset.agentRoutes || [],
+    isEvacuation: Boolean(dataset.isEvacuation),
+    clockMode: dataset.clockMode || "clock",
+    completedLabel: dataset.completedLabel || null,
+    simSecondsPerRealSecond: dataset.simSecondsPerRealSecond,
+  });
+  if (dataset.showFindingsImmediately && Array.isArray(dataset.findings)) {
+    scene?.setPlaybackFindings?.(dataset.findings, {
+      house: activeHouse(),
+      items: state.items,
+    });
+  }
+  playbackController.play();
+}
+
 const demoControls = mountDemoControls({
   controlHost: $("#demo-controls-panel"),
   resultsHost: $("#twin-results-section"),
   onRunSimulation(scenarioId) {
-    simulationAdapter?.run?.(scenarioId, {
+    if (simulationAdapter) {
+      simulationAdapter.run?.(scenarioId, {
+        house: activeHouse(),
+        items: state.items,
+        personas: state.personas || [],
+      });
+      return;
+    }
+    if (playbackController.getState().status === "PAUSED") {
+      playbackController.play();
+      return;
+    }
+    const dataset = createMockPlaybackDataset(scenarioId, {
       house: activeHouse(),
       items: state.items,
       personas: state.personas || [],
     });
+    startPlaybackFromDataset(dataset);
   },
   onPauseSimulation() {
-    simulationAdapter?.pause?.();
+    if (simulationAdapter) {
+      simulationAdapter.pause?.();
+      return;
+    }
+    playbackController.pause();
   },
   onResetSimulation() {
-    simulationAdapter?.reset?.();
+    if (simulationAdapter) {
+      simulationAdapter.reset?.();
+      scene?.clearPlayback?.();
+      return;
+    }
+    activePlaybackDataset = null;
+    previewLayoutItems = null;
+    playbackController.reset();
   },
   onSimulationSpeedChange(multiplier) {
     simulationAdapter?.setSpeed?.(multiplier);
+    playbackController.setSpeed(multiplier);
   },
-});
-simulationAdapter = createMockSimulationAdapter({
-  onStateChange(patch) {
-    demoControls.setState(patch);
+  onScenarioChange() {
+    if (!simulationAdapter && playbackController.getState().hasSimulation) {
+      activePlaybackDataset = null;
+      previewLayoutItems = null;
+      playbackController.reset();
+    }
+  },
+  onSeekTimeline(second) {
+    playbackController.seek(second);
+  },
+  onToggleRoutes(showAll) {
+    playbackController.setShowAllRoutes(showAll);
+  },
+  onSelectFinding(findingOrNull) {
+    scene?.focusFinding?.(findingOrNull);
+  },
+  onSelectLayoutView(viewMode) {
+    if (!activePlaybackDataset) return;
+    if (viewMode === "after" && Array.isArray(activePlaybackDataset.afterItems)) {
+      previewLayoutItems = activePlaybackDataset.afterItems;
+      scene?.showPatchTransition?.(activePlaybackDataset.patchChanges || []);
+      demoControls.setState({
+        scores: activePlaybackDataset.afterScores ?? activePlaybackDataset.beforeScores,
+      });
+    } else {
+      previewLayoutItems = null;
+      scene?.showPatchTransition?.([]);
+      demoControls.setState({
+        scores: activePlaybackDataset.beforeScores ?? null,
+      });
+    }
+    scene?.update(
+      previewLayoutItems || state.items,
+      selection,
+      state.style,
+      state.room || ROOM,
+      activeHouse(),
+    );
   },
 });
 const householdPage = createHouseholdPage($("#household-page"), {
@@ -295,7 +454,7 @@ function render() {
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(getSpend(state.items))} estimated`;
   demoControls.setPersonas(state.personas || []);
   demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
-  scene?.update(state.items, selection, state.style, room, house);
+  scene?.update(previewLayoutItems || state.items, selection, state.style, room, house);
   drawPlanPins();
 }
 function select(id) {
@@ -737,6 +896,9 @@ function loadWholeHomeDemo() {
   hasProject = true;
   selection = null;
   simulationAdapter?.reset?.();
+  activePlaybackDataset = null;
+  previewLayoutItems = null;
+  playbackController.reset();
   withSyncGuard(() => clearConfirmedImportedHouse());
   commit(createWholeHomeDemoState());
   syncForm();
@@ -761,6 +923,9 @@ function beginSetup(fresh = false) {
         return;
       }
       simulationAdapter?.reset?.();
+      activePlaybackDataset = null;
+      previewLayoutItems = null;
+      playbackController.reset();
       hasProject = true;
       const importedHouse = sample ? null : (next.importedHouse ?? null);
       withSyncGuard(() => {
@@ -1228,8 +1393,19 @@ window.__stillroom = {
   getState: () => state,
   getScene: () => scene,
   simulationUI: demoControls,
+  playbackController,
+  connectSimulationPlayback(payload = {}) {
+    simulationAdapter?.dispose?.();
+    simulationAdapter = null;
+    startPlaybackFromDataset({
+      ...payload,
+      isMockData: Boolean(payload.isMockData),
+    });
+    return playbackController;
+  },
   connectSimulationEngine(engine) {
     simulationAdapter?.dispose?.();
+    playbackController.reset();
     simulationAdapter = engine;
     demoControls.setState({
       status: "READY",
@@ -1242,7 +1418,15 @@ window.__stillroom = {
       errorMessage: null,
       isMockData: false,
     });
-    engine?.onStateChange?.((patch) => demoControls.setState(patch));
+    engine?.onStateChange?.((patch) => {
+      demoControls.setState(patch);
+      if (Array.isArray(patch?.findings)) {
+        scene?.setPlaybackFindings?.(patch.findings, {
+          house: activeHouse(),
+          items: state.items,
+        });
+      }
+    });
     return demoControls;
   },
 };
