@@ -2,6 +2,7 @@ import {
   ROOM,
   initialState,
   autoStyle,
+  resolveBrief,
   catalog,
   styles,
   createItem,
@@ -19,6 +20,18 @@ import {
   roomWalls,
   wallOpenings,
 } from "./room-layout.js";
+import {
+  applyObjectOperation,
+  canPlaceInHouse,
+  constrainToHouse,
+  fitItemInHouse,
+  getRoomAtPoint,
+  getWallOpeningsInHouse,
+  isObjectLocked,
+  normalizeHouse,
+  syncHouseObjects,
+} from "./house-model.js";
+import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -88,10 +101,14 @@ function persist() {
     $("#save-state").textContent = "Session only";
   }
 }
+const activeHouse = (s = state) =>
+  s.house ? (s.house.bounds ? s.house : normalizeHouse(s.house)) : null;
+
 function commit(next) {
   history.push(state);
   if (history.length > 20) history.shift();
-  state = { ...next, spent: getSpend(next.items) };
+  const house = next.house ? syncHouseObjects(next.house, next.items) : null;
+  state = { ...next, ...(next.house !== undefined ? { house } : {}), spent: getSpend(next.items) };
   if (!state.items.some((i) => i.id === selection)) selection = null;
   persist();
   render();
@@ -125,34 +142,59 @@ function renderDraft() {
   }
 }
 function itemGlyph(item) {
-  const kind = ["bookcase", "storage", "shelf"].includes(item.kind)
+  const kind = ["bookcase", "storage", "shelf", "counter"].includes(item.kind)
     ? "cabinet"
     : item.kind;
   return `<span class="item-swatch" style="background:${/^#[\da-f]{3,8}$/i.test(item.color) ? item.color : "#cdc5b6"}">${icon(kind)}</span>`;
 }
 function render() {
+  const house = activeHouse();
   $("#room-name").textContent = state.roomName;
   const room = state.room || ROOM;
-  $(".subtitle").textContent = `${room.width} × ${room.depth} m · Living space`;
+  $(".subtitle").textContent = house
+    ? `${house.bounds.width.toFixed(1)} × ${house.bounds.depth.toFixed(1)} m · ${house.rooms.length} rooms (${house.rooms.map((r) => r.name).join(", ")})`
+    : `${room.width} × ${room.depth} m · Living space`;
+  $("#whole-home-btn").hidden = Boolean(house);
   $("#item-count").textContent = state.items.length;
   $("#shop-count").textContent = state.savedProducts?.length || "";
   $("#undo").disabled = !history.length;
   $("#compare-photo").hidden = !state.roomPhoto;
   const item = state.items.find((i) => i.id === selection);
+  const locked = item && isObjectLocked(item);
   $("#objectbar").innerHTML = item
-    ? `<strong>${escape(item.name)}</strong><span class="object-tools"><button data-action="rotate" title="Rotate 90 degrees">${icon("rotate")} Rotate</button>${item.owned ? "" : '<button data-action="save">Save piece</button>'}<button data-action="swap">${icon("swap")} Swap</button><button data-action="remove">${icon("trash")} Remove</button></span>`
+    ? locked
+      ? `<strong>${escape(item.name)}</strong><span class="object-tools"><span class="locked-pill">${icon("lock")} ${item.type === "fixed" ? "Fixed fixture · Locked" : "Locked"}</span>${item.type === "fixed" ? "" : `<button data-action="unlock">Unlock</button>`}</span>`
+      : `<strong>${escape(item.name)}</strong><span class="object-tools"><button data-action="rotate" title="Rotate 90 degrees">${icon("rotate")} Rotate</button>${item.owned ? "" : '<button data-action="save">Save piece</button>'}<button data-action="swap">${icon("swap")} Swap</button><button data-action="lock" title="Lock piece">${icon("lock")} Lock</button><button data-action="remove">${icon("trash")} Remove</button></span>`
     : `<span class="gesture">${icon("move")} ${view === "interior" ? "Drag to look around" : view === "plan" ? "Drag a piece to move" : "Drag to orbit"} <span aria-hidden="true">·</span> Select a piece to edit</span>`;
   $("#inventory").innerHTML =
     state.items
-      .map(
-        (i) =>
-          `<button class="item-row" data-item="${escape(i.id)}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(i.name)}<small>${i.owned ? "Already owned" : "Suggested piece"}</small></span><span class="price">${i.owned ? "Owned" : currency(i.price)}</span></button>`,
-      )
+      .map((i) => {
+        const roomLabel = house
+          ? house.rooms.find((r) => r.id === i.roomId)?.name ||
+            getRoomAtPoint(house, i.x, i.z)?.name
+          : null;
+        const kindTag =
+          i.type === "fixed"
+            ? "Fixed fixture · Locked"
+            : i.locked
+              ? "Locked piece"
+              : i.owned
+                ? "Already owned"
+                : "Suggested piece";
+        const sub = roomLabel ? `${escape(roomLabel)} · ${kindTag}` : kindTag;
+        const priceLabel =
+          i.type === "fixed" || i.locked
+            ? "Locked"
+            : i.owned
+              ? "Owned"
+              : currency(i.price);
+        return `<button class="item-row" data-item="${escape(i.id)}" data-locked="${Boolean(isObjectLocked(i))}" aria-pressed="${selection === i.id}">${itemGlyph(i)}<span class="item-name">${escape(i.name)}<small>${sub}</small></span><span class="price">${priceLabel}</span></button>`;
+      })
       .join("") ||
     '<p class="muted">Add a piece or auto-style this room to start.</p>';
   $("#notes").textContent =
-    `${state.items.filter((i) => !i.owned).length} suggested · ${currency(getSpend(state.items))} estimated`;
-  scene?.update(state.items, selection, state.style, room);
+    `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(getSpend(state.items))} estimated`;
+  scene?.update(state.items, selection, state.style, room, house);
   drawPlanPins();
 }
 function select(id) {
@@ -162,6 +204,11 @@ function select(id) {
 function move(id, x, z) {
   const item = state.items.find((i) => i.id === id);
   if (!item || Math.hypot(item.x - x, item.z - z) < 0.005) return;
+  if (isObjectLocked(item)) {
+    toast("Locked fixtures cannot be moved.");
+    render();
+    return;
+  }
   updatePiece(bounded({ ...item, x, z }));
 }
 $("#scene").tabIndex = 0;
@@ -179,6 +226,10 @@ $("#scene").addEventListener("keydown", (e) => {
   const item = state.items.find((i) => i.id === selection);
   if (!item || !deltas[e.key]) return;
   e.preventDefault();
+  if (isObjectLocked(item)) {
+    toast("Locked fixtures cannot be moved.");
+    return;
+  }
   const [dx, dz] = deltas[e.key];
   move(item.id, item.x + dx * 0.1, item.z + dz * 0.1);
 });
@@ -197,6 +248,16 @@ function bounded(item, room = state.room || ROOM) {
     (Math.abs(Math.sin(radians)) * item.width +
       Math.abs(Math.cos(radians)) * item.depth) /
     2;
+  const house = activeHouse();
+  if (house) {
+    const [x, z] = constrainToHouse(house, item.x, item.z, halfX + 0.035, halfZ + 0.035);
+    return {
+      ...item,
+      x,
+      z,
+      roomId: getRoomAtPoint(house, x, z)?.id ?? item.roomId ?? null,
+    };
+  }
   const limitX = room.width / 2 - halfX - 0.035;
   const limitZ = room.depth / 2 - halfZ - 0.035;
   return {
@@ -207,6 +268,10 @@ function bounded(item, room = state.room || ROOM) {
 }
 function catalogDialog(swapId = null) {
   const old = state.items.find((i) => i.id === swapId);
+  if (old && isObjectLocked(old)) {
+    toast("Locked fixtures cannot be replaced.");
+    return;
+  }
   const products = [...catalog].sort(
     (a, b) => Number(b.kind === old?.kind) - Number(a.kind === old?.kind),
   );
@@ -219,16 +284,24 @@ function catalogDialog(swapId = null) {
     if (!btn) return;
     const p = catalog.find((i) => i.id === btn.dataset.product);
     const remaining = state.items.filter((i) => i.id !== swapId);
+    const house = activeHouse();
     let item = bounded(
       createItem(p, {
         id: crypto.randomUUID(),
-        x: old?.x ?? 0,
-        z: old?.z ?? 0,
+        x: old?.x ?? (house ? -1.4 : 0),
+        z: old?.z ?? (house ? 1.8 : 0),
         rotation: old?.rotation ?? 0,
         owned: false,
       }),
     );
-    item = fitItem(item, state.room || ROOM, remaining);
+    item = house
+      ? fitItemInHouse(
+          { ...item, locked: false, type: "shopify" },
+          house,
+          remaining,
+          old?.roomId || eyePose?.roomId || "living-room",
+        )
+      : fitItem(item, state.room || ROOM, remaining);
     if (!item) {
       toast("No clear space. Move or remove a piece first.");
       return;
@@ -254,6 +327,15 @@ $("#objectbar").onclick = (e) => {
   const action = e.target.closest("[data-action]")?.dataset.action;
   const item = state.items.find((i) => i.id === selection);
   if (!item || !action) return;
+  if (action === "lock" || action === "unlock") {
+    const res = applyObjectOperation(state.items, { type: action, objectId: item.id }, activeHouse());
+    if (res.ok) commit({ ...state, items: res.items });
+    return;
+  }
+  if (isObjectLocked(item)) {
+    toast("Locked fixtures cannot be modified.");
+    return;
+  }
   if (action === "save") return savePieces([item]);
   if (action === "swap") return catalogDialog(item.id);
   if (action === "rotate")
@@ -263,6 +345,34 @@ $("#objectbar").onclick = (e) => {
   if (action === "remove")
     commit({ ...state, items: state.items.filter((i) => i.id !== selection) });
 };
+function styleActiveState(baseState, overrides = {}) {
+  const house = activeHouse(baseState);
+  if (!house) return autoStyle(baseState, overrides);
+  const { style, budget, skipKinds, prioritizeKinds } = resolveBrief(baseState, overrides);
+  const kept = baseState.items.filter((i) => i.owned || isObjectLocked(i));
+  const items = [...kept];
+  let remaining = budget;
+  const kinds = [...new Set([...prioritizeKinds, "sofa", "table", "chair", "rug", "lamp", "plant"])];
+  for (const kind of kinds) {
+    if (skipKinds.includes(kind) || items.some((i) => !isObjectLocked(i) && i.roomId === "living-room" && i.kind === kind)) continue;
+    const options = catalog.filter((p) => p.kind === kind && p.price <= remaining);
+    const product = options.find((p) => p.style === style) ?? options.sort((a, b) => a.price - b.price)[0];
+    if (!product) continue;
+    const placed = fitItemInHouse(
+      { ...createItem(product, { id: `suggested-${kind}` }), locked: false, type: "shopify" },
+      house,
+      items,
+      "living-room",
+    );
+    if (placed) {
+      items.push(placed);
+      remaining -= placed.price;
+    }
+  }
+  const added = items.length - kept.length;
+  const notes = `${added} ${added === 1 ? "suggestion" : "suggestions"} in ${style.toLowerCase()}. Fixed fixtures and owned pieces kept.`;
+  return { ...baseState, items, style, budget, spent: getSpend(items), notes };
+}
 $("#styles").onclick = (e) => {
   const btn = e.target.closest("[data-style]");
   if (btn) {
@@ -277,7 +387,7 @@ $("#style-form").onsubmit = (e) => {
   const overrides = {};
   if (pickedStyle) overrides.style = draftStyle;
   if (budget !== state.budget) overrides.budget = budget;
-  const next = autoStyle(
+  const next = styleActiveState(
     {
       ...state,
       style: draftStyle,
@@ -435,11 +545,16 @@ function enterEditor() {
 }
 function updateWalkControls() {
   const walking = stage === "tour" && view === "interior";
+  const house = activeHouse();
   $("#tour-map").hidden = !walking;
   $(".walk-pad").hidden = !walking;
   $("#walk-help").textContent = walking
-    ? "Drag the background to look around. Jump between viewpoints or walk with W, A, S, D when the room is focused."
-    : "Select furniture in the room to move, rotate, replace, or save it.";
+    ? house
+      ? "Drag the background to look around. Click a room pin or walk between rooms with W, A, S, D."
+      : "Drag the background to look around. Jump between viewpoints or walk with W, A, S, D when the room is focused."
+    : house
+      ? "Orbit around the whole home, or switch to Interior above to walk between rooms with W, A, S, D."
+      : "Select furniture in the room to move, rotate, replace, or save it.";
 }
 function markStage(next) {
   if (document.body.classList.contains("room-expanded")) toggleExpanded(false);
@@ -496,6 +611,17 @@ function navigate(next) {
   persist();
   window.scrollTo(0, 0);
 }
+function loadWholeHomeDemo() {
+  hasProject = true;
+  selection = null;
+  commit(createWholeHomeDemoState());
+  syncForm();
+  navigate("tour");
+  jumpTo("living-room");
+  changeView($("#view-3d").disabled ? "plan" : "3d");
+  toast("Whole-home demo loaded · Orbit or switch to Interior to walk between rooms");
+}
+$("#whole-home-btn").onclick = loadWholeHomeDemo;
 function beginSetup(fresh = false) {
   const previous = stage === "setup" ? state.screen || "design" : stage;
   markStage("setup");
@@ -505,7 +631,11 @@ function beginSetup(fresh = false) {
     isNew: fresh,
     onCancel: hasProject ? () => navigate(previous) : null,
     readPhoto,
-    onApply(next, { demo: sample = false } = {}) {
+    onApply(next, { demo: sample = false, wholeHome = false } = {}) {
+      if (wholeHome) {
+        loadWholeHomeDemo();
+        return;
+      }
       hasProject = true;
       commit({
         ...next,
@@ -523,11 +653,17 @@ function beginSetup(fresh = false) {
 function jumpTo(id) {
   if (view !== "interior") return;
   scene?.goToSpot?.(id);
-  $("#spot-label").textContent = {
-    entry: "Entrance",
-    center: "Room center",
-    window: "Window side",
-  }[id];
+  const house = activeHouse();
+  if (house) {
+    const room = house.rooms.find((r) => r.id === id) || house.rooms[0];
+    $("#spot-label").textContent = room?.name || "Living Room";
+  } else {
+    $("#spot-label").textContent = {
+      entry: "Entrance",
+      center: "Room center",
+      window: "Window side",
+    }[id];
+  }
   document
     .querySelectorAll("[data-spot]")
     .forEach((b) =>
@@ -537,6 +673,10 @@ function jumpTo(id) {
 let eyePose;
 function drawPose(pose) {
   eyePose = pose;
+  $("#scene").dataset.room = pose.roomId || "";
+  if (pose.roomName && view === "interior") {
+    $("#spot-label").textContent = pose.roomName;
+  }
   const arrow = $("#map-eye");
   if (arrow)
     arrow.setAttribute(
@@ -544,9 +684,94 @@ function drawPose(pose) {
       `translate(${pose.x} ${pose.z}) rotate(${(pose.yaw * 180) / Math.PI})`,
     );
 }
+function syncPinButtons(map, house) {
+  const desired = house
+    ? house.rooms.map((r, i) => ({
+        id: r.id,
+        label: String(i + 1),
+        title: r.name,
+        aria: `Jump to ${r.name}`,
+      }))
+    : [
+        { id: "entry", label: "1", title: "Entrance", aria: "View from entrance" },
+        { id: "center", label: "2", title: "Room center", aria: "View from room center" },
+        { id: "window", label: "3", title: "Window", aria: "View from window" },
+      ];
+  const currentIds = Array.from(map.querySelectorAll("button[data-spot]")).map(
+    (b) => b.dataset.spot,
+  );
+  if (currentIds.join(",") === desired.map((d) => d.id).join(",")) return;
+  map.querySelectorAll("button[data-spot]").forEach((b) => b.remove());
+  for (const pin of desired) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.spot = pin.id;
+    btn.title = pin.title;
+    btn.setAttribute("aria-label", pin.aria);
+    btn.textContent = pin.label;
+    map.append(btn);
+  }
+}
 function drawPlanPins() {
   if (stage !== "tour" || view !== "interior" || !scene?.getSpots) return;
   const map = $(".plan-pins");
+  const house = activeHouse();
+  syncPinButtons(map, house);
+  let svg = map.querySelector("svg");
+  if (!svg) {
+    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("aria-hidden", "true");
+    map.prepend(svg);
+  }
+  const pieces = state.items
+    .filter((i) => i.kind !== "rug")
+    .map(
+      (i) =>
+        `<rect transform="translate(${i.x} ${i.z}) rotate(${-i.rotation})" x="${-i.width / 2}" y="${-i.depth / 2}" width="${i.width}" height="${i.depth}" rx=".08" fill="${isObjectLocked(i) ? "#7d857b" : "#a99c83"}" opacity=".72"/>`,
+    )
+    .join("");
+
+  if (house) {
+    const { minX, minZ, width, depth } = house.bounds;
+    const pad = 0.45;
+    const vx = minX - pad;
+    const vz = minZ - pad;
+    const vw = width + pad * 2;
+    const vd = depth + pad * 2;
+    map.style.width = "108px";
+    map.style.height = "auto";
+    map.style.aspectRatio = vw + "/" + vd;
+    svg.setAttribute("viewBox", [vx, vz, vw, vd].join(" "));
+    const roomPolys = house.rooms
+      .map(
+        (r) =>
+          `<polygon points="${r.polygon.map(([x, z]) => `${x},${z}`).join(" ")}" fill="#ebe5d6" stroke="#6f7162" stroke-width=".11"/>`,
+      )
+      .join("");
+    const openings = house.walls
+      .flatMap((wall) =>
+        getWallOpeningsInHouse(house, wall).map((hole) => {
+          const x1 = wall.cx + hole.left * wall.ux;
+          const z1 = wall.cz + hole.left * wall.uz;
+          const x2 = wall.cx + hole.right * wall.ux;
+          const z2 = wall.cz + hole.right * wall.uz;
+          return `<line x1="${x1}" y1="${z1}" x2="${x2}" y2="${z2}" stroke="${hole.kind === "window" ? "#83acb5" : "#efeade"}" stroke-width=".22"/>`;
+        }),
+      )
+      .join("");
+    svg.innerHTML = `${roomPolys}${openings}${pieces}<path id="map-eye" d="M0,-.36 L.20,.14 L0,.05 L-.20,.14 Z" fill="#b94925" stroke="white" stroke-width=".045"/>`;
+    for (const [id, spot] of Object.entries(scene.getSpots())) {
+      const pin = map.querySelector(`[data-spot="${id}"]`);
+      if (!pin) continue;
+      pin.style.left = (100 * (spot.x - vx)) / vw + "%";
+      pin.style.top = (100 * (spot.z - vz)) / vd + "%";
+    }
+    if (eyePose) drawPose(eyePose);
+    return;
+  }
+
+  map.style.width = "";
+  map.style.height = "";
   const room = normalizeArchitecture(state.room || ROOM);
   const polygon = footprintCorners(room)
     .map(([x, z]) => x + "," + z)
@@ -562,19 +787,6 @@ function drawPlanPins() {
       }),
     )
     .join("");
-  const pieces = state.items
-    .filter((i) => i.kind !== "rug")
-    .map(
-      (i) =>
-        `<rect transform="translate(${i.x} ${i.z}) rotate(${-i.rotation})" x="${-i.width / 2}" y="${-i.depth / 2}" width="${i.width}" height="${i.depth}" rx=".08" fill="#a99c83" opacity=".64"/>`,
-    )
-    .join("");
-  let svg = map.querySelector("svg");
-  if (!svg) {
-    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("aria-hidden", "true");
-    map.prepend(svg);
-  }
   const w = room.width + 0.5,
     d = room.depth + 0.5;
   map.style.aspectRatio = w + "/" + d;
@@ -582,6 +794,7 @@ function drawPlanPins() {
   svg.innerHTML = `<polygon points="${polygon}" fill="#ebe5d6" stroke="#6f7162" stroke-width=".09"/>${holes}${pieces}<path id="map-eye" d="M0,-.32 L.18,.12 L0,.04 L-.18,.12 Z" fill="#b94925" stroke="white" stroke-width=".035"/>`;
   for (const [id, spot] of Object.entries(scene.getSpots())) {
     const pin = map.querySelector(`[data-spot="${id}"]`);
+    if (!pin) continue;
     pin.style.left = 50 + (100 * spot.x) / w + "%";
     pin.style.top = 50 + (100 * spot.z) / d + "%";
   }
@@ -599,22 +812,34 @@ function walk(direction) {
     toast("No more walking space in that direction.");
     return;
   }
-  $("#spot-label").textContent = "Walking";
+  if (!activeHouse()) {
+    $("#spot-label").textContent = "Walking";
+  }
   document
     .querySelectorAll("[data-spot]")
     .forEach((b) => b.setAttribute("aria-pressed", "false"));
 }
-document
-  .querySelectorAll("[data-spot]")
-  .forEach((b) => (b.onclick = () => jumpTo(b.dataset.spot)));
+$(".plan-pins").onclick = (e) => {
+  const b = e.target.closest("[data-spot]");
+  if (b) jumpTo(b.dataset.spot);
+};
 document
   .querySelectorAll("[data-walk]")
   .forEach((b) => (b.onclick = () => walk(b.dataset.walk)));
-$("#scene").addEventListener("keydown", (event) => {
+window.addEventListener("keydown", (event) => {
+  if (
+    dialog.open ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.altKey ||
+    event.target?.matches?.("input, textarea, select, [contenteditable]")
+  ) {
+    return;
+  }
   const direction = { w: "forward", s: "backward", a: "left", d: "right" }[
     event.key.toLowerCase()
   ];
-  if (stage === "tour" && view === "interior" && direction) {
+  if (!$("#studio").hidden && view === "interior" && direction) {
     event.preventDefault();
     walk(direction);
   }
@@ -634,7 +859,7 @@ function savePieces(items) {
     (state.savedProducts || []).map((row) => [row.id, row]),
   );
   for (const item of items)
-    if (!item.owned && item.productId)
+    if (!item.owned && !isObjectLocked(item) && item.productId)
       saved.set(item.id, { id: item.id, productId: item.productId });
   commit({ ...state, savedProducts: [...saved.values()] });
   toast(
@@ -644,7 +869,7 @@ function savePieces(items) {
   );
 }
 $("#save-room").onclick = () => {
-  savePieces(state.items.filter((i) => !i.owned));
+  savePieces(state.items.filter((i) => !i.owned && !isObjectLocked(i)));
   navigate("shop");
 };
 function renderShopping() {
@@ -683,6 +908,29 @@ $("#saved-products").onclick = (e) => {
   renderShopping();
 };
 function updatePiece(candidate) {
+  const current = state.items.find((i) => i.id === candidate.id);
+  if (isObjectLocked(current)) {
+    toast("Locked fixtures cannot be moved or modified.");
+    render();
+    return false;
+  }
+  const house = activeHouse();
+  if (house) {
+    if (!canPlaceInHouse(candidate, house, state.items)) {
+      toast("That position needs more space or clears a wall/doorway.");
+      render();
+      return false;
+    }
+    const nextCandidate = {
+      ...candidate,
+      roomId: getRoomAtPoint(house, candidate.x, candidate.z)?.id ?? candidate.roomId ?? null,
+    };
+    commit({
+      ...state,
+      items: state.items.map((i) => (i.id === nextCandidate.id ? nextCandidate : i)),
+    });
+    return true;
+  }
   const room = state.room || ROOM;
   if (!canPlaceItem(candidate, room, state.items)) {
     toast("That position needs more space. Try another spot.");
@@ -710,17 +958,27 @@ $("#edit-request").onsubmit = (e) => {
     desk: /desk/,
     bed: /bed/,
     bookcase: /bookcase|shelf/,
+    toilet: /toilet/,
+    sink: /sink|vanity/,
+    counter: /counter/,
+    refrigerator: /fridge|refrigerator/,
+    stove: /stove|range/,
+    ac: /\bac\b|air.?cond/,
   }).find(([, re]) => re.test(text))?.[0];
   const picked = state.items.find((i) => i.id === selection);
   const item =
     picked && (!kind || kind === picked.kind)
       ? picked
-      : state.items.find((i) => i.kind === kind);
+      : state.items.find((i) => i.kind === kind && !isObjectLocked(i)) ??
+        state.items.find((i) => i.kind === kind);
   const room = state.room || ROOM;
+  const house = activeHouse();
   let message;
   if (/^(remove|delete|rotate|turn|swap|replace)\b/.test(text)) {
     if (!item) message = "Select a piece or name an item in this room.";
-    else if (/^(remove|delete)/.test(text)) {
+    else if (isObjectLocked(item)) {
+      message = item.name + " is locked and cannot be modified.";
+    } else if (/^(remove|delete)/.test(text)) {
       commit({ ...state, items: state.items.filter((i) => i.id !== item.id) });
       message = item.name + " removed.";
     } else if (/^(rotate|turn)/.test(text)) {
@@ -747,18 +1005,22 @@ $("#edit-request").onsubmit = (e) => {
             a.price - b.price,
       );
       const replacement = alternatives
-        .map((p) =>
-          fitItem(
-            createItem(p, {
-              id: crypto.randomUUID(),
-              x: item.x,
-              z: item.z,
-              rotation: item.rotation,
-            }),
-            room,
-            remaining,
-          ),
-        )
+        .map((p) => {
+          const base = createItem(p, {
+            id: crypto.randomUUID(),
+            x: item.x,
+            z: item.z,
+            rotation: item.rotation,
+          });
+          return house
+            ? fitItemInHouse(
+                { ...base, locked: false, type: "shopify" },
+                house,
+                remaining,
+                item.roomId || "living-room",
+              )
+            : fitItem(base, room, remaining);
+        })
         .find(Boolean);
       if (replacement) {
         selection = replacement.id;
@@ -779,9 +1041,17 @@ $("#edit-request").onsubmit = (e) => {
           a.price - b.price,
       );
     const added = candidates
-      .map((p) =>
-        fitItem(createItem(p, { id: crypto.randomUUID() }), room, state.items),
-      )
+      .map((p) => {
+        const base = createItem(p, { id: crypto.randomUUID() });
+        return house
+          ? fitItemInHouse(
+              { ...base, locked: false, type: "shopify" },
+              house,
+              state.items,
+              eyePose?.roomId || "living-room",
+            )
+          : fitItem(base, room, state.items);
+      })
       .find(Boolean);
     if (added) {
       selection = added.id;
@@ -793,13 +1063,17 @@ $("#edit-request").onsubmit = (e) => {
       text,
     )
   ) {
-    commit(autoStyle({ ...state, brief: text }));
+    commit(styleActiveState({ ...state, brief: text }));
     syncForm();
     message = state.notes;
   } else
     message =
       "Try “add a lamp”, “remove the rug”, “rotate this”, or “soft modern under $800”.";
   result.textContent = message;
+};
+window.__stillroom = {
+  getState: () => state,
+  getScene: () => scene,
 };
 syncForm();
 if (

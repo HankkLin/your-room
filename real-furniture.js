@@ -111,6 +111,7 @@ export function createFurnitureAssets(onReady) {
       const group = new THREE.Group();
       group.add(fit);
       group.userData.itemId = item.id;
+      group.userData.locked = Boolean(item.locked || item.type === 'fixed');
       group.userData.dimensions = { w, d, h };
       return group;
     },

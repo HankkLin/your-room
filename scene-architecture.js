@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { box, mesh } from './scene-furniture.js';
+import { getWallOpeningsInHouse } from './house-model.js';
 
 import { footprintCorners, roomWalls, wallOpenings } from './room-layout.js';
 export { constrainToRoom, defaultRoom, footprintCorners, isInsideRoom, normalizeArchitecture, openingConflict, roomOpeningPose, roomWalls, wallOpenings } from './room-layout.js';
@@ -224,11 +225,161 @@ function buildWall(shell, side, room, materials, mats) {
   return { tall, low, far: side.far };
 }
 
+function polygonShape(polygon) {
+  const shape = new THREE.Shape();
+  shape.moveTo(polygon[0][0], -polygon[0][1]);
+  for (const [px, pz] of polygon.slice(1)) shape.lineTo(px, -pz);
+  shape.closePath();
+  return shape;
+}
+
+function roomSurface(root, shape, bounds, material) {
+  const geometry = new THREE.ShapeGeometry(shape);
+  const vertices = geometry.getAttribute('position');
+  const uv = geometry.getAttribute('uv');
+  const w = Math.max(1, bounds.width);
+  const d = Math.max(1, bounds.depth);
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(
+      i,
+      (vertices.getX(i) - bounds.minX) / w,
+      (vertices.getY(i) + bounds.maxZ) / d,
+    );
+  }
+  const floor = mesh(root, geometry, material);
+  floor.rotation.x = -Math.PI / 2;
+  floor.castShadow = false;
+}
+
+function buildHouseWallSegment(parent, material, left, right, bottom, top, thickness, zCenter) {
+  if (right - left < 0.005 || top - bottom < 0.005) return;
+  box(parent, material, right - left, top - bottom, thickness, (left + right) / 2, (top + bottom) / 2, zCenter).castShadow = false;
+}
+
+function buildHouseWindow(root, hole, zCenter, thickness, materials) {
+  const w = hole.right - hole.left;
+  const h = hole.top - hole.bottom;
+  const x = (hole.right + hole.left) / 2;
+  const y = (hole.top + hole.bottom) / 2;
+  const trim = materials.trim;
+  const glass = mesh(root, new THREE.PlaneGeometry(w - 0.04, h - 0.04), materials.houseGlass, x, y, zCenter);
+  glass.castShadow = false;
+  glass.receiveShadow = false;
+
+  const frameDepth = thickness + 0.036;
+  for (const side of [-1, 1]) {
+    box(root, trim, 0.048, h + 0.04, frameDepth, x + side * (w - 0.03) / 2, y, zCenter).castShadow = false;
+    box(root, trim, w + 0.02, 0.048, frameDepth, x, y + side * (h - 0.03) / 2, zCenter).castShadow = false;
+  }
+  box(root, trim, 0.028, h - 0.04, frameDepth * 0.65, x, y, zCenter).castShadow = false;
+  box(root, trim, w - 0.04, 0.026, frameDepth * 0.65, x, y + h * 0.08, zCenter).castShadow = false;
+  box(root, trim, w + 0.1, 0.042, frameDepth + 0.04, x, hole.bottom - 0.02, zCenter, 0.006).castShadow = false;
+}
+
+function buildHouseDoor(root, hole, zCenter, thickness, materials, mats) {
+  const width = hole.right - hole.left;
+  const height = hole.top;
+  const x = (hole.left + hole.right) / 2;
+  const trim = materials.trim;
+  const frameDepth = thickness + 0.034;
+
+  for (const edge of [hole.left + 0.024, hole.right - 0.024]) {
+    box(root, trim, 0.048, height, frameDepth, edge, height / 2, zCenter).castShadow = false;
+  }
+  box(root, trim, width + 0.04, 0.052, frameDepth, x, height - 0.015, zCenter).castShadow = false;
+  box(root, materials.threshold, width - 0.04, 0.012, thickness + 0.02, x, 0.006, zCenter).castShadow = false;
+
+  if (hole.exterior) {
+    const leafW = width - 0.08;
+    const leafH = height - 0.05;
+    box(root, materials.door, leafW, leafH, 0.044, x, leafH / 2 + 0.012, zCenter, 0.006).castShadow = false;
+    box(root, mats.brass, 0.09, 0.02, 0.075, x + leafW * 0.34, 0.96, zCenter, 0.005).castShadow = false;
+  }
+}
+
+function addHousePlanOpening(parent, hole, zCenter, thickness, materials) {
+  const width = hole.right - hole.left;
+  const x = (hole.left + hole.right) / 2;
+  if (hole.kind === 'window') {
+    box(parent, materials.planGlass, width, 0.05, thickness * 0.72, x, 0.045, zCenter).castShadow = false;
+    return;
+  }
+  box(parent, materials.threshold, width, 0.022, thickness * 0.85, x, 0.014, zCenter).castShadow = false;
+  const swing = width * 0.84;
+  const arc = new THREE.EllipseCurve(hole.left + 0.04, zCenter, swing, swing, 0, Math.PI / 2);
+  const points = arc.getPoints(20).map(({ x: ax, y: az }) => new THREE.Vector3(ax, 0.024, az));
+  parent.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), materials.planLine));
+}
+
+function buildHouseWall(shell, wall, house, materials, mats) {
+  const anchor = new THREE.Group();
+  anchor.position.set(wall.cx, 0, wall.cz);
+  anchor.rotation.y = wall.angle;
+  shell.add(anchor);
+
+  const tall = new THREE.Group();
+  const low = new THREE.Group();
+  anchor.add(tall, low);
+
+  const thickness = wall.thickness || wallThickness;
+  const zCenter = wall.exterior ? -thickness / 2 : 0;
+  const wallMat = wall.exterior ? materials.back : materials.side;
+  const lowHeight = wall.exterior ? 0.14 : 0.11;
+  const edge = wall.length / 2;
+  const holes = getWallOpeningsInHouse(house, wall);
+
+  let cursor = -edge;
+  for (const hole of holes) {
+    if (hole.left < cursor) continue;
+    buildHouseWallSegment(tall, wallMat, cursor, hole.left, 0, wall.height, thickness, zCenter);
+    buildHouseWallSegment(low, materials.boundary, cursor, hole.left, 0, lowHeight, thickness, zCenter);
+    if (hole.left - cursor > 0.02) {
+      box(tall, materials.trim, hole.left - cursor, 0.095, 0.024, (cursor + hole.left) / 2, 0.048, zCenter + thickness / 2 + 0.012).castShadow = false;
+      if (!wall.exterior) {
+        box(tall, materials.trim, hole.left - cursor, 0.095, 0.024, (cursor + hole.left) / 2, 0.048, zCenter - thickness / 2 - 0.012).castShadow = false;
+      }
+    }
+    buildHouseWallSegment(tall, wallMat, hole.left, hole.right, hole.top, wall.height, thickness, zCenter);
+    buildHouseWallSegment(tall, wallMat, hole.left, hole.right, 0, hole.bottom, thickness, zCenter);
+    if (hole.kind === 'window') {
+      buildHouseWindow(tall, hole, zCenter, thickness, materials);
+    } else {
+      buildHouseDoor(tall, hole, zCenter, thickness, materials, mats);
+    }
+    addHousePlanOpening(low, hole, zCenter, thickness, materials);
+    cursor = hole.right;
+  }
+
+  buildHouseWallSegment(tall, wallMat, cursor, edge, 0, wall.height, thickness, zCenter);
+  buildHouseWallSegment(low, materials.boundary, cursor, edge, 0, lowHeight, thickness, zCenter);
+  if (edge - cursor > 0.02) {
+    box(tall, materials.trim, edge - cursor, 0.095, 0.024, (cursor + edge) / 2, 0.048, zCenter + thickness / 2 + 0.012).castShadow = false;
+    if (!wall.exterior) {
+      box(tall, materials.trim, edge - cursor, 0.095, 0.024, (cursor + edge) / 2, 0.048, zCenter - thickness / 2 - 0.012).castShadow = false;
+    }
+  }
+  box(tall, materials.trim, wall.length, 0.04, thickness + 0.02, 0, wall.height - 0.02, zCenter).castShadow = false;
+
+  return {
+    tall,
+    low,
+    exterior: wall.exterior,
+    cx: wall.cx,
+    cz: wall.cz,
+    outNx: -wall.nx,
+    outNz: -wall.nz,
+    far: false,
+  };
+}
+
 export function createArchitecture(scene, mats, invalidate) {
   const stone = stoneTexture();
   const art = [0, 1].map((index) => new THREE.MeshBasicMaterial({ map: artTexture(index), color: '#fffcf2' }));
   const materials = {
     floor: finish('#fff', { map: mats.floorMap, roughness: 0.77 }),
+    floorOak: finish('#fff', { map: mats.floorMap, roughness: 0.77 }),
+    floorWalnut: finish('#8c5d44', { map: mats.floorMap, roughness: 0.74 }),
+    floorStone: finish('#ffffff', { map: stone, roughness: 0.55 }),
     base: finish('#b39a80'),
     back: finish('#eee0cb'),
     side: finish('#e8d6bf'),
@@ -236,6 +387,14 @@ export function createArchitecture(scene, mats, invalidate) {
     boundary: finish('#d4c1a8'),
     ceiling: finish('#f2eae0'),
     glass: new THREE.MeshBasicMaterial({ color: '#d4dfdf', toneMapped: false }),
+    houseGlass: new THREE.MeshStandardMaterial({
+      color: '#bfe0ea',
+      transparent: true,
+      opacity: 0.42,
+      roughness: 0.15,
+      metalness: 0.1,
+      side: THREE.DoubleSide,
+    }),
     linen: finish('#e5d6c2', { side: THREE.DoubleSide, bumpMap: mats.fabricBump, bumpScale: 0.018 }),
     door: finish('#d8c4a9', { map: mats.woodMap, roughness: 0.72 }),
     doorPanel: finish('#e5d4bd', { map: mats.woodMap, roughness: 0.75 }),
@@ -246,8 +405,10 @@ export function createArchitecture(scene, mats, invalidate) {
     art,
   };
   let shell;
-  let roof;
+  let roofs = [];
   let walls = [];
+  let wholeHomeMode = false;
+  let lastCameraPos = new THREE.Vector3(10, 8, 12);
   let currentView = '3d';
   let signature;
   let disposed = false;
@@ -270,22 +431,60 @@ export function createArchitecture(scene, mats, invalidate) {
     if (!shell) return;
     shell.removeFromParent();
     shell.traverse((child) => child.geometry?.dispose());
+    roofs = [];
+    walls = [];
+  }
+
+  function applyVisibility() {
+    materials.boundary.color.set(currentView === 'plan' ? '#958674' : '#d4c1a8');
+    for (const roofMesh of roofs) roofMesh.visible = currentView === 'interior';
+
+    if (!wholeHomeMode) {
+      for (const wall of walls) {
+        wall.tall.visible = currentView === 'interior' || (currentView === '3d' && wall.far);
+        wall.low.visible = !wall.tall.visible;
+      }
+      return;
+    }
+
+    for (const wall of walls) {
+      if (currentView === 'plan') {
+        wall.tall.visible = false;
+        wall.low.visible = true;
+      } else if (currentView === 'interior') {
+        wall.tall.visible = true;
+        wall.low.visible = false;
+      } else if (!wall.exterior) {
+        wall.tall.visible = true;
+        wall.low.visible = false;
+      } else {
+        const dx = lastCameraPos.x - wall.cx;
+        const dz = lastCameraPos.z - wall.cz;
+        const horiz = Math.hypot(dx, dz) || 1;
+        const facingCamera = (dx * wall.outNx + dz * wall.outNz) / horiz > 0.22;
+        wall.tall.visible = !facingCamera;
+        wall.low.visible = facingCamera;
+      }
+    }
   }
 
   function setView(view) {
     currentView = view;
-    materials.boundary.color.set(view === 'plan' ? '#958674' : '#d4c1a8');
-    if (roof) roof.visible = view === 'interior';
-    for (const wall of walls) {
-      wall.tall.visible = view === 'interior' || (view === '3d' && wall.far);
-      wall.low.visible = !wall.tall.visible;
-    }
+    applyVisibility();
+  }
+
+  function syncCamera(cameraPos) {
+    if (!cameraPos) return;
+    lastCameraPos.copy(cameraPos);
+    if (wholeHomeMode && currentView === '3d') applyVisibility();
   }
 
   return {
     setView,
+    syncCamera,
     update(room, palette) {
-      const nextSignature = JSON.stringify([room.width, room.depth, room.height, room.shape, room.openings]);
+      wholeHomeMode = false;
+      const nextSignature = JSON.stringify(['single', room.width, room.depth, room.height, room.shape, room.openings]);
       if (signature !== nextSignature) {
         signature = nextSignature;
         clearShell();
@@ -294,9 +493,9 @@ export function createArchitecture(scene, mats, invalidate) {
         const shape = footprintShape(room);
         slab(shell, shape, -0.13, 0.125, materials.base);
         surface(shell, shape, room, materials.floor);
-        roof = slab(shell, shape, room.height, 0.06, materials.ceiling);
+        roofs = [slab(shell, shape, room.height, 0.06, materials.ceiling)];
         walls = roomWalls(room).map((side) => buildWall(shell, side, room, materials, mats));
-        setView(currentView);
+        applyVisibility();
       }
       const isStone = room.floorFinish === 'stone';
       const nextMap = isStone ? stone : mats.floorMap;
@@ -309,6 +508,44 @@ export function createArchitecture(scene, mats, invalidate) {
       materials.back.color.set(room.wallColor ?? palette.wall);
       materials.side.color.set(room.wallColor ?? palette.side);
       materials.trim.color.set(palette.trim);
+    },
+    updateHouse(house, palette, cameraPos) {
+      wholeHomeMode = true;
+      if (cameraPos) lastCameraPos.copy(cameraPos);
+      const nextSignature = JSON.stringify([
+        'house',
+        house.id,
+        house.ceilingHeight,
+        house.rooms.map((r) => [r.id, r.polygon, r.floorFinish]),
+        house.walls.map((w) => [w.id, w.x1, w.z1, w.x2, w.z2, w.exterior]),
+        house.doors,
+        house.windows,
+      ]);
+      if (signature !== nextSignature) {
+        signature = nextSignature;
+        clearShell();
+        shell = new THREE.Group();
+        scene.add(shell);
+        roofs = [];
+        for (const room of house.rooms) {
+          const shape = polygonShape(room.polygon);
+          slab(shell, shape, -0.13, 0.125, materials.base);
+          const floorMat =
+            room.floorFinish === 'stone'
+              ? materials.floorStone
+              : room.floorFinish === 'walnut'
+                ? materials.floorWalnut
+                : materials.floorOak;
+          roomSurface(shell, shape, room.bounds, floorMat);
+          roofs.push(slab(shell, shape, house.ceilingHeight, 0.06, materials.ceiling));
+        }
+        walls = house.walls.map((wall) => buildHouseWall(shell, wall, house, materials, mats));
+      }
+      materials.floorOak.color.set(palette.floor);
+      materials.back.color.set(palette.wall);
+      materials.side.color.set(palette.side);
+      materials.trim.color.set(palette.trim);
+      applyVisibility();
     },
     dispose() {
       disposed = true;

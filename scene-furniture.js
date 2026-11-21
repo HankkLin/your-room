@@ -332,6 +332,97 @@ function bed(group, w, d, h, color, mats) {
   }
 }
 
+function toiletFixture(group, w, d, h, color, mats) {
+  const porcelain = new THREE.MeshStandardMaterial({ color: color || '#f3f0ea', roughness: 0.28 });
+  const tankDepth = d * 0.32;
+  const bowlDepth = d * 0.68;
+  const bowlHeight = h * 0.52;
+  box(group, porcelain, w * 0.72, bowlHeight * 0.78, bowlDepth * 0.74, 0, bowlHeight * 0.39, d * 0.1, 0.06);
+  const bowl = tube(group, porcelain, 0.5, 0.42, bowlHeight * 0.46, 0, bowlHeight * 0.77, d * 0.14, 28);
+  bowl.scale.set(w * 0.88, 1, bowlDepth * 0.92);
+  const lid = tube(group, porcelain, 0.5, 0.5, 0.032, 0, bowlHeight + 0.018, d * 0.14, 28);
+  lid.scale.set(w * 0.9, 1, bowlDepth * 0.94);
+  box(group, porcelain, w * 0.92, h * 0.56, tankDepth, 0, h * 0.7, -d / 2 + tankDepth / 2, 0.035);
+  box(group, porcelain, w * 0.96, 0.036, tankDepth * 1.06, 0, h - 0.018, -d / 2 + tankDepth / 2, 0.012);
+  tube(group, mats.brass, 0.026, 0.026, 0.018, 0, h + 0.008, -d / 2 + tankDepth / 2, 16);
+}
+
+function sinkFixture(group, w, d, h, color, mats) {
+  const cabinetry = new THREE.MeshStandardMaterial({ color: color || '#cbb89d', map: mats.woodMap, roughness: 0.68 });
+  const counterMat = solid('#ede8df', 0.38);
+  const basinMat = solid('#fbfaf7', 0.24);
+  const counterThick = 0.045;
+  const toeHeight = 0.09;
+  const bodyH = h - counterThick - toeHeight;
+  box(group, mats.black, w * 0.92, toeHeight, d * 0.84, 0, toeHeight / 2, -d * 0.04);
+  box(group, cabinetry, w * 0.98, bodyH, d * 0.94, 0, toeHeight + bodyH / 2, -d * 0.02, 0.018);
+  box(group, counterMat, w, counterThick, d, 0, h - counterThick / 2, 0, 0.012);
+  box(group, counterMat, w, 0.075, 0.028, 0, h + 0.035, -d / 2 + 0.014, 0.006);
+  box(group, basinMat, Math.min(w * 0.58, 0.54), 0.024, d * 0.56, 0, h + 0.006, d * 0.05, 0.01);
+  tube(group, mats.black, 0.014, 0.016, 0.19, 0, h + 0.095, -d * 0.24, 14);
+  box(group, mats.black, 0.022, 0.02, 0.13, 0, h + 0.18, -d * 0.18, 0.008);
+  const panels = w > 0.85 ? 2 : 1;
+  const pw = (w * 0.92) / panels;
+  for (let i = 0; i < panels; i++) {
+    const px = (i - (panels - 1) / 2) * pw;
+    box(group, mats.brass, Math.min(0.14, pw * 0.45), 0.016, 0.024, px, h - 0.16, d * 0.47, 0.006);
+  }
+}
+
+function counterFixture(group, w, d, h, color, mats) {
+  const cabinetry = new THREE.MeshStandardMaterial({ color: color || '#c5ab8b', map: mats.woodMap, roughness: 0.66 });
+  const stoneTop = solid('#e8e2d7', 0.4);
+  const counterThick = 0.048;
+  const toeHeight = 0.095;
+  const bodyH = h - counterThick - toeHeight;
+  box(group, mats.black, w * 0.96, toeHeight, d * 0.85, 0, toeHeight / 2, -d * 0.04);
+  box(group, cabinetry, w * 0.99, bodyH, d * 0.95, 0, toeHeight + bodyH / 2, -d * 0.02, 0.016);
+  box(group, stoneTop, w, counterThick, d, 0, h - counterThick / 2, 0, 0.012);
+  box(group, stoneTop, w, 0.085, 0.026, 0, h + 0.04, -d / 2 + 0.013, 0.006);
+  const bays = Math.max(2, Math.round(w / 0.58));
+  const bayW = (w - 0.04) / bays;
+  for (let i = 0; i < bays; i++) {
+    const px = (i - (bays - 1) / 2) * bayW;
+    box(group, mats.brass, Math.min(0.15, bayW * 0.42), 0.015, 0.024, px, h - 0.16, d * 0.47, 0.005);
+  }
+}
+
+function refrigeratorFixture(group, w, d, h, color, mats) {
+  const steel = new THREE.MeshStandardMaterial({ color: color || '#c9cdd1', metalness: 0.42, roughness: 0.36 });
+  const seam = mats.black;
+  box(group, steel, w, h * 0.98, d * 0.92, 0, h * 0.49, -d * 0.04, 0.024);
+  const upperH = h * 0.62;
+  const lowerH = h * 0.32;
+  for (const side of [-1, 1]) {
+    box(group, steel, w * 0.485, upperH, 0.048, side * w * 0.248, h - upperH / 2 - 0.02, d * 0.45, 0.014);
+    box(group, seam, 0.016, upperH * 0.55, 0.032, side * w * 0.06, h - upperH / 2 - 0.02, d * 0.49, 0.006);
+  }
+  box(group, steel, w * 0.98, lowerH, 0.048, 0, lowerH / 2 + 0.02, d * 0.45, 0.014);
+  box(group, seam, w * 0.68, 0.018, 0.032, 0, lowerH - 0.06, d * 0.49, 0.006);
+}
+
+function stoveFixture(group, w, d, h, color, mats) {
+  const body = new THREE.MeshStandardMaterial({ color: color || '#55585c', metalness: 0.38, roughness: 0.42 });
+  const glass = new THREE.MeshStandardMaterial({ color: '#222426', metalness: 0.5, roughness: 0.22 });
+  box(group, body, w, h, d * 0.95, 0, h / 2, -d * 0.025, 0.018);
+  box(group, glass, w * 0.94, 0.018, d * 0.86, 0, h + 0.009, 0.01, 0.006);
+  box(group, body, w, 0.11, 0.055, 0, h + 0.055, -d / 2 + 0.028, 0.01);
+  box(group, glass, w * 0.78, h * 0.52, 0.026, 0, h * 0.42, d * 0.46, 0.01);
+  box(group, mats.brass, w * 0.72, 0.02, 0.038, 0, h * 0.74, d * 0.49, 0.008);
+  for (const x of [-w * 0.24, w * 0.24]) {
+    for (const z of [-d * 0.18, d * 0.18]) {
+      tube(group, mats.black, 0.095, 0.095, 0.008, x, h + 0.02, z, 24);
+    }
+  }
+}
+
+function acFixture(group, w, d, h, color, mats) {
+  const shell = solid(color || '#f4f3ee', 0.35);
+  box(group, shell, w, h, d, 0, h / 2, 0, 0.038);
+  box(group, mats.black, w * 0.86, h * 0.14, 0.018, 0, h * 0.22, d / 2 + 0.004, 0.006);
+  box(group, new THREE.MeshBasicMaterial({ color: '#78b88c' }), 0.028, 0.01, 0.01, w * 0.36, h * 0.62, d / 2 + 0.006);
+}
+
 export function createFurniture(item, mats) {
   const group = new THREE.Group();
   const w = Math.max(0.07, Number(item.width) || 0.6);
@@ -343,7 +434,13 @@ export function createFurniture(item, mats) {
   };
   const color = item.color || defaults[kind] || '#b2916e';
 
-  if (/sofa|couch|loveseat|sectional/.test(kind)) sofa(group, w, d, h, color, mats, w > 1.95 ? 3 : 2);
+  if (/toilet/.test(kind)) toiletFixture(group, w, d, h, color, mats);
+  else if (/sink|vanity/.test(kind)) sinkFixture(group, w, d, h, color, mats);
+  else if (/counter/.test(kind)) counterFixture(group, w, d, h, color, mats);
+  else if (/refrigerator|fridge/.test(kind)) refrigeratorFixture(group, w, d, h, color, mats);
+  else if (/stove|range|oven/.test(kind)) stoveFixture(group, w, d, h, color, mats);
+  else if (/^ac\b|air.?cond/.test(kind)) acFixture(group, w, d, h, color, mats);
+  else if (/sofa|couch|loveseat|sectional/.test(kind)) sofa(group, w, d, h, color, mats, w > 1.95 ? 3 : 2);
   else if (/chair|armchair/.test(kind)) loungeChair(group, w, d, h, color, mats);
   else if (/table|desk/.test(kind)) table(group, w, d, h, color, mats, kind);
   else if (/rug|carpet/.test(kind)) rug(group, w, d, h, color, mats);
@@ -356,6 +453,7 @@ export function createFurniture(item, mats) {
   } else cabinet(group, w, d, h, color, mats, kind);
 
   group.userData.itemId = item.id;
+  group.userData.locked = Boolean(item.locked || item.type === 'fixed');
   group.userData.dimensions = { w, d, h };
   return group;
 }

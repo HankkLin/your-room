@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { box, createFurniture, createRoomMaterials } from './scene-furniture.js';
 import { createFurnitureAssets } from './real-furniture.js';
 import { constrainToRoom, createArchitecture, defaultRoom, isInsideRoom, normalizeArchitecture, roomOpeningPose } from './scene-architecture.js';
+import { constrainToHouse, getRoomAtPoint, isObjectLocked, isWalkablePoint, normalizeHouse } from './house-model.js';
 
 const initialCamera = new THREE.Vector3(7.5, 5.1, 8.65);
 const initialTarget = new THREE.Vector3(0, 0.92, -0.1);
@@ -24,7 +25,7 @@ function addLighting(scene) {
   sun.target.position.set(0.9, 0, 0.96);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1536, 1536);
-  Object.assign(sun.shadow.camera, { left: -4.2, right: 4.2, top: 4.55, bottom: -4.12, near: 1, far: 15 });
+  Object.assign(sun.shadow.camera, { left: -4.2, right: 4.2, top: 4.55, bottom: -4.12, near: 1, far: 28 });
   sun.shadow.bias = -0.00015;
   sun.shadow.normalBias = 0.023;
   sun.shadow.radius = 4;
@@ -36,7 +37,7 @@ function addLighting(scene) {
   return sun;
 }
 
-const objectSignature = (item) => JSON.stringify([item.kind, item.name, item.color, item.width, item.depth, item.height]);
+const objectSignature = (item) => JSON.stringify([item.kind, item.name, item.color, item.width, item.depth, item.height, Boolean(item.locked), Number(item.elevation) || 0]);
 
 function selectionOutline() {
   const outline = new THREE.Group();
@@ -124,11 +125,11 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   const outline = selectionOutline();
   scene.add(outline);
 
-  const oblique = new THREE.PerspectiveCamera(31, 1, 0.1, 50);
+  const oblique = new THREE.PerspectiveCamera(31, 1, 0.1, 90);
   oblique.position.copy(initialCamera);
-  const eye = new THREE.PerspectiveCamera(49, 1, 0.039, 30);
+  const eye = new THREE.PerspectiveCamera(49, 1, 0.039, 45);
   eye.rotation.order = 'YXZ';
-  const plan = new THREE.OrthographicCamera(-3.25, 3.25, 2.55, -2.55, 0.01, 30);
+  const plan = new THREE.OrthographicCamera(-3.25, 3.25, 2.55, -2.55, 0.01, 40);
   plan.up.set(0, 0, -1);
   plan.position.set(0, 12, 0);
   plan.lookAt(0, 0, 0);
@@ -153,6 +154,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   const hit = new THREE.Vector3();
   let currentView = '3d';
   let roomLayout = normalizeArchitecture();
+  let houseLayout = null;
   let roomGeometry;
   let itemsInScene = [];
   let currentStyle;
@@ -167,13 +169,14 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     for (const record of objects.values()) {
       if (record.kind === kind) record.needsAsset = true;
     }
-    api.update(itemsInScene, selected, currentStyle, roomLayout);
+    api.update(itemsInScene, selected, currentStyle, roomLayout, houseLayout);
   });
 
   function render() {
     pendingFrame = 0;
     if (disposed) return;
     if (controls.enabled) controls.update();
+    architecture.syncCamera(oblique.position);
     renderer.render(scene, camera());
   }
 
@@ -193,7 +196,13 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     eye.aspect = aspect;
     eye.fov = aspect < 1.2 ? 58 : 49;
     eye.updateProjectionMatrix();
-    const halfHeight = Math.max(roomLayout.depth / 2 + 0.38, (roomLayout.width / 2 + 0.42) / aspect);
+    const spanW = houseLayout ? houseLayout.bounds.width : roomLayout.width;
+    const spanD = houseLayout ? houseLayout.bounds.depth : roomLayout.depth;
+    const centerX = houseLayout ? houseLayout.bounds.centerX : 0;
+    const centerZ = houseLayout ? houseLayout.bounds.centerZ : 0;
+    const halfHeight = Math.max(spanD / 2 + 0.38, (spanW / 2 + 0.42) / aspect);
+    plan.position.set(centerX, 14, centerZ);
+    plan.lookAt(centerX, 0, centerZ);
     plan.top = halfHeight;
     plan.bottom = -halfHeight;
     plan.left = -halfHeight * aspect;
@@ -203,29 +212,49 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   }
 
   function resetCameras() {
-    const scaleX = roomLayout.width / defaultRoom.width;
-    const scaleZ = roomLayout.depth / defaultRoom.depth;
-    const scale = Math.max(0.8, scaleX, scaleZ);
-    const proportionalSize = new THREE.Vector3(scaleX, 1, scaleZ);
     plan.zoom = 1;
     plan.updateProjectionMatrix();
-    oblique.position.copy(initialCamera).multiplyScalar(scale);
-    controls.target.copy(initialTarget).multiply(proportionalSize);
-    controls.minDistance = 5.3 * scale;
-    controls.maxDistance = 18 * scale;
-    controls.update();
+    if (houseLayout) {
+      const { width, depth, centerX, centerZ } = houseLayout.bounds;
+      const scale = Math.max(1, width / defaultRoom.width, depth / defaultRoom.depth);
+      controls.enablePan = true;
+      controls.minAzimuthAngle = -Infinity;
+      controls.maxAzimuthAngle = Infinity;
+      controls.minDistance = 5.5;
+      controls.maxDistance = Math.max(26, 16 * scale);
+      controls.target.set(centerX, 0.85, centerZ);
+      oblique.position.set(centerX + 6.9 * scale, 5.2 * scale, centerZ + 7.9 * scale);
+      controls.update();
+    } else {
+      const scaleX = roomLayout.width / defaultRoom.width;
+      const scaleZ = roomLayout.depth / defaultRoom.depth;
+      const scale = Math.max(0.8, scaleX, scaleZ);
+      const proportionalSize = new THREE.Vector3(scaleX, 1, scaleZ);
+      controls.enablePan = false;
+      controls.minAzimuthAngle = 0.025;
+      controls.maxAzimuthAngle = Math.PI / 2 - 0.065;
+      oblique.position.copy(initialCamera).multiplyScalar(scale);
+      controls.target.copy(initialTarget).multiply(proportionalSize);
+      controls.minDistance = 5.3 * scale;
+      controls.maxDistance = 18 * scale;
+      controls.update();
+    }
     eye.zoom = 1;
     eye.updateProjectionMatrix();
     goToSpot('entry');
   }
 
-  function sizeRoom(room) {
+  function sizeRoom(room, house = null) {
     roomLayout = normalizeArchitecture(room);
-    const { width, depth, height, shape, openings } = roomLayout;
-    const geometry = JSON.stringify([width, depth, height, shape, openings]);
+    houseLayout = house ? (house.bounds ? house : normalizeHouse(house)) : null;
+    const geometry = houseLayout
+      ? JSON.stringify(['house', houseLayout.id, houseLayout.bounds, houseLayout.ceilingHeight, houseLayout.rooms.length])
+      : JSON.stringify(['single', roomLayout.width, roomLayout.depth, roomLayout.height, roomLayout.shape, roomLayout.openings]);
     if (geometry === roomGeometry) return;
     roomGeometry = geometry;
-    const radius = Math.max(4.2, Math.hypot(width, depth) * 0.62);
+    const spanW = houseLayout ? houseLayout.bounds.width : roomLayout.width;
+    const spanD = houseLayout ? houseLayout.bounds.depth : roomLayout.depth;
+    const radius = Math.max(4.2, Math.hypot(spanW, spanD) * 0.65);
     Object.assign(sun.shadow.camera, { left: -radius, right: radius, top: radius, bottom: -radius });
     sun.shadow.camera.updateProjectionMatrix();
     resetCameras();
@@ -233,6 +262,9 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   }
 
   function canStand(x, z) {
+    if (houseLayout) {
+      return isWalkablePoint(houseLayout, x, z, { items: itemsInScene, clearance: eyeClearance });
+    }
     if (!isInsideRoom(roomLayout, x, z, eyeClearance)) return false;
     return !itemsInScene.some((item) => {
       if (item.height <= 0.13) return false;
@@ -246,7 +278,9 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   }
 
   function nearestSpot(x, z) {
-    const point = constrainToRoom(roomLayout, x, z, eyeClearance, eyeClearance);
+    const point = houseLayout
+      ? constrainToHouse(houseLayout, x, z, eyeClearance, eyeClearance)
+      : constrainToRoom(roomLayout, x, z, eyeClearance, eyeClearance);
     if (canStand(...point)) return point;
     for (const radius of [0.28, 0.55, 0.83, 1.14, 1.58]) {
       for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 6) {
@@ -259,6 +293,21 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   }
 
   function resolveSpot(id) {
+    if (houseLayout) {
+      const targetRoom =
+        id === 'entry'
+          ? houseLayout.rooms[0]
+          : houseLayout.rooms.find((room) => room.id === id);
+      if (!targetRoom) return null;
+      const vp = targetRoom.viewpoint;
+      const rawX = vp?.x ?? targetRoom.bounds.centerX;
+      const rawZ = vp?.z ?? targetRoom.bounds.centerZ;
+      const targetX = vp?.targetX ?? houseLayout.bounds.centerX;
+      const targetZ = vp?.targetZ ?? houseLayout.bounds.centerZ;
+      const [safeX, safeZ] = nearestSpot(rawX, rawZ);
+      return { x: safeX, z: safeZ, targetX, targetZ, label: targetRoom.name };
+    }
+
     const { width, depth } = roomLayout;
     const window = roomOpeningPose(roomLayout, 'window');
     const door = roomOpeningPose(roomLayout, 'door');
@@ -287,19 +336,42 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     return { x: safeX, z: safeZ, targetX, targetZ };
   }
 
+  function currentPose() {
+    const activeRoom = houseLayout ? getRoomAtPoint(houseLayout, eye.position.x, eye.position.z) : null;
+    return {
+      x: eye.position.x,
+      z: eye.position.z,
+      yaw: -eye.rotation.y,
+      roomId: activeRoom?.id ?? null,
+      roomName: activeRoom?.name ?? null,
+    };
+  }
+
   function reportPose() {
-    onPose({ x: eye.position.x, z: eye.position.z, yaw: -eye.rotation.y });
+    onPose(currentPose());
   }
 
   function goToSpot(id) {
     const spot = resolveSpot(id);
     if (!spot) return false;
-    const { height } = roomLayout;
+    const height = houseLayout ? houseLayout.ceilingHeight : roomLayout.height;
     eye.position.set(spot.x, Math.min(1.59, height - 0.44), spot.z);
     eye.lookAt(spot.targetX, Math.min(1.08, height * 0.47), spot.targetZ);
     reportPose();
     invalidate();
     return true;
+  }
+
+  function stepAxis(fromX, fromZ, deltaX, deltaZ) {
+    for (const scale of [1, 0.5]) {
+      const sx = deltaX * scale;
+      const sz = deltaZ * scale;
+      if (Math.hypot(sx, sz) < 1e-4) continue;
+      if (canStand(fromX + sx * 0.5, fromZ + sz * 0.5) && canStand(fromX + sx, fromZ + sz)) {
+        return [fromX + sx, fromZ + sz];
+      }
+    }
+    return [fromX, fromZ];
   }
 
   function walk(forward, right) {
@@ -310,8 +382,10 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     const dx = stepX * Math.cos(heading) - stepZ * Math.sin(heading);
     const dz = -stepX * Math.sin(heading) - stepZ * Math.cos(heading);
     const { x, z } = eye.position;
-    if (canStand(x + dx, z)) eye.position.x += dx;
-    if (canStand(eye.position.x, z + dz)) eye.position.z += dz;
+    let [nx, nz] = stepAxis(x, z, dx, 0);
+    [nx, nz] = stepAxis(nx, nz, 0, dz);
+    eye.position.x = nx;
+    eye.position.z = nz;
     if (x === eye.position.x && z === eye.position.z) return false;
     reportPose();
     invalidate();
@@ -340,11 +414,14 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     if (!object && currentView !== 'interior') return;
     event.stopImmediatePropagation();
     canvas.setPointerCapture(event.pointerId);
-    canvas.style.cursor = 'grabbing';
     if (!object) {
+      canvas.style.cursor = 'grabbing';
       lookDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
       return;
     }
+    const itemRecord = itemsInScene.find((i) => i.id === object.userData.itemId);
+    const locked = Boolean(object.userData.locked || isObjectLocked(itemRecord));
+    canvas.style.cursor = locked ? 'pointer' : 'grabbing';
     const ground = ray.ray.intersectPlane(plane, hit);
     controls.enabled = false;
     drag = {
@@ -357,7 +434,8 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
       z: object.position.z,
       dx: ground ? object.position.x - hit.x : 0,
       dz: ground ? object.position.z - hit.z : 0,
-      canDrag: Boolean(ground),
+      canDrag: Boolean(ground) && !locked,
+      locked,
       moved: false,
     };
     selected = drag.id;
@@ -387,7 +465,9 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
       const angle = drag.object.rotation.y;
       const xExtent = (Math.abs(Math.cos(angle)) * w + Math.abs(Math.sin(angle)) * d) / 2;
       const zExtent = (Math.abs(Math.sin(angle)) * w + Math.abs(Math.cos(angle)) * d) / 2;
-      const [x, z] = constrainToRoom(roomLayout, hit.x + drag.dx, hit.z + drag.dz, xExtent + 0.035, zExtent + 0.035);
+      const [x, z] = houseLayout
+        ? constrainToHouse(houseLayout, hit.x + drag.dx, hit.z + drag.dz, xExtent + 0.035, zExtent + 0.035)
+        : constrainToRoom(roomLayout, hit.x + drag.dx, hit.z + drag.dz, xExtent + 0.035, zExtent + 0.035);
       drag.object.position.x = x;
       drag.object.position.z = z;
       drag.moved = true;
@@ -399,7 +479,14 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
 
     if (event.buttons === 0) {
       cast(event);
-      canvas.style.cursor = furnitureAtPointer() ? 'move' : currentView === 'plan' ? 'default' : 'grab';
+      const hovered = furnitureAtPointer();
+      canvas.style.cursor = hovered
+        ? hovered.userData.locked
+          ? 'pointer'
+          : 'move'
+        : currentView === 'plan'
+          ? 'default'
+          : 'grab';
     }
   }
 
@@ -417,7 +504,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     drag = null;
     controls.enabled = currentView === '3d';
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-    canvas.style.cursor = 'move';
+    canvas.style.cursor = current.locked ? 'pointer' : 'move';
     if (canceled) {
       current.object.position.x = current.x;
       current.object.position.z = current.z;
@@ -425,7 +512,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     } else if (current.moved) {
       onMove(current.id, current.object.position.x, current.object.position.z);
     }
-    if (objects.get(current.id)?.needsAsset) api.update(itemsInScene, selected, currentStyle, roomLayout);
+    if (objects.get(current.id)?.needsAsset) api.update(itemsInScene, selected, currentStyle, roomLayout, houseLayout);
     renderer.shadowMap.needsUpdate = true;
     invalidate();
   }
@@ -437,16 +524,19 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   canvas.addEventListener('pointerup', pointerUp, true);
   canvas.addEventListener('pointercancel', pointerCancel, true);
   canvas.addEventListener('lostpointercapture', pointerCancel);
-  controls.addEventListener('change', invalidate);
+  controls.addEventListener('change', () => {
+    architecture.syncCamera(oblique.position);
+    invalidate();
+  });
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
 
   const api = {
-    update(items, selectedId, style, room) {
+    update(items, selectedId, style, room, house = null) {
       itemsInScene = items;
       currentStyle = style;
-      sizeRoom(room);
+      sizeRoom(room, house);
       const ids = new Set(items.map((item) => item.id));
       for (const [id, record] of objects) {
         if (ids.has(id)) continue;
@@ -467,14 +557,16 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
           record = { object, signature, kind: item.kind };
           objects.set(item.id, record);
         }
-        if (drag?.id !== item.id) record.object.position.set(Number(item.x) || 0, 0, Number(item.z) || 0);
+        const y = Number(item.elevation ?? item.y) || 0;
+        if (drag?.id !== item.id) record.object.position.set(Number(item.x) || 0, y, Number(item.z) || 0);
         record.object.rotation.y = THREE.MathUtils.degToRad(Number(item.rotation) || 0);
       }
       selected = selectedId;
       setOutline(outline, objects.get(selected)?.object);
       const label = String(style?.name ?? style ?? '').toLowerCase().replace(/-/g, ' ');
       const palette = palettes[label] || palettes['warm minimal'];
-      architecture.update(roomLayout, palette);
+      if (houseLayout) architecture.updateHouse(houseLayout, palette, oblique.position);
+      else architecture.update(roomLayout, palette);
       renderer.shadowMap.needsUpdate = true;
       invalidate();
     },
@@ -506,7 +598,21 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     },
     goToSpot,
     walk,
+    getPose: currentPose,
+    setEyePose(x, z, yaw = 0) {
+      const height = houseLayout ? houseLayout.ceilingHeight : roomLayout.height;
+      eye.position.set(x, Math.min(1.59, height - 0.44), z);
+      eye.rotation.set(0, -yaw, 0);
+      reportPose();
+      invalidate();
+    },
     getSpots() {
+      if (houseLayout) {
+        return Object.fromEntries(houseLayout.rooms.map((room) => {
+          const spot = resolveSpot(room.id);
+          return [room.id, { x: spot.x, z: spot.z, label: room.name }];
+        }));
+      }
       return Object.fromEntries(['entry', 'center', 'window'].map((id) => {
         const { x, z } = resolveSpot(id);
         return [id, { x, z }];

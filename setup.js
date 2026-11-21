@@ -12,6 +12,7 @@ import {
   fitItem,
   getSpend,
 } from "./model.js";
+import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
@@ -283,9 +284,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     host.onpointermove = null;
     host.onpointerup = null;
   }
-  function leave(next, demo) {
+  function leave(next, demo, extra = {}) {
     onExit();
-    onApply(next, { demo });
+    onApply(next, { demo, ...extra });
   }
   function stepper() {
     return (
@@ -317,6 +318,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       '<button class="start-option" id="custom-room"><span class="start-symbol">' +
       icon("room") +
       '</span><span><strong>Build a custom room</strong><small>Set the shape, dimensions, and finishes.</small></span><span class="start-arrow">→</span></button>' +
+      '<button class="start-option" id="whole-home-demo"><span class="start-symbol">' +
+      icon("house") +
+      '</span><span><strong>Try whole-home demo</strong><small>Explore a connected 4-room house with fixed fixtures.</small></span><span class="start-arrow">→</span></button>' +
       '<p class="setup-error" role="status">' +
       esc(error) +
       '</p></section><section class="setup-sample"><div class="sample-preview">' +
@@ -697,6 +701,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     leave(
       {
         ...state,
+        house: null,
         roomName: draft.roomName.trim() || "My living room",
         room: draft.room,
         roomPhoto: draft.photo,
@@ -735,9 +740,13 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         });
       return;
     }
+    if (b.id === "whole-home-demo") {
+      leave(createWholeHomeDemoState(), true, { wholeHome: true });
+      return;
+    }
     if (b.id === "explore-demo") {
       const sample = initialState();
-      leave({ ...sample, room: roomDefaults(sample.room) }, true);
+      leave({ ...sample, house: null, room: roomDefaults(sample.room) }, true);
       return;
     }
     if (b.id === "custom-room") {
