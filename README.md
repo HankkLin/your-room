@@ -51,7 +51,7 @@ npm run test:e2e -- e2e/shopify.spec.js e2e/live-shopify-candidates.spec.js e2e/
 
 | Check | What the test observes |
 | --- | --- |
-| Shop MCP adapter | A mocked provider receives the exact seller and variant IDs for lookup and cart creation. Two variants at quantities 2 and 1 produce one merchant cart. Mixed-merchant requests, changed prices, unavailable stock, incomplete confirmations and upstream errors exercise the rejection paths. |
+| Shop MCP adapter | A mocked provider receives the exact seller and variant IDs for lookup and cart creation. Two variants at quantities 3 and 1 produce one merchant cart. The mock confirms two exact variant lookups followed by one checkout call. Mixed-merchant requests, changed prices, unavailable stock, incomplete confirmations and upstream errors exercise the rejection paths. |
 | Shopping list in Chrome | Two sellers get separate links. A failed seller leaves the other checkout usable. Reloading and re-saving preserve quantities and the original quote. The test compares captured request bodies and merchant URLs. |
 | Alternatives and assets | Chrome searches multiple variants, leaves unchosen variants out of the scene, requires approval after changed dimensions, and verifies the Three.js mesh, scale, reload and fallback after a model 404. |
 | Household through checkout | The integrated test opens Design, browses two variants, rejects a price change from $120 to $142, approves the refreshed offer, fixes the blocked route from one failure to zero, and checks that the cart contains only the approved SKU at $142 and quantity one. |
