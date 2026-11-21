@@ -33,6 +33,9 @@ import {
 } from "./house-model.js";
 import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
+import { createHouseholdPage } from "./src/components/persona/household-page.js";
+import { validatePersonas } from "./src/contracts/persona.js";
+import { listPersonaRooms } from "./src/persona/rooms.js";
 
 const $ = (selector) => document.querySelector(selector);
 const escape = (value) =>
@@ -68,6 +71,7 @@ try {
     typeof saved.roomName === "string"
   ) {
     state = { ...demo, ...saved };
+    if (validatePersonas(state.personas, listPersonaRooms(state))) state.personas = [];
     hasProject = true;
   }
 } catch {
@@ -83,6 +87,15 @@ let stage = "setup";
 let toastTimer;
 let scene;
 const dialog = $("#dialog");
+const householdPage = createHouseholdPage($("#household-page"), {
+  onSave(personas) {
+    state = { ...state, personas };
+    navigate("design");
+  },
+  onSkip() {
+    navigate("design");
+  },
+});
 document.querySelectorAll("[data-icon]").forEach((node) => {
   node.innerHTML = icon(node.dataset.icon);
 });
@@ -406,7 +419,7 @@ $("#style-form").onsubmit = (e) => {
 };
 $("#undo").onclick = () => {
   if (history.length) {
-    state = { ...history.pop(), screen: stage, flowVersion: 2 };
+    state = { ...history.pop(), personas: state.personas, screen: stage, flowVersion: 2 };
     selection = null;
     persist();
     syncForm();
@@ -557,6 +570,7 @@ function updateWalkControls() {
       : "Select furniture in the room to move, rotate, replace, or save it.";
 }
 function markStage(next) {
+  if (stage === "household" && next !== "household") householdPage.close();
   if (document.body.classList.contains("room-expanded")) toggleExpanded(false);
   stage = next;
   document.body.dataset.stage = next;
@@ -571,6 +585,7 @@ function markStage(next) {
   $("#studio").hidden = !["design", "tour"].includes(next);
   $("#shop-page").hidden = next !== "shop";
   $("#setup-page").hidden = next !== "setup";
+  $("#household-page").hidden = next !== "household";
   $("#design-panel").hidden = next !== "design";
   $("#tour-panel").hidden = next !== "tour";
   $(".inventory").hidden = next !== "tour";
@@ -602,7 +617,9 @@ function navigate(next) {
   markStage(next);
   state = { ...state, flowVersion: 2, screen: next };
   if (next === "shop") renderShopping();
-  else {
+  else if (next === "household") {
+    householdPage.open({ personas: state.personas, rooms: listPersonaRooms(state) });
+  } else {
     enterEditor();
     render();
     if (next === "tour" && !$("#view-interior").disabled)
@@ -639,14 +656,19 @@ function beginSetup(fresh = false) {
       hasProject = true;
       commit({
         ...next,
+        personas: fresh ? [] : state.personas,
         flowVersion: 2,
         hasLayout: sample || (!fresh && Boolean(next.hasLayout)),
       });
+      if (fresh) history = [];
       selection = null;
       syncForm();
-      navigate(sample ? "tour" : "design");
-      changeView($("#view-interior").disabled ? "plan" : "interior");
-      jumpTo("entry");
+      const nextStage = sample ? "tour" : fresh ? "household" : "design";
+      navigate(nextStage);
+      if (scene) {
+        changeView($("#view-interior").disabled ? "plan" : "interior");
+        jumpTo("entry");
+      }
     },
   });
 }
@@ -846,6 +868,7 @@ window.addEventListener("keydown", (event) => {
 });
 $("#room-settings").onclick = () => beginSetup();
 $("#new-project").onclick = () => beginSetup(true);
+$("#household-step").onclick = () => navigate("household");
 $("#style-step").onclick = $("#revise-brief").onclick = () =>
   navigate("design");
 $("#tour-step").onclick = $("#back-to-tour").onclick = () => navigate("tour");
@@ -1079,7 +1102,7 @@ syncForm();
 if (
   hasProject &&
   state.flowVersion === 2 &&
-  ["tour", "design", "shop"].includes(state.screen)
+  ["household", "tour", "design", "shop"].includes(state.screen)
 )
   navigate(state.screen);
 else beginSetup(true);

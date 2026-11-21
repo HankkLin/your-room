@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/details.css" />
     <link rel="stylesheet" href="/journey.css" />
+    <link rel="stylesheet" href="/household.css" />
   </head>
   <body>
     <header class="masthead">
@@ -20,20 +21,58 @@
       >
       <nav class="stage-nav" aria-label="Design steps">
         <button id="room-settings" data-step="setup">
-          <span>1</span>Room setup
+          <span aria-hidden="true">1</span>Room setup
+        </button>
+        <button id="household-step" data-step="household">
+          <span aria-hidden="true">2</span>Household
         </button>
         <button id="style-step" data-step="design">
-          <span>2</span>Design brief
+          <span aria-hidden="true">3</span>Design brief
         </button>
         <button id="tour-step" data-step="tour">
-          <span>3</span>Explore room
+          <span aria-hidden="true">4</span>Explore room
         </button>
         <button id="shop" data-step="shop">
-          <span>4</span>Shopping list <small id="shop-count"></small>
+          <span aria-hidden="true">5</span>Shopping list <small id="shop-count"></small>
         </button>
       </nav>
     </header>
     <section id="setup-page" hidden></section>
+    <main id="household-page" hidden aria-labelledby="household-title">
+      <header class="household-heading">
+        <h1 id="household-title" tabindex="-1">Your household</h1>
+        <p class="subtitle">Describe who lives here and how they spend a typical day.</p>
+      </header>
+      <div class="household-intake">
+        <form id="household-form" class="household-panel">
+          <label class="field" for="household-description">Household description</label>
+          <textarea id="household-description" rows="4" maxlength="4000" required
+            placeholder="Alex works from home from 9 to 5. Sam watches TV from 4 to 5."></textarea>
+          <div class="household-buttons">
+            <button class="primary" id="generate-household" type="submit">Generate</button>
+            <button class="secondary" id="sample-household" type="button">Load sample household</button>
+          </div>
+          <p class="household-status" id="household-status" role="status"></p>
+        </form>
+        <section class="household-panel household-rooms" aria-labelledby="household-rooms-title">
+          <h2 id="household-rooms-title">Available rooms</h2>
+          <ul id="household-rooms-list"></ul>
+        </section>
+      </div>
+      <section id="household-review" aria-labelledby="household-review-title" hidden>
+        <header class="household-review-heading">
+          <h2 id="household-review-title">Review your household</h2>
+          <p class="muted" id="household-time-help">Use 24-hour times. For overnight activities, end one entry at 24:00 and start the next at 00:00.</p>
+        </header>
+        <fieldset id="household-members" aria-labelledby="household-review-title"></fieldset>
+      </section>
+      <p class="household-status" id="household-save-status" role="status"></p>
+      <footer class="household-buttons household-footer">
+        <button class="primary" id="save-household" type="button" disabled>Save and continue</button>
+        <button class="secondary" id="skip-household" type="button">Skip</button>
+        <button class="secondary" id="add-household-guest" type="button">Add guest</button>
+      </footer>
+    </main>
     <main id="studio" hidden>
       <section class="intro">
         <div>
