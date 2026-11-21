@@ -12,7 +12,10 @@ import {
   fitItem,
   getSpend,
 } from "./model.js";
+import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
+import { openFloorplanImporter } from "./floorplan-import-ui.js";
+import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
 const paints = {
@@ -283,9 +286,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     host.onpointermove = null;
     host.onpointerup = null;
   }
-  function leave(next, demo) {
+  function leave(next, demo, extra = {}) {
     onExit();
-    onApply(next, { demo });
+    onApply(next, { demo, ...extra });
   }
   function stepper() {
     return (
@@ -314,9 +317,16 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       icon("image") +
       '</span><span><strong>Upload a room photo</strong><small>Review the furniture found in your photo.</small></span><span class="start-arrow">↗</span><input type="file" id="room-photo-upload" accept="image/*"></label>' +
       '<button class="text-btn sample-photo-link" id="try-sample-photo">Try a sample photo <span aria-hidden="true">→</span></button>' +
+      '<label class="start-option start-option-floorplan"><span class="start-symbol">' +
+      icon("cube") +
+      '</span><span><strong>Import a whole-home floorplan</strong><small>Extract multi-room walls, doors, windows, and locked fixtures.</small></span><span class="start-arrow">↗</span><input type="file" id="floorplan-upload" accept="image/png,image/jpeg,image/webp"></label>' +
+      '<button class="text-btn sample-photo-link" id="try-sample-floorplan">Try sample whole-home floorplan <span aria-hidden="true">→</span></button>' +
       '<button class="start-option" id="custom-room"><span class="start-symbol">' +
       icon("room") +
       '</span><span><strong>Build a custom room</strong><small>Set the shape, dimensions, and finishes.</small></span><span class="start-arrow">→</span></button>' +
+      '<button class="start-option" id="whole-home-demo"><span class="start-symbol">' +
+      icon("house") +
+      '</span><span><strong>Try whole-home demo</strong><small>Explore a connected 4-room house with fixed fixtures.</small></span><span class="start-arrow">→</span></button>' +
       '<p class="setup-error" role="status">' +
       esc(error) +
       '</p></section><section class="setup-sample"><div class="sample-preview">' +
@@ -649,8 +659,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
   }
   function finish() {
     const oldRoom = state.room || ROOM;
+    const wholeHome = !isNew && (state.importedHouse || state.house);
     const changed =
-      !isNew &&
+      !isNew && !wholeHome &&
       (draft.room.width !== oldRoom.width ||
         draft.room.depth !== oldRoom.depth ||
         draft.room.shape !== (oldRoom.shape || "rectangle") ||
@@ -697,21 +708,54 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     leave(
       {
         ...state,
+        house: isNew ? null : state.house,
         roomName: draft.roomName.trim() || "My living room",
         room: draft.room,
         roomPhoto: draft.photo,
+        importedHouse: isNew ? null : state.importedHouse,
         items,
         spent: getSpend(items),
       },
       false,
     );
   }
+  function launchFloorplanFlow(initialMode, initialFile = null) {
+    ++photoToken;
+    openFloorplanImporter({
+      host,
+      initialMode,
+      initialFile,
+      onBack() {
+        bindSetupHandlers();
+        render(true);
+      },
+      onConfirmed(confirmedHouse) {
+        leave(
+          {
+            ...state,
+            roomName: confirmedHouse.name || "Imported Home",
+            room: roomDefaults(houseToPrimaryStudioRoom(confirmedHouse)),
+            roomPhoto: null,
+            importedHouse: confirmedHouse,
+            items: [],
+            spent: 0,
+          },
+          false,
+        );
+      },
+    });
+  }
+  function bindSetupHandlers() {
   host.onclick = (e) => {
     const b = e.target.closest("button");
     if (!b || !host.contains(b)) return;
     if (b.id === "setup-cancel" || b.id === "resume-room") {
       onExit();
       onCancel?.();
+      return;
+    }
+    if (b.id === "try-sample-floorplan") {
+      launchFloorplanFlow("sample");
       return;
     }
     if (b.id === "try-sample-photo") {
@@ -735,9 +779,13 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         });
       return;
     }
+    if (b.id === "whole-home-demo") {
+      leave(createWholeHomeDemoState(), true, { wholeHome: true });
+      return;
+    }
     if (b.id === "explore-demo") {
       const sample = initialState();
-      leave({ ...sample, room: roomDefaults(sample.room) }, true);
+      leave({ ...sample, house: null, room: roomDefaults(sample.room) }, true);
       return;
     }
     if (b.id === "custom-room") {
@@ -860,6 +908,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
   };
   host.onchange = (e) => {
     if (e.target.id === "room-photo-upload") void photo(e.target.files[0]);
+    if (e.target.id === "floorplan-upload" && e.target.files?.[0]) {
+      launchFloorplanFlow("upload", e.target.files[0]);
+    }
   };
   host.onpointerdown = (e) => {
     const handle = e.target.closest(".plan-grip");
@@ -889,5 +940,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
   host.onpointerup = host.onpointercancel = () => {
     drag = null;
   };
+  }
+  bindSetupHandlers();
   render(true);
 }

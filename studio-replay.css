@@ -1,0 +1,63 @@
+.studio-replay {
+  margin-top: 20px;
+  padding: clamp(14px, 2vw, 20px);
+}
+.studio-replay-header, .studio-replay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.studio-replay-header {
+  justify-content: space-between;
+}
+.studio-replay-header h2 {
+  font: 400 28px/1.1 var(--serif);
+  letter-spacing: -.025em;
+}
+.studio-replay-message, .studio-replay-findings {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.studio-replay-message:not(:empty) {
+  margin-top: 10px;
+}
+.studio-replay-message[data-error] {
+  color: var(--clay-dark);
+}
+.studio-replay-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+  align-items: start;
+  gap: 14px 20px;
+  margin-top: 12px;
+}
+.studio-replay-summary table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.studio-replay-summary th, .studio-replay-summary td {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+.studio-replay-summary th:first-child {
+  text-align: left;
+}
+.studio-replay-summary thead th {
+  color: var(--muted);
+}
+.studio-replay-summary tbody th {
+  font-weight: 500;
+}
+.studio-replay-findings {
+  margin: 0;
+  padding: 6px 0 0 20px;
+  overflow-wrap: anywhere;
+}
+.studio-replay-findings li + li {
+  margin-top: 5px;
+}
