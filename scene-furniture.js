@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import {
+  classifyFurnitureArchetype,
+  FURNITURE_ARCHETYPES,
+  inferProductColor,
+} from './src/spatial/furniture-archetypes.js';
 
 const random = (seed) => {
   let state = seed;
@@ -448,6 +453,170 @@ function acFixture(group, w, d, h, color, mats) {
   box(group, new THREE.MeshBasicMaterial({ color: '#78b88c' }), 0.028, 0.01, 0.01, w * 0.36, h * 0.62, d / 2 + 0.006);
 }
 
+function diningChair(group, w, d, h, color, mats) {
+  const seatMat = upholstery(color, mats, 0.02);
+  const frameMat = mats.oak;
+  const seatY = h * 0.53;
+  const legR = Math.min(0.022, w * 0.048);
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const lx = sx * (w * 0.4);
+      const lz = sz * (d * 0.39);
+      const leg = tube(group, frameMat, legR, legR * 0.72, seatY, lx, seatY / 2, lz, 14);
+      leg.rotation.x = sz * -0.05;
+      leg.rotation.z = sx * 0.04;
+    }
+  }
+  box(group, frameMat, w * 0.84, 0.036, d * 0.8, 0, seatY - 0.024, 0.01, 0.01);
+  box(group, seatMat, w * 0.88, Math.max(0.045, h * 0.07), d * 0.82, 0, seatY + 0.018, 0.02, 0.025);
+  const postH = h - seatY + 0.04;
+  for (const sx of [-1, 1]) {
+    const post = tube(group, frameMat, legR * 0.95, legR, postH, sx * (w * 0.39), seatY + postH / 2 - 0.02, -d * 0.39, 14);
+    post.rotation.x = -0.1;
+  }
+  const backRest = box(group, frameMat, w * 0.86, h * 0.22, 0.032, 0, h - h * 0.13, -d * 0.42, 0.014);
+  backRest.rotation.x = -0.1;
+}
+
+function coffeeTableMesh(group, w, d, h, color, mats, name = '') {
+  const top = new THREE.MeshStandardMaterial({ color, map: mats.woodMap, roughness: 0.62 });
+  const thin = Math.min(h * 0.14, 0.048);
+  const round = /\b(?:round|oval|circle|drum)\b/i.test(name) || Math.abs(w - d) < 0.14;
+  if (round) {
+    const surface = tube(group, top, 0.5, 0.5, thin, 0, h - thin / 2, 0, 56);
+    surface.scale.set(w, 1, d);
+    const pedestal = tube(group, mats.walnut, 0.24, 0.3, h - thin, 0, (h - thin) / 2, 0, 32);
+    pedestal.scale.set(w, 1, d);
+  } else {
+    box(group, top, w, thin, d, 0, h - thin / 2, 0, 0.022);
+    const shelfY = h * 0.32;
+    box(group, top, w * 0.86, Math.max(0.02, thin * 0.55), d * 0.82, 0, shelfY, 0, 0.01);
+    const legW = Math.min(0.045, w * 0.06);
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        box(group, mats.walnut, legW, h - thin, legW, sx * (w * 0.43), (h - thin) / 2, sz * (d * 0.41), 0.008);
+      }
+    }
+  }
+  const book = solid('#ded5c2');
+  const cover = solid('#718075');
+  box(group, book, Math.min(0.22, w * 0.24), 0.022, Math.min(0.15, d * 0.24), -w * 0.14, h + 0.013, d * 0.05, 0.004).rotation.y = 0.1;
+  box(group, cover, Math.min(0.225, w * 0.245), 0.005, Math.min(0.155, d * 0.245), -w * 0.14, h + 0.026, d * 0.05, 0.003).rotation.y = 0.1;
+  tube(group, solid('#eee5d5', 0.42), 0.042, 0.038, 0.064, w * 0.18, h + 0.032, -d * 0.05);
+}
+
+function diningTableMesh(group, w, d, h, color, mats, name = '') {
+  const top = new THREE.MeshStandardMaterial({ color, map: mats.woodMap, roughness: 0.6 });
+  const topThick = Math.min(0.046, h * 0.07);
+  const apronH = Math.min(0.068, h * 0.095);
+  const round = /\b(?:round|bistro|circle)\b/i.test(name);
+  if (round) {
+    const surface = tube(group, top, 0.5, 0.5, topThick, 0, h - topThick / 2, 0, 56);
+    surface.scale.set(w, 1, d);
+  } else {
+    box(group, top, w, topThick, d, 0, h - topThick / 2, 0, 0.018);
+    box(group, top, w * 0.84, apronH, d * 0.8, 0, h - topThick - apronH / 2, 0, 0.008);
+  }
+  const legH = h - topThick;
+  const legR = Math.min(0.032, Math.min(w, d) * 0.045);
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const leg = tube(group, top, legR, legR * 0.72, legH, sx * (w * 0.42), legH / 2, sz * (d * 0.39), 16);
+      leg.rotation.x = sz * -0.03;
+      leg.rotation.z = sx * 0.03;
+    }
+  }
+}
+
+function deskMesh(group, w, d, h, color, mats) {
+  const wood = new THREE.MeshStandardMaterial({ color, map: mats.woodMap, roughness: 0.62 });
+  const drawerFront = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color).offsetHSL(0, 0, 0.06),
+    map: mats.woodMap,
+    roughness: 0.68,
+  });
+  const topThick = 0.036;
+  const drawerH = Math.min(0.11, h * 0.15);
+  box(group, wood, w, topThick, d, 0, h - topThick / 2, 0, 0.014);
+  box(group, wood, w * 0.92, drawerH, d * 0.86, 0, h - topThick - drawerH / 2, -d * 0.02, 0.008);
+  for (const side of [-1, 1]) {
+    box(group, drawerFront, w * 0.43, drawerH * 0.82, 0.018, side * w * 0.23, h - topThick - drawerH / 2, d * 0.42, 0.004);
+    box(group, mats.brass, Math.min(0.09, w * 0.09), 0.012, 0.018, side * w * 0.23, h - topThick - drawerH / 2, d * 0.435, 0.004);
+  }
+  const legH = h - topThick - drawerH;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      tube(group, mats.oak, 0.024, 0.017, legH, sx * (w * 0.44), legH / 2, sz * (d * 0.4), 14);
+    }
+  }
+  // Subtle laptop / desk pad cue so a desk reads immediately as a workspace
+  box(group, mats.black, Math.min(0.34, w * 0.3), 0.008, Math.min(0.23, d * 0.38), 0, h + 0.004, d * 0.04, 0.004);
+  const lid = box(group, mats.black, Math.min(0.34, w * 0.3), 0.21, 0.008, 0, h + 0.1, -d * 0.07, 0.004);
+  lid.rotation.x = -0.22;
+}
+
+function nightstandMesh(group, w, d, h, color, mats) {
+  const finish = new THREE.MeshStandardMaterial({ color, map: mats.woodMap, roughness: 0.67 });
+  const front = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color).offsetHSL(0, 0, 0.07),
+    map: mats.woodMap,
+    roughness: 0.72,
+  });
+  const legH = Math.min(h * 0.28, 0.17);
+  const bodyH = h - legH;
+  feet(group, mats.walnut, w * 0.78, d * 0.74, legH, 0.02);
+  box(group, finish, w, bodyH, d, 0, legH + bodyH / 2, 0, 0.018);
+  // Top drawer + open lower cubby visual
+  const drawerH = bodyH * 0.44;
+  box(group, front, w * 0.9, drawerH, 0.022, 0, h - drawerH / 2 - 0.025, d / 2 + 0.004, 0.006);
+  box(group, mats.brass, Math.min(0.1, w * 0.24), 0.014, 0.02, 0, h - drawerH / 2 - 0.025, d / 2 + 0.02, 0.005);
+  box(group, solid('#3b322a', 0.88), w * 0.84, bodyH * 0.38, 0.02, 0, legH + bodyH * 0.26, d / 2 - 0.006, 0.004);
+}
+
+function tvMediaConsoleMesh(group, w, d, h, color, mats) {
+  const consoleH = Math.min(0.54, Math.max(0.38, h * 0.56));
+  cabinet(group, w, d, consoleH, color, mats, 'console');
+  // Slim flat-panel TV mounted cleanly on the media console
+  const tvW = Math.min(w * 0.84, 1.42);
+  const tvH = Math.max(0.46, Math.min(0.78, tvW * 0.56));
+  const bezel = mats.black;
+  const screenMat = new THREE.MeshStandardMaterial({
+    color: '#182028',
+    metalness: 0.45,
+    roughness: 0.2,
+  });
+  box(group, bezel, Math.min(0.34, tvW * 0.28), 0.016, Math.min(0.2, d * 0.52), 0, consoleH + 0.008, -d * 0.06, 0.005);
+  box(group, bezel, 0.05, 0.075, 0.035, 0, consoleH + 0.045, -d * 0.06);
+  box(group, bezel, tvW, tvH, 0.032, 0, consoleH + 0.075 + tvH / 2, -d * 0.06, 0.01);
+  box(group, screenMat, tvW * 0.96, tvH * 0.93, 0.008, 0, consoleH + 0.075 + tvH / 2, -d * 0.06 + 0.015);
+}
+
+function tableLampMesh(group, w, d, h, color, mats) {
+  const baseRadius = Math.min(w, d) * 0.32;
+  const baseH = h * 0.44;
+  const ceramic = solid(color || '#dfd6c5', 0.55);
+  const body = tube(group, ceramic, baseRadius * 0.68, baseRadius, baseH, 0, baseH / 2, 0, 28);
+  body.castShadow = true;
+  tube(group, mats.brass, 0.014, 0.014, h * 0.16, 0, baseH + h * 0.08, 0, 14);
+  const shade = new THREE.MeshStandardMaterial({
+    color: '#f2ead9',
+    roughness: 0.9,
+    side: THREE.DoubleSide,
+    emissive: '#edc880',
+    emissiveIntensity: 0.26,
+  });
+  const shadeR = Math.min(w, d) * 0.48;
+  const shadePart = mesh(
+    group,
+    new THREE.CylinderGeometry(shadeR * 0.72, shadeR, h * 0.4, 36, 1, true),
+    shade,
+    0,
+    h * 0.78,
+    0,
+  );
+  shadePart.castShadow = false;
+}
+
 export function createFurniture(item, mats) {
   const group = new THREE.Group();
   const w = Math.max(0.07, Number(item.width) || 0.6);
@@ -457,7 +626,7 @@ export function createFurniture(item, mats) {
   const defaults = {
     sofa: '#c9b69a', chair: '#78907b', rug: '#d7bd9d', plant: '#b17155', lamp: '#e1cdb0',
   };
-  const color = item.color || defaults[kind] || '#b2916e';
+  const color = inferProductColor(item, defaults[kind] || '#b2916e');
 
   if (/toilet/.test(kind)) toiletFixture(group, w, d, h, color, mats);
   else if (/bathtub|tub/.test(kind)) bathtubFixture(group, w, d, h, color, mats);
@@ -467,17 +636,62 @@ export function createFurniture(item, mats) {
   else if (/refrigerator|fridge/.test(kind)) refrigeratorFixture(group, w, d, h, color, mats);
   else if (/stove|range|oven/.test(kind)) stoveFixture(group, w, d, h, color, mats);
   else if (/^ac\b|air.?cond/.test(kind)) acFixture(group, w, d, h, color, mats);
-  else if (/sofa|couch|loveseat|sectional/.test(kind)) sofa(group, w, d, h, color, mats, w > 1.95 ? 3 : 2);
-  else if (/chair|armchair/.test(kind)) loungeChair(group, w, d, h, color, mats);
-  else if (/table|desk/.test(kind)) table(group, w, d, h, color, mats, kind);
-  else if (/rug|carpet/.test(kind)) rug(group, w, d, h, color, mats);
-  else if (/plant/.test(kind)) plant(group, w, d, h, color, mats);
-  else if (/lamp|light/.test(kind)) lamp(group, w, d, h, color, mats, item.name);
-  else if (/bed/.test(kind)) bed(group, w, d, h, color, mats);
-  else if (/ottoman|bench|stool/.test(kind)) {
-    feet(group, mats.walnut, w * 0.77, d * 0.77, h * 0.35, 0.025);
-    box(group, upholstery(color, mats), w, h * 0.68, d, 0, h * 0.66, 0, 0.082);
-  } else cabinet(group, w, d, h, color, mats, kind);
+  else {
+    const archetype = classifyFurnitureArchetype(item, item.kind);
+    group.userData.archetype = archetype;
+    switch (archetype) {
+      case FURNITURE_ARCHETYPES.SOFA:
+        sofa(group, w, d, h, color, mats, w > 1.95 ? 3 : 2);
+        break;
+      case FURNITURE_ARCHETYPES.ARMCHAIR:
+        loungeChair(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.DINING_CHAIR:
+        diningChair(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.COFFEE_TABLE:
+        coffeeTableMesh(group, w, d, h, color, mats, item.name || item.title || '');
+        break;
+      case FURNITURE_ARCHETYPES.DINING_TABLE:
+        diningTableMesh(group, w, d, h, color, mats, item.name || item.title || '');
+        break;
+      case FURNITURE_ARCHETYPES.DESK:
+        deskMesh(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.BED:
+        bed(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.NIGHTSTAND:
+        nightstandMesh(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.BOOKSHELF:
+        cabinet(group, w, d, h, color, mats, 'bookcase');
+        break;
+      case FURNITURE_ARCHETYPES.FLOOR_LAMP:
+        lamp(group, w, d, h, color, mats, item.name || item.title || '');
+        break;
+      case FURNITURE_ARCHETYPES.TABLE_LAMP:
+        tableLampMesh(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.PLANT:
+        plant(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.RUG:
+        rug(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.TV_MEDIA_CONSOLE:
+        tvMediaConsoleMesh(group, w, d, h, color, mats);
+        break;
+      case FURNITURE_ARCHETYPES.OTTOMAN_BENCH:
+        feet(group, mats.walnut, w * 0.77, d * 0.77, h * 0.35, 0.025);
+        box(group, upholstery(color, mats), w, h * 0.68, d, 0, h * 0.66, 0, 0.082);
+        break;
+      case FURNITURE_ARCHETYPES.DRESSER_CABINET:
+      default:
+        cabinet(group, w, d, h, color, mats, 'console');
+        break;
+    }
+  }
 
   group.userData.itemId = item.id;
   group.userData.locked = Boolean(item.locked || item.type === 'fixed');

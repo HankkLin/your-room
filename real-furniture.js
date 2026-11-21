@@ -5,6 +5,7 @@ import decoderJs from 'three/examples/jsm/libs/draco/gltf/draco_wasm_wrapper.js?
 import decoderWasm from 'three/examples/jsm/libs/draco/gltf/draco_decoder.wasm?url';
 import { glbUrl } from './src/shopify/product-assets.js';
 import { ASSET_REPRESENTATION_TIERS } from './src/spatial/product-scene-object.js';
+import { classifyFurnitureArchetype, FURNITURE_ARCHETYPES } from './src/spatial/furniture-archetypes.js';
 
 const modelFiles = {
   sofa: 'SheenWoodLeatherSofa.glb',
@@ -104,7 +105,14 @@ export function createFurnitureAssets(onReady) {
       const url = glbUrl(item.modelUrl);
       if (url && !models.has(url)) void load(url, url, true);
       const verifiedModel = url ? models.get(url) : null;
-      const representativeModel = models.get(item.kind);
+      const archetype = classifyFurnitureArchetype(item, item.kind);
+      const repKey =
+        archetype === FURNITURE_ARCHETYPES.SOFA
+          ? 'sofa'
+          : archetype === FURNITURE_ARCHETYPES.ARMCHAIR
+            ? 'chair'
+            : null;
+      const representativeModel = repKey ? models.get(repKey) : null;
       const model = verifiedModel || representativeModel;
       if (!model) return null;
 

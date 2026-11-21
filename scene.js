@@ -38,7 +38,7 @@ function addLighting(scene) {
   return sun;
 }
 
-const objectSignature = (item) => JSON.stringify([item.kind, item.shopify && item.modelUrl, item.name, item.color, item.width, item.depth, item.height, Boolean(item.locked), Number(item.elevation) || 0]);
+const objectSignature = (item) => JSON.stringify([item.kind, item.archetype, item.shopify && item.modelUrl, item.name, item.color, item.width, item.depth, item.height, Boolean(item.locked), Number(item.elevation) || 0]);
 
 function selectionOutline() {
   const outline = new THREE.Group();

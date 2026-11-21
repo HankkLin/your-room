@@ -3,6 +3,13 @@ import { toSceneObject } from "../contracts/scene.js";
 import { productCandidateId, shopifyHttpsUrl } from "../contracts/product.js";
 import { glbUrl } from "../shopify/product-assets.js";
 import { createCandidatePlacement } from "../shopify/scene-candidate.js";
+import {
+  ARCHETYPE_FALLBACK_DIMENSIONS,
+  archetypeToCanonicalKind,
+  classifyFurnitureArchetype,
+  FURNITURE_ARCHETYPES,
+  inferProductColor,
+} from "./furniture-archetypes.js";
 import { withFurnitureFootprint } from "./furniture-footprint.js";
 
 export const ASSET_REPRESENTATION_TIERS = Object.freeze({
@@ -31,21 +38,20 @@ function inferFurnitureKind(candidate, explicitKind) {
   if (explicitKind && (furniturePreviewKinds.includes(explicitKind) || explicitKind === "tv")) {
     return explicitKind;
   }
+  const archetype = classifyFurnitureArchetype(candidate);
+  const archetypeKind = archetypeToCanonicalKind(archetype);
+  const text = `${candidate?.title || ""} ${candidate?.name || ""} ${candidate?.productType || ""} ${candidate?.variantTitle || ""}`.toLowerCase();
+  const hasStrongTitleSignal =
+    /\b(?:sofa|couch|sectional|loveseat|bed|mattress|headboard|desk|workstation|bookshelf|bookcase|shelving|rug|carpet|flatweave|lamp|sconce|lighting|plant|tree|ficus|planter|chair|armchair|stool|recliner|table|nightstand|dresser|cabinet|console|tv|television)\b/.test(
+      text,
+    );
+  if (hasStrongTitleSignal && (furniturePreviewKinds.includes(archetypeKind) || archetypeKind === "tv")) {
+    return archetypeKind;
+  }
   if (candidate?.kind && (furniturePreviewKinds.includes(candidate.kind) || candidate.kind === "tv")) {
     return candidate.kind;
   }
-  const text = `${candidate?.title || ""} ${candidate?.name || ""} ${candidate?.variantTitle || ""}`.toLowerCase();
-  if (/\b(?:sofa|couch|sectional|loveseat)\b/.test(text)) return "sofa";
-  if (/\b(?:bed|mattress)\b/.test(text)) return "bed";
-  if (/\b(?:desk|workstation)\b/.test(text)) return "desk";
-  if (/\b(?:bookcase|bookshelf|shelving|shelf)\b/.test(text)) return "bookcase";
-  if (/\b(?:rug|carpet|flatweave)\b/.test(text)) return "rug";
-  if (/\b(?:lamp|sconce|lighting)\b/.test(text)) return "lamp";
-  if (/\b(?:plant|tree|planter)\b/.test(text)) return "plant";
-  if (/\b(?:chair|armchair|stool|recliner)\b/.test(text)) return "chair";
-  if (/\b(?:table|island|dining)\b/.test(text)) return "table";
-  if (/\b(?:tv|television|monitor)\b/.test(text)) return "tv";
-  return "console";
+  return archetypeKind;
 }
 
 function hasValidAxes(dims) {
@@ -99,7 +105,13 @@ export function resolveProduct3DRepresentation(item = {}, options = {}) {
     };
   }
 
-  if (repKinds.has(item?.kind)) {
+  const archetype = classifyFurnitureArchetype(item, item?.kind);
+  const usesRepGlb =
+    repKinds.has(item?.kind) &&
+    archetype !== FURNITURE_ARCHETYPES.DINING_CHAIR &&
+    archetype !== FURNITURE_ARCHETYPES.OTTOMAN_BENCH;
+
+  if (usesRepGlb) {
     return {
       tier: ASSET_REPRESENTATION_TIERS.REPRESENTATIVE_3D_ASSET,
       label: "Representative 3D category model (scaled to product dimensions)",
@@ -147,7 +159,18 @@ export function productCandidateToSceneObject(candidate, options = {}) {
   }
 
   const kind = inferFurnitureKind(candidate, options.kind);
-  const defaults = KIND_FALLBACK_DIMENSIONS[kind] || KIND_FALLBACK_DIMENSIONS.console;
+  const archetype = classifyFurnitureArchetype(
+    options.kind ? { ...candidate, title: "", name: "" } : candidate,
+    kind,
+  );
+  const semanticArchetype = classifyFurnitureArchetype(candidate, kind);
+  const resolvedArchetype =
+    options.kind && archetypeToCanonicalKind(semanticArchetype) !== options.kind
+      ? archetype
+      : semanticArchetype;
+  const archetypeDefaults = ARCHETYPE_FALLBACK_DIMENSIONS[resolvedArchetype];
+  const defaults =
+    archetypeDefaults || KIND_FALLBACK_DIMENSIONS[kind] || KIND_FALLBACK_DIMENSIONS.console;
 
   const x = Array.isArray(options.position)
     ? Number(options.position[0]) || 0
@@ -268,12 +291,30 @@ export function productCandidateToSceneObject(candidate, options = {}) {
         ? Number(candidate.price)
         : Number(rawItem.price ?? 0);
 
+  const validImageUrls = [
+    ...(Array.isArray(candidate.imageUrls) ? candidate.imageUrls : []),
+    candidate.imageUrl,
+    candidate.photo,
+    rawItem.photo,
+  ]
+    .map(shopifyHttpsUrl)
+    .filter(Boolean);
+  const uniqueImageUrls = [...new Set(validImageUrls)];
+  const primaryPhoto = uniqueImageUrls[0] ?? candidate.photo ?? rawItem.photo ?? null;
+  const resolvedColor = inferProductColor(
+    { ...rawItem, ...candidate },
+    rawItem.color || defaults.color,
+  );
+
   const merged = {
     ...rawItem,
     id: objectId,
     type: "shopify",
     kind,
+    archetype: resolvedArchetype,
+    color: resolvedColor,
     name: String(candidate.title || candidate.name || rawItem.name || kind),
+    title: String(candidate.title || candidate.name || rawItem.name || kind),
     roomId,
     locked: false,
     owned: false,
@@ -300,6 +341,7 @@ export function productCandidateToSceneObject(candidate, options = {}) {
     merchant:
       candidate.merchant ??
       rawItem.merchant ??
+      candidate.store ??
       candidate.sellerDomain ??
       rawItem.store ??
       null,
@@ -307,7 +349,9 @@ export function productCandidateToSceneObject(candidate, options = {}) {
     productUrl: validProductUrl,
     url: validProductUrl,
     checkoutUrl: validCheckoutUrl,
-    photo: candidate.imageUrl ?? candidate.photo ?? rawItem.photo ?? null,
+    imageUrls: uniqueImageUrls,
+    imageUrl: primaryPhoto,
+    photo: primaryPhoto,
     modelUrl: validModelUrl,
     ...(candidate.modelScope || rawItem.modelScope
       ? { modelScope: candidate.modelScope || rawItem.modelScope }
@@ -324,20 +368,27 @@ export function productCandidateToSceneObject(candidate, options = {}) {
       candidateId: candidateCompositeId ?? candidate.id ?? null,
       productId: candidate.productId ?? rawItem.productId ?? null,
       variantId: candidate.variantId ?? rawItem.variantId ?? null,
+      title: String(candidate.title || candidate.name || rawItem.name || kind),
       sellerDomain:
         candidate.sellerDomain ?? rawItem.shopify?.sellerDomain ?? null,
       merchant:
-        candidate.merchant ?? rawItem.merchant ?? candidate.sellerDomain ?? null,
+        candidate.merchant ??
+        rawItem.merchant ??
+        candidate.store ??
+        candidate.sellerDomain ??
+        null,
       price: resolvedPrice,
       priceMinor: Number.isSafeInteger(candidate.priceMinor)
         ? candidate.priceMinor
         : Math.round(resolvedPrice * 100),
       currency: candidate.currency || "USD",
-      available:
-        typeof candidate.available === "boolean" ? candidate.available : true,
+      ...(typeof candidate.available === "boolean"
+        ? { available: candidate.available }
+        : {}),
       productUrl: validProductUrl,
       checkoutUrl: validCheckoutUrl,
-      imageUrl: candidate.imageUrl ?? candidate.photo ?? rawItem.photo ?? null,
+      imageUrls: uniqueImageUrls,
+      imageUrl: primaryPhoto,
       dimensions: { ...dimensions },
       dimensionSource,
       modelUrl: validModelUrl,

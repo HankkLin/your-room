@@ -64,7 +64,10 @@ export function mountDesignSearch(root, { getContext, session, onChange }) {
         constraints: { query: manual, kind: kindSelect.value, budget: { amount: budget, currency: "USD" }, existingPieces } },
       { signal: pending.signal });
       if (pending.signal.aborted) return;
-      if (products.length) session.remember({ source: "design", query: manual || prompt, kind: products[0].kind, products, warnings });
+      if (products.length) {
+        session.remember({ source: "design", query: manual || prompt, kind: products[0].kind, products, warnings });
+        onChange();
+      }
       const cards = products.map(product => {
         const [card] = createResult(product, "", null);
         if (product.placed) {
