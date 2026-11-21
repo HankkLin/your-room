@@ -268,6 +268,17 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
   });
   const scores = extractCategoryScoreMap(evaluation);
 
+  const spanSeconds = Math.max(
+    60,
+    (simulation.endSecond ?? scenarioConfig.endMinute * 60) -
+      (simulation.startSecond ?? scenarioConfig.startMinute * 60),
+  );
+  // Target ~18s at 1x (~3.6s at 5x, ~0.9s at 20x) regardless of schedule duration
+  const simSecondsPerRealSecond = Math.max(
+    180,
+    Math.round(spanSeconds / 18),
+  );
+
   return {
     scenarioId,
     scenarioConfig,
@@ -279,7 +290,7 @@ export function runTwinScenario(scenarioId, { house, items, state }) {
     agentRoutes: [],
     isEvacuation: false,
     clockMode: "clock",
-    simSecondsPerRealSecond: scenarioId === "normal-day" ? 900 : 180,
+    simSecondsPerRealSecond,
     findings: evaluation.findings,
     scores,
     beforeScores: scores,

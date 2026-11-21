@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEMO_SCENARIOS,
+  normalizeSimulationViewState,
   resolveFindingLevel,
 } from "./src/contracts/simulation.js";
 import {
@@ -133,6 +134,26 @@ test("Test 5 — Scorecard, Before / After comparison, and Redesign actions rend
   assert(compareHtml.includes(">55<"));
   assert(compareHtml.includes(">84<"));
   assert(compareHtml.includes("+29"));
+
+  // Before-only state (afterScores === null, overallAfterScore === null) must NOT coerce null -> 0 ("-79")
+  const beforeOnlyState = normalizeSimulationViewState({
+    status: "COMPLETE",
+    beforeScores: mockBeforeScores,
+    afterScores: null,
+    overallBeforeScore: 79,
+    overallAfterScore: null,
+  });
+  assert.equal(beforeOnlyState.overallBeforeScore, 79);
+  assert.equal(beforeOnlyState.overallAfterScore, null);
+  const beforeOnlyHtml = renderBeforeAfterMarkup(
+    beforeOnlyState.beforeScores,
+    beforeOnlyState.afterScores,
+    {
+      overallBefore: beforeOnlyState.overallBeforeScore,
+      overallAfter: beforeOnlyState.overallAfterScore,
+    },
+  );
+  assert(!beforeOnlyHtml.includes("-79"));
 
   const deckHtml = renderResultsDeckMarkup(mockSimulationResult);
   for (const action of mockRedesignActions) {

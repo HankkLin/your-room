@@ -344,12 +344,18 @@ export function normalizeSimulationViewState(raw = {}) {
   const afterScores = normalizeScoreMap(raw?.afterScores);
   const scores = normalizeScoreMap(raw?.scores) ?? beforeScores;
 
-  const overallBeforeScore = Number.isFinite(Number(raw?.overallBeforeScore))
-    ? Math.round(Number(raw.overallBeforeScore))
-    : null;
-  const overallAfterScore = Number.isFinite(Number(raw?.overallAfterScore))
-    ? Math.round(Number(raw.overallAfterScore))
-    : null;
+  const overallBeforeScore =
+    raw?.overallBeforeScore != null &&
+    raw.overallBeforeScore !== "" &&
+    Number.isFinite(Number(raw.overallBeforeScore))
+      ? Math.round(Number(raw.overallBeforeScore))
+      : null;
+  const overallAfterScore =
+    raw?.overallAfterScore != null &&
+    raw.overallAfterScore !== "" &&
+    Number.isFinite(Number(raw.overallAfterScore))
+      ? Math.round(Number(raw.overallAfterScore))
+      : null;
 
   const redesignActions = Array.isArray(raw?.redesignActions)
     ? raw.redesignActions
