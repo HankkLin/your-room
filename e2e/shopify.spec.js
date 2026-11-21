@@ -297,6 +297,80 @@ test("whole-home checkout groups duplicate placements and keeps separate merchan
   expect(calls.filter(c => c.endpoint === "checkout").at(-1).body.lines).toEqual([lineFor(lamp), lineFor(shade)]);
 });
 
+test("whole-home review saves room context and checks out exact quantities per merchant", async ({ page }, testInfo) => {
+  const ikea = process.env.PLAYWRIGHT_PLANNER === "ikea";
+  const revised = { ...lamp, priceMinor: 19900 };
+  const calls = await mockShopify(page, {
+    lookup: ({ refs }) => ({ json: { products: products.filter(p => refs.some(r =>
+      r.sellerDomain === p.sellerDomain && r.variantId === p.variantId)) } }),
+    checkout: ({ lines }) => {
+      if (lines[0].ref.sellerDomain === rug.sellerDomain) return { json: { continueUrl: rugCheckout } };
+      if (lines.some(line => line.ref.variantId === ref.variantId && line.priceMinor === lamp.priceMinor)) {
+        return { status: 409, json: { error: "The lamp price changed.", products: [revised, shade] } };
+      }
+      return { json: { continueUrl: checkoutUrl } };
+    },
+  });
+  await page.goto("/");
+  await page.locator("#whole-home-demo").click();
+  const placements = [
+    ["home-lamp", lamp], ["home-desk", lamp], ["home-coffee-table", shade], ["home-rug", rug],
+  ].map(([id, product]) => ({ id, name: product.title, shopify: lineFor(product).ref }));
+  const reason = "Light the reading chair in the living room.";
+  await page.evaluate(({ placements, reason }) => {
+    const key = "living-blueprint.project.v1";
+    const saved = JSON.parse(localStorage.getItem(key));
+    saved.items = saved.items.flatMap(item => {
+      const placement = placements.find(row => row.id === item.id);
+      if (!placement) return item.owned || item.locked ? [item] : [];
+      return [{ ...item, ...placement, type: "shopify", suggestedReason: item.id === "home-lamp" ? reason : undefined }];
+    });
+    saved.savedProducts = [{ ...placements[0], quantity: 2, savedPrice: { priceMinor: 18900, currency: "USD" } }];
+    localStorage.setItem(key, JSON.stringify(saved));
+  }, { placements, reason });
+  await page.reload();
+  const a = page.getByRole("region", { name: ref.sellerDomain });
+  const b = page.getByRole("region", { name: rug.sellerDomain });
+  const handoff = { name: "Continue to Shopify checkout" };
+  const checkoutCalls = () => calls.filter(call => call.endpoint === "checkout");
+  const reviewEntries = ikea ? ["#tray-review-products", '[data-journey-action="shop"]'] : ["#save-room", "#save-room"];
+  for (const [index, entry] of reviewEntries.entries()) {
+    await page.locator(entry).click();
+    await expect(a.getByRole("button", { name: "Start checkout" })).toBeEnabled();
+    await expect(page.locator(".shop-card")).toHaveCount(4);
+    const card = page.locator(".shop-card").filter({ has: page.locator('[data-include="home-lamp"]') });
+    await expect(card.getByText("Living Room", { exact: true })).toHaveCount(1);
+    await expect(card.getByText(reason, { exact: true })).toHaveCount(1);
+    const rows = (await project(page)).savedProducts;
+    expect(rows.map(row => row.id).sort()).toEqual(placements.map(row => row.id).sort());
+    expect(rows.find(row => row.id === "home-lamp")).toMatchObject({ quantity: 2, shopify: ref,
+      savedPrice: { priceMinor: 18900, currency: "USD" }, roomLabel: "Living Room", suggestedReason: reason });
+    expect(rows.find(row => row.id === "home-desk").roomLabel).toBe("Bedroom");
+    expect(checkoutCalls()).toHaveLength(0);
+    if (index === 0) {
+      // Reopen the saved project, then use its other review entry on the next pass.
+      await page.reload();
+      await page.locator("#back-to-tour").click();
+    }
+  }
+  await page.getByRole("button", { name: "Prepare all merchant checkouts" }).click();
+  await expect(b.getByRole("link", handoff)).toHaveAttribute("href", rugCheckout);
+  await expect(a.getByText("The lamp price changed.")).toBeVisible();
+  await expect(a.getByRole("link", handoff)).toHaveCount(0);
+  expect(checkoutCalls()).toHaveLength(2);
+  const firstLines = checkoutCalls().map(call => call.body.lines);
+  expect(firstLines).toContainEqual([lineFor(rug)]);
+  const lightingLines = firstLines.find(lines => lines[0].ref.sellerDomain === ref.sellerDomain);
+  expect(lightingLines).toHaveLength(2);
+  expect(lightingLines).toEqual(expect.arrayContaining([lineFor(lamp, 3), lineFor(shade)]));
+  await a.getByRole("button", { name: "Start checkout" }).click();
+  await expect(a.getByRole("link", handoff)).toHaveAttribute("href", checkoutUrl);
+  await expect(b.getByRole("link", handoff)).toHaveAttribute("href", rugCheckout);
+  expect(checkoutCalls()).toHaveLength(3);
+  expect(checkoutCalls()[2].body.lines).toEqual(expect.arrayContaining([lineFor(revised, 3), lineFor(shade)]));
+  if (ikea) await page.locator("#shop-page").screenshot({ path: testInfo.outputPath("step-7-merchant-groups.png") });
+});
+
 test("a price change requires another click and leaves the other merchant handoff available", async ({ page }) => {
   const newLamp = { ...lamp, priceMinor: 19900 };
   const { calls, a, b, all } = await openSavedMerchants(page, {
@@ -316,6 +390,34 @@ test("a price change requires another click and leaves the other merchant handof
   await a.getByRole("button", { name: "Start checkout" }).click();
   await expect(a.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", checkoutUrl);
   expect(calls.filter(c => c.endpoint === "checkout").at(-1).body.lines).toEqual([lineFor(newLamp, 2), lineFor(shade)]);
+});
+
+test("whole-home review keeps legacy quantities and shows a partial subtotal for unpriced pieces", async ({ page }) => {
+  const calls = await mockShopify(page);
+  await page.goto("/");
+  await page.locator("#whole-home-demo").click();
+  await page.evaluate(({ ref, lampName }) => {
+    const key = "living-blueprint.project.v1";
+    const saved = JSON.parse(localStorage.getItem(key));
+    const archive = { id: "home-chair", productId: "old-chair", merchant: "Archived store", url: "https://archive.example/products/chair" };
+    saved.items = saved.items.flatMap(item => {
+      if (item.id === archive.id) return [{ ...item, ...archive, variant: undefined, variantId: undefined, price: null, shopify: undefined }];
+      if (item.id === "home-desk") return [{ ...item, name: "Legacy desk", productId: null, shopify: { sellerDomain: "incomplete.example" },
+        price: null, variantId: null, url: null, merchant: "Retired store" }];
+      if (item.id === "home-lamp") return [{ ...item, name: lampName, shopify: ref }];
+      return [];
+    });
+    saved.savedProducts = [{ ...archive, quantity: 2, price: 40 }];
+    localStorage.setItem(key, JSON.stringify(saved));
+  }, { ref, lampName: lamp.title });
+  await page.reload();
+  await page.locator("#save-room").click();
+  await expect(page.locator(".shop-card")).toHaveCount(3);
+  await expect(page.locator("#saved-total")).toHaveText("Partial estimated subtotal · $269");
+  expect((await project(page)).savedProducts.find(row => row.id === "home-chair")).toMatchObject({ quantity: 2, price: 40 });
+  await page.getByRole("region", { name: ref.sellerDomain }).getByRole("button", { name: "Start checkout" }).click();
+  await expect(page.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", checkoutUrl);
+  expect(calls.filter(call => call.endpoint === "checkout").map(call => call.body)).toEqual([{ lines: [lineFor(lamp)] }]);
 });
 
 test("re-saving the same placement keeps the original unit quote and saved quantity", async ({ page }) => {

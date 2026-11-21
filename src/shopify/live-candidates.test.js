@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { createShopifyApiMiddleware } from "./shopify-api.js";
 import { createProductCandidate, productCandidateId } from "../contracts/product.js";
-import { refreshPatchCandidates, savedProductsForPatch, toRedesignCandidate } from "./scene-candidate.js";
+import { refreshPatchCandidates, savedProductForPlacement, savedProductsForPatch, toRedesignCandidate } from "./scene-candidate.js";
 import { catalogCheckoutRow } from "./catalog-checkout.js";
 import { getCandidateProducts } from "./candidate-products.js";
 import { applyScenePatch, createRedesignDemoHouse, validateScenePatch } from "../redesign/index.js";
@@ -157,4 +157,17 @@ test("saved catalog pieces recover exact Shopify references and keep their saved
     { ...row, url: "https://www.sundays-company.com/pages/help?variant=41588406419527" },
     { ...row, variantId: "gid://shopify/ProductVariant/999" },
   ]) assert.equal(catalogCheckoutRow(changed), changed);
+});
+
+test("room review retains matching legacy offer details and isolates incomplete references", () => {
+  const previous = { id: "chair", productId: "legacy", url: "https://merchant.example/products/chair",
+    price: 40, photo: "https://merchant.example/chair.jpg", quantity: 2, name: "Original chair", suggestedReason: "Reading corner" };
+  const item = { id: previous.id, productId: previous.productId, url: previous.url };
+  assert.deepEqual(savedProductForPlacement(item, { previous }), previous);
+  assert.equal(savedProductForPlacement({ ...item, url: "https://merchant.example/products/bench" }, { previous }).quantity, undefined);
+  const invalid = savedProductForPlacement({ ...item, shopify: { variantId: "incomplete" } }, { previous });
+  assert.equal(invalid.shopify, undefined);
+  assert.equal(invalid.quantity, 2);
+  const ref = { variantId: "gid://shopify/ProductVariant/1", sellerDomain: shop };
+  assert.equal(savedProductForPlacement({ id: "p", shopify: ref }, { previous: { id: "p", shopify: ref, name: "Saved name" } }).name, "Saved name");
 });

@@ -79,7 +79,8 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       ? product?.merchant || row.merchant || row.shopify.sellerDomain
       : product?.store || product?.merchant || row.merchant || row.store || "Merchant";
     const variant = live ? product?.variantTitle ?? row.variant : product?.variant || row.variant;
-    const numericPrice = Number(product?.price ?? row.price);
+    const amount = product?.price ?? row.price;
+    const numericPrice = amount == null ? NaN : Number(amount);
     const price = live
       ? formatShopifyMoney(product?.priceMinor, product?.currency)
       : Number.isFinite(numericPrice)
@@ -214,9 +215,15 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     display.push(...catalogCards);
     root.replaceChildren(...(display.length ? display : [element("div", "shop-empty", "Your saved products will appear here.")]));
     const included = saved.filter(({ row }) => !row.shopify || !excluded.has(row.id));
-    const knownMinor = included.map(({ row, product }) => row.shopify
-      ? product?.currency === "USD" && Number.isSafeInteger(product.priceMinor) ? product.priceMinor * (row.quantity ?? 1) : null
-      : Math.round(product.price * 100));
+    const knownMinor = included.map(({ row, product }) => {
+      const amount = product?.price ?? row.price;
+      const unitMinor = row.shopify
+        ? (product?.currency === "USD" ? product.priceMinor : null)
+        : (amount == null ? null : Math.round(Number(amount) * 100));
+      const quantity = row.quantity ?? 1;
+      return Number.isSafeInteger(unitMinor) && unitMinor >= 0 && Number.isSafeInteger(quantity) && quantity > 0 &&
+        Number.isSafeInteger(unitMinor * quantity) ? unitMinor * quantity : null;
+    });
     const partial = knownMinor.includes(null);
     const subtotal = knownMinor.reduce((sum, amount) => sum + (amount ?? 0), 0);
     total.textContent = `${partial ? "Partial estimated subtotal" : "Estimated subtotal"} · ${formatUsd(subtotal / 100)}`;

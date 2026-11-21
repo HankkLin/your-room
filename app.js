@@ -45,7 +45,7 @@ import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
 import { createCandidateSession } from "./src/shopify/candidate-session.js";
 import { catalogCheckoutRow } from "./src/shopify/catalog-checkout.js";
-import { createCandidatePlacement, refreshPatchCandidates, savedProductsForPatch, savedShopifyRow } from "./src/shopify/scene-candidate.js";
+import { createCandidatePlacement, refreshPatchCandidates, savedProductForPlacement, savedProductsForPatch, savedShopifyRow } from "./src/shopify/scene-candidate.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
 import { mountDesignSearch } from "./src/components/catalog/design-search.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
@@ -1691,40 +1691,17 @@ $(".brand").onclick = (e) => {
   if (stage !== "setup") beginSetup();
 };
 function savePieces(items, { replaceExisting = false } = {}) {
+  const house = activeHouse();
   const previous = new Map((state.savedProducts ?? []).map(row => [row.id, row]));
   const saved = replaceExisting ? new Map() : new Map(previous);
   for (const item of items) {
     if (item.owned || isObjectLocked(item)) continue;
-    if (item.shopify) {
-      saved.set(item.id, savedShopifyRow(item, previous.get(item.id), shopifyQuotes.get(item.shopify)));
-    } else if (item.productId) {
-      saved.set(item.id, {
-        id: item.id,
-        productId: item.productId,
-        name: item.name,
-        ...(item.variantId ? { variantId: item.variantId } : {}),
-        ...(item.variant ? { variant: item.variant } : {}),
-        ...(item.merchant || item.store
-          ? { merchant: item.merchant || item.store, store: item.store || item.merchant }
-          : {}),
-        ...(Number.isFinite(Number(item.price)) ? { price: Number(item.price) } : {}),
-        ...(item.url ? { url: item.url } : {}),
-        ...(item.photo ? { photo: item.photo } : {}),
-      });
-    } else if (item.url || item.merchant || item.store) {
-      saved.set(item.id, {
-        id: item.id,
-        name: item.name,
-        merchant: item.merchant || item.store || "Merchant",
-        store: item.store || item.merchant || "Merchant",
-        variant: item.variant || "Default Title",
-        price: Number(item.price) || 0,
-        url: item.url || null,
-        photo: item.photo || null,
-      });
-    }
+    const room = house && (house.rooms.find(entry => entry.id === item.roomId) || getRoomAtPoint(house, item.x, item.z));
+    const row = savedProductForPlacement(item, { previous: previous.get(item.id), roomLabel: room?.name,
+      quote: item.shopify && shopifyQuotes.get(item.shopify) });
+    if (row) saved.set(item.id, row);
   }
-  const savedProducts = [...saved.values()].map(row => catalogCheckoutRow(row, previous.get(row.id)));
+  const savedProducts = [...saved.values()];
   commit({ ...state, savedProducts });
   toast(
     items.length === 1

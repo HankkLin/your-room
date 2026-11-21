@@ -1,6 +1,7 @@
 import { createShopifyPreview } from "../../model.js";
 import { canAdoptCandidate, offerSignature, productCandidateId, validCandidateRow } from "../contracts/product.js";
 import { shopifyRequest } from "./shopify-client.js";
+import { catalogCheckoutRow } from "./catalog-checkout.js";
 
 export function createCandidatePlacement(candidate, kind, placement) {
   if (!validCandidateRow(candidate) || !canAdoptCandidate(candidate)) return null;
@@ -44,11 +45,47 @@ export function savedShopifyRow(item, previous, quote) {
   const id = productCandidateId(item.shopify);
   if (!id) throw new Error("This piece has no valid Shopify merchant and variant.");
   const existing = productCandidateId(previous?.shopify) === id ? previous : null;
-  const row = { ...existing, id: item.id, name: item.name, shopify: { ...item.shopify } };
-  const prices = [row.savedPrice, item.savedPrice, productCandidateId(quote) === id ? quote : null];
+  const exactQuote = productCandidateId(quote) === id ? quote : null;
+  const row = { ...existing, id: item.id, name: item.name || existing?.name || exactQuote?.title, shopify: { ...item.shopify } };
+  if (item.suggestedReason) row.suggestedReason = item.suggestedReason;
+  const prices = [row.savedPrice, item.savedPrice, exactQuote];
   const price = prices.find(price => Number.isSafeInteger(price?.priceMinor) && price.priceMinor >= 0 &&
     typeof price.currency === "string" && /^[A-Z]{3}$/.test(price.currency));
   if (price) row.savedPrice = { priceMinor: price.priceMinor, currency: price.currency };
+  return row;
+}
+
+/** Save one selected placement with the room and rationale displayed by the planner. */
+export function savedProductForPlacement(item, { previous, quote, roomLabel, suggestedReason = item.suggestedReason } = {}) {
+  let row;
+  if (productCandidateId(item.shopify)) {
+    row = savedShopifyRow(item, previous, quote);
+  } else if (item.productId || item.url || item.merchant || item.store) {
+    const merchant = item.merchant || item.store;
+    row = catalogCheckoutRow({
+      id: item.id, ...(item.name ? { name: item.name } : {}),
+      ...(item.productId ? { productId: item.productId } : {}),
+      ...(item.variantId ? { variantId: item.variantId } : {}),
+      ...(item.variant ? { variant: item.variant } : {}),
+      ...(merchant ? { merchant, store: item.store || merchant } : {}),
+      ...(item.price != null && Number.isFinite(Number(item.price)) ? { price: Number(item.price) } : {}),
+      ...(item.url ? { url: item.url } : {}),
+      ...(item.photo ? { photo: item.photo } : {}),
+    }, previous);
+    // An old unlinked offer can retain its saved snapshot only for the same placement and offer.
+    const previousMerchant = previous?.merchant || previous?.store;
+    if (!row.shopify && previous?.id === item.id && !previous.shopify &&
+        (row.url || row.productId) && row.url === previous.url && row.productId === previous.productId &&
+        (row.variantId ?? null) === (previous.variantId ?? null) &&
+        (!row.variant || !previous.variant || row.variant === previous.variant) &&
+        (!merchant || !previousMerchant || merchant === previousMerchant)) {
+      row = { ...previous, ...row };
+    }
+  } else {
+    return null;
+  }
+  if (roomLabel) row.roomLabel = roomLabel;
+  if (suggestedReason) row.suggestedReason = suggestedReason;
   return row;
 }
 
