@@ -349,7 +349,7 @@ function housePreview(house, items) {
     ${rooms.join("")}${pieces.join("")}${labels.join("")}</svg>`;
 }
 
-export function openSetup({ state, isNew, initialStep = null, onApply, onCancel, onEditCurrent, readPhoto }) {
+export function openSetup({ state, isNew, initialStep = null, onFurnitureDraft, onBackToStyle, onApply, onCancel, onEditCurrent, readPhoto }) {
   const host = document.getElementById("setup-page");
   let step = initialStep ?? (isNew ? 1 : 2);
   let source = isNew ? "custom" : state.roomPhoto ? "photo" : "custom";
@@ -362,7 +362,39 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
   };
   const rawHouse = !isNew && (state.importedHouse || state.house);
   const house = rawHouse ? normalizeHouse(rawHouse) : null;
-  const houseInventory = Boolean(house && initialStep === 3);
+  const editingInventory = initialStep === 3 && !isNew;
+  const editableFields = ["name", "width", "depth", "height", "dimensionSource", "dimensionsSource"];
+  const saved = editingInventory && state.furnitureDraft;
+  if (saved) {
+    const editable = item => item.owned && !item.locked && item.type !== "fixed";
+    draft.items = draft.items.filter(item => !editable(item) || !saved.removed.includes(item.id));
+    for (const item of draft.items) {
+      const changes = saved.edits[item.id];
+      if (!editable(item) || !changes) continue;
+      for (const key of editableFields) {
+        if (Object.hasOwn(changes, key)) item[key] = changes[key];
+      }
+    }
+    draft.additions = structuredClone(saved.additions);
+    if (Object.hasOwn(saved, "photo")) draft.photo = saved.photo;
+  }
+  function saveFurnitureDraft() {
+    if (!onFurnitureDraft) return;
+    const current = new Map(draft.items.map(item => [item.id, item]));
+    const removed = [];
+    const edits = {};
+    for (const original of state.items) {
+      if (!original.owned || original.locked || original.type === "fixed") continue;
+      const item = current.get(original.id);
+      if (!item) removed.push(original.id);
+      else {
+        const fields = editableFields.filter(key => item[key] !== original[key]);
+        if (fields.length) edits[item.id] = Object.fromEntries(fields.map(key => [key, item[key]]));
+      }
+    }
+    onFurnitureDraft({ removed, edits, additions: draft.additions,
+      ...(draft.photo !== state.roomPhoto ? { photo: draft.photo } : {}) });
+  }
   let detection = "idle",
     message = "",
     error = "",
@@ -674,10 +706,11 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
   }
   function render(focus = false) {
     if (!active) return;
+    saveFurnitureDraft();
     const title = step === 2 ? "Shape your room." : "Keep your furniture.";
     host.innerHTML =
       '<div class="setup-shell">' +
-      (houseInventory ? "" : stepper()) +
+      (editingInventory ? "" : stepper()) +
       (step === 1
         ? first()
         : '<div class="setup-heading"><p class="eyebrow">Room setup</p><h1 tabindex="-1">' +
@@ -691,7 +724,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
             ? source === "photo"
               ? "Use this footprint"
               : "Review furniture"
-            : houseInventory ? "Continue to AI Design"
+            : editingInventory ? "Continue to Explore room"
             : detection === "loading"
               ? "Use current list"
               : "Continue to styling") +
@@ -931,7 +964,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
         ...state,
         house: isNew ? null : state.house,
         roomName: draft.roomName.trim() || "My living room",
-        room: houseInventory ? state.room : draft.room,
+        room: editingInventory ? state.room : draft.room,
         roomPhoto: draft.photo,
         importedHouse: isNew ? null : state.importedHouse,
         items,
@@ -1041,9 +1074,9 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       return;
     }
     if (b.id === "setup-back") {
-      if (houseInventory) {
+      if (editingInventory) {
         onExit();
-        onCancel?.();
+        onBackToStyle();
         return;
       }
       stepTo(step - 1);
@@ -1149,7 +1182,10 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       }
     }
     const row = node.closest("[data-draft]");
-    if (!row) return;
+    if (!row) {
+      saveFurnitureDraft();
+      return;
+    }
     const item = draft.additions.find((i) => i.id === row.dataset.draft);
     if (node.matches("[data-kind]")) {
       item.kind = node.value;
@@ -1182,6 +1218,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
     }
     if (node.matches("[data-count]") && node.validity.valid && node.value)
       item.count = Math.floor(Number(node.value));
+    saveFurnitureDraft();
   };
   host.onchange = (e) => {
     if (e.target.id === "room-photo-upload" || e.target.id === "furniture-photo-upload") {

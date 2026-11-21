@@ -21,7 +21,7 @@
       <a href="#studio" class="brand"
         ><span class="brandmark" data-icon="brand"></span>Living Blueprint</a
       >
-      <nav class="stage-nav bp-eight-nav" aria-label="8-step blueprint workflow">
+      <nav class="stage-nav bp-eight-nav" aria-label="7-step blueprint workflow">
         <button id="room-settings" data-step="setup" data-bp-step="1">
           <span aria-hidden="true">1</span>Your Home
         </button>
@@ -34,17 +34,14 @@
         <button id="furniture-step" data-bp-step="4" type="button">
           <span aria-hidden="true">4</span>Your Furniture
         </button>
-        <button id="ai-design-step" data-bp-step="5" type="button">
-          <span aria-hidden="true">5</span>AI Design
+        <button id="tour-step" data-step="tour" data-bp-step="5">
+          <span aria-hidden="true">5</span>Explore room
         </button>
-        <button id="tour-step" data-step="tour" data-bp-step="6">
-          <span aria-hidden="true">6</span>Explore room
+        <button id="stress-test-step" data-bp-step="6" type="button">
+          <span aria-hidden="true">6</span>Stress Test
         </button>
-        <button id="stress-test-step" data-bp-step="7" type="button">
-          <span aria-hidden="true">7</span>Stress Test
-        </button>
-        <button id="shop" data-step="shop" data-bp-step="8">
-          <span aria-hidden="true">8</span>Furnish &amp; Buy <small id="shop-count"></small>
+        <button id="shop" data-step="shop" data-bp-step="7">
+          <span aria-hidden="true">7</span>Furnish &amp; Buy <small id="shop-count"></small>
         </button>
       </nav>
     </header>
@@ -281,7 +278,7 @@
                     required /></span
               ></label>
               <button type="button" class="primary" id="continue-furniture" hidden>Continue to Your Furniture →</button>
-              <button type="submit" class="primary" id="generate">
+              <button type="submit" class="secondary" id="generate">
                 <span data-icon="sparkles"></span> Auto-style room
               </button>
               <p class="restyle-result" id="restyle-design-result" role="status"></p>
@@ -315,7 +312,7 @@
             </section>
           </section>
           <section id="tour-panel" class="panel" hidden>
-            <p class="eyebrow">Step 6 · Explore &amp; Edit</p>
+            <p class="eyebrow">Step 5 · Explore &amp; Edit</p>
             <h2>Explore your layout</h2>
             <p class="restyle-result" id="restyle-tour-result" role="status"></p>
             <p id="walk-help" hidden></p>
@@ -350,7 +347,7 @@
       <section class="panel studio-replay" id="studio-replay-panel" aria-labelledby="studio-replay-title" hidden>
         <header class="studio-replay-header">
           <div>
-            <p class="eyebrow">Step 6 · Regional Blueprint Redesign &amp; Routine Replay</p>
+            <p class="eyebrow">Step 5 · Regional Blueprint Redesign &amp; Routine Replay</p>
             <h2 id="studio-replay-title">Replay your saved household &amp; edit a selected area</h2>
           </div>
           <div class="studio-replay-actions">
@@ -389,7 +386,7 @@
       <section class="inventory" aria-label="Furnishing and suggested products tray">
         <div class="inventory-head">
           <div>
-            <p class="eyebrow">Step 6 · Explore &amp; Edit</p>
+            <p class="eyebrow">Step 5 · Explore &amp; Edit</p>
             <h2>Pieces in this plan <span id="item-count"></span></h2>
           </div>
           <div class="inventory-actions">
@@ -402,7 +399,7 @@
       </section>
     </main>
     <main id="shop-page" hidden aria-labelledby="shop-title">
-      <p class="eyebrow">Step 8 · Furnish &amp; Buy</p>
+      <p class="eyebrow">Step 7 · Furnish &amp; Buy</p>
       <h1 id="shop-title">Saved pieces &amp; merchant checkout</h1>
       <p class="shop-intro" id="shop-intro"></p>
       <div class="shop-honesty-banner" id="shop-honesty-banner">

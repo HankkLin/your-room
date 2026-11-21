@@ -214,7 +214,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   expect(errors).toEqual([]);
 });
 
-test("Blueprint 8-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 8-step header nav, StyleBrief priority chips, Family of Four + Grandparents, Friends count control, region selection shortcut, Before/After redesign stepper, and Owned vs Merchant Shopify handoff", async ({
+test("Blueprint 7-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 7-step header nav, StyleBrief priority chips, Family of Four + Grandparents, Friends count control, region selection shortcut, Before/After redesign stepper, and Owned vs Merchant Shopify handoff", async ({
   page,
 }) => {
   const errors = [];
@@ -222,10 +222,10 @@ test("Blueprint 8-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 8-step hea
 
   await page.goto("/");
 
-  // U1: 8-step Blueprint header navigation renders all 8 canonical steps
+  // U1: 7-step Blueprint header navigation renders all 7 canonical steps
   const nav = page.locator("nav.bp-eight-nav");
   await expect(nav).toBeVisible();
-  await expect(nav.locator("[data-bp-step]")).toHaveCount(8);
+  await expect(nav.locator("[data-bp-step]")).toHaveCount(7);
   await expect(nav.locator('[data-bp-step="1"]')).toHaveAttribute("aria-current", "step");
 
   // Step 1: Import sample whole-home floorplan -> Confirm
@@ -256,16 +256,16 @@ test("Blueprint 8-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 8-step hea
   await page.locator("[data-name]").last().fill("Family heirloom armchair");
   await page.locator("#setup-next").click();
 
-  // Step 6: Explore room + Select area / Draw region opens floorplan region editor immediately
+  // Step 5: Explore room + Select area / Draw region opens floorplan region editor immediately
   await page.locator("#tour-step").click();
-  await expect(nav.locator('[data-bp-step="6"]')).toHaveAttribute("aria-current", "step");
+  await expect(nav.locator('[data-bp-step="5"]')).toHaveAttribute("aria-current", "step");
   await expect(page.locator("#select-area-shortcut")).toBeVisible();
   await page.locator("#select-area-shortcut").click();
   await expect(page.locator("#studio-region-editor .region-map")).toBeVisible();
 
-  // Step 7: Stress Test nav button -> Friends Are Coming card + friend count preset 12 (4 family + 12 friends -> crowd run)
+  // Step 6: Stress Test nav button -> Friends Are Coming card + friend count preset 12 (4 family + 12 friends -> crowd run)
   await page.locator("#stress-test-step").click();
-  await expect(nav.locator('[data-bp-step="7"]')).toHaveAttribute("aria-current", "step");
+  await expect(nav.locator('[data-bp-step="6"]')).toHaveAttribute("aria-current", "step");
   await page.locator('[data-scenario-card="friends-arrival"]').click();
   await expect(page.locator("#sim-friends-control")).toBeVisible();
   await page.locator('[data-friend-preset="12"]').click();
@@ -290,10 +290,10 @@ test("Blueprint 8-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 8-step hea
   await expect(page.locator("#sim-findings-list")).toContainText("0.76 m width");
   await expect(page.locator("#sim-redesign-stepper li")).toHaveCount(5);
 
-  // U10: Step 8 Furnish & Buy separates Already owned ($0) from New products grouped by merchant
+  // U10: Step 7 Furnish & Buy separates Already owned ($0) from New products grouped by merchant
   await page.locator("#tray-review-products").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "shop");
-  await expect(nav.locator('[data-bp-step="8"]')).toHaveAttribute("aria-current", "step");
+  await expect(nav.locator('[data-bp-step="7"]')).toHaveAttribute("aria-current", "step");
   await expect(page.locator(".shop-owned-section")).toContainText("Already owned");
   await expect(page.locator(".shop-owned-section")).toContainText("Family heirloom armchair");
   await expect(page.locator("#shop-honesty-banner")).toBeVisible();

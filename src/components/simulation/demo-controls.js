@@ -292,7 +292,7 @@ export function renderControlPanelMarkup(
   return `<div class="twin-control-card" aria-label="Household Digital Twin controls">
     <div class="twin-card-head">
       <div>
-        <p class="eyebrow">Step 7 · Living Blueprint Stress Test</p>
+        <p class="eyebrow">Step 6 · Living Blueprint Stress Test</p>
         <h2>Simulate life</h2>
       </div>
       ${state.isMockData ? '<span class="twin-mock-badge" title="Placeholder mock output while simulation engine is external">Demo mock</span>' : '<span class="bp-spec-tag">DWG · LIVE TWIN</span>'}
