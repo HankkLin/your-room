@@ -50,27 +50,43 @@ const DEFAULT_PERSONA_COLORS = Object.freeze([
 const PRIMARY_SCENARIO_CARDS = Object.freeze([
   {
     id: "morning-routine",
+    icon: "☀️",
+    shortLabel: "Morning",
     title: "Morning Routine",
     subtitle: "Everyday family life",
     badge: "4 family",
   },
   {
     id: "friends-arrival",
+    icon: "🎉",
+    shortLabel: "Friends",
     title: "Friends Are Coming",
     subtitle: "Staged crowd waves",
     badge: "Crowd test",
   },
   {
     id: "grandparents-visit",
+    icon: "♿",
+    shortLabel: "Grandparents",
     title: "Grandparents Staying Over",
-    subtitle: "♿ Accessibility test",
+    subtitle: "Accessibility test (0.90 m)",
     badge: "♿ 0.90 m",
   },
   {
     id: "fire-emergency",
+    icon: "🔥",
+    shortLabel: "Fire",
     title: "Fire Emergency",
-    subtitle: "Secondary safety test",
+    subtitle: "Emergency egress check",
     badge: "Safety",
+  },
+  {
+    id: "normal-day",
+    icon: "🏠",
+    shortLabel: "Normal Day",
+    title: "Normal Day",
+    subtitle: "Full daily schedule",
+    badge: "All day",
   },
 ]);
 
@@ -166,12 +182,9 @@ export function renderPersonaQuickViewMarkup(personas = []) {
 function renderScenarioCardsMarkup(state, disabled) {
   const cards = PRIMARY_SCENARIO_CARDS.map((card) => {
     const active = state.scenarioId === card.id;
-    return `<button type="button" class="twin-scenario-card" data-scenario-card="${escapeHtml(card.id)}" aria-pressed="${active}" ${disabled ? "disabled" : ""}>
-      <span class="twin-sc-top">
-        <strong>${escapeHtml(card.title)}</strong>
-        <span class="twin-sc-badge">${escapeHtml(card.badge)}</span>
-      </span>
-      <small>${escapeHtml(card.subtitle)}</small>
+    return `<button type="button" class="twin-scenario-card twin-scenario-icon-btn" data-scenario-card="${escapeHtml(card.id)}" aria-label="${escapeHtml(card.title)}" title="${escapeHtml(`${card.title} — ${card.subtitle}`)}" aria-pressed="${active}" ${disabled ? "disabled" : ""}>
+      <span class="twin-sc-icon" aria-hidden="true">${card.icon}</span>
+      <span class="twin-sc-short">${escapeHtml(card.shortLabel)}</span>
     </button>`;
   }).join("");
 
@@ -195,7 +208,7 @@ function renderScenarioCardsMarkup(state, disabled) {
         </div>`
       : "";
 
-  return `<div class="twin-scenario-grid" role="group" aria-label="Stress test scenarios">${cards}</div>${friendControl}`;
+  return `<div class="twin-scenario-grid twin-scenario-icon-bar" role="group" aria-label="Stress test scenarios">${cards}</div>${friendControl}`;
 }
 
 export function renderControlPanelMarkup(
@@ -285,7 +298,11 @@ export function renderControlPanelMarkup(
       ${state.isMockData ? '<span class="twin-mock-badge" title="Placeholder mock output while simulation engine is external">Demo mock</span>' : '<span class="bp-spec-tag">DWG · LIVE TWIN</span>'}
     </div>
     ${renderScenarioCardsMarkup(state, isBusy)}
-    <label class="twin-field" for="sim-scenario">
+    <div class="twin-scenario-active-bar">
+      <strong>${escapeHtml(activeScenario?.name || "Morning Routine")}</strong>
+      <span id="sim-scenario-desc">${escapeHtml(activeScenario?.description || "")}</span>
+    </div>
+    <label class="twin-field" for="sim-scenario" hidden>
       <span class="section-label">All scenarios</span>
       <select id="sim-scenario" aria-label="Simulation scenario" ${isBusy ? "disabled" : ""}>
         ${scenarios
@@ -296,7 +313,6 @@ export function renderControlPanelMarkup(
           .join("")}
       </select>
     </label>
-    <p class="twin-scenario-desc" id="sim-scenario-desc">${escapeHtml(activeScenario?.description || "")}</p>
     <div class="twin-status-row" id="sim-status" data-status="${escapeHtml(state.status)}" role="status" aria-live="polite">
       <span class="twin-status-indicator"><span class="twin-dot" aria-hidden="true"></span><span>${escapeHtml(statusText)}</span></span>
       <span class="twin-clock" id="sim-clock">${state.currentTime ? escapeHtml(state.currentTime) : ""}</span>

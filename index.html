@@ -159,6 +159,19 @@
           </div>
           <div class="viewport">
             <div class="scene-host" id="scene"></div>
+            <aside
+              class="bp-furniture-rail"
+              id="furniture-rail"
+              aria-label="Furniture product rail"
+              hidden
+            ></aside>
+            <aside
+              class="bp-product-preview"
+              id="product-preview-card"
+              role="region"
+              aria-label="Product preview"
+              hidden
+            ></aside>
             <div class="tour-map" id="tour-map" hidden>
               <div class="plan-pins">
                 <button
@@ -298,11 +311,8 @@
           <section id="tour-panel" class="panel" hidden>
             <p class="eyebrow">Step 5 · Explore &amp; Edit</p>
             <h2>Explore your layout</h2>
-            <p id="walk-help">
-              Drag the background to look around. Use the numbered viewpoints or
-              walk with W, A, S, D while the room is focused.
-            </p>
-            <div class="walk-pad" aria-label="Walk through the room">
+            <p id="walk-help" hidden></p>
+            <div class="walk-pad" aria-label="Walk through the room" hidden>
               <button data-walk="left" aria-label="Walk left">←</button
               ><button data-walk="forward" aria-label="Walk forward">↑</button
               ><button data-walk="backward" aria-label="Walk backward">↓</button
