@@ -1,6 +1,7 @@
 import { FINDING_TYPES } from "../../contracts/simulation.js";
 import { createDemoHousehold, MORNING_ROUTINE_SCENARIO } from "../demo-household.js";
 import { simulateHouse } from "../simulation-engine.js";
+import { validateAccessibility } from "./accessibility.js";
 import { validateEvacuation } from "./evacuation.js";
 import { validateNoiseConflicts } from "./noise.js";
 import { validatePrivacySightlines } from "./privacy.js";
@@ -11,10 +12,13 @@ const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const round1 = (n) => Math.round(n * 10) / 10;
 
 const DEDUCTION_WEIGHTS = {
-  // Movement
+  // Movement & Accessibility
   [FINDING_TYPES.NO_PATH]: 45,
   [FINDING_TYPES.CONGESTION]: 30,
   [FINDING_TYPES.LONG_PATH]: 15,
+  [FINDING_TYPES.ACCESSIBILITY_ROUTE_BLOCKED]: 42,
+  [FINDING_TYPES.ACCESSIBILITY_CLEARANCE_FAIL]: 28,
+  [FINDING_TYPES.ACCESSIBILITY_TURN_RADIUS_FAIL]: 24,
 
   // Privacy
   [FINDING_TYPES.PRIVACY_SIGHTLINE]: 32,
@@ -91,6 +95,7 @@ export function evaluateHouseholdExperience({
   scenario = null,
   sun = null,
   includeEvacuation = true,
+  forceAccessibilityCheck = false,
 } = {}) {
   if (!house || typeof house !== "object") {
     throw new Error("A valid House JSON object is required for household evaluation.");
@@ -117,7 +122,16 @@ export function evaluateHouseholdExperience({
         )
       : null);
 
-  const movementFindings = simulation ? [...simulation.findings] : [];
+  const accessibilityResult = validateAccessibility({
+    house,
+    household: effectiveHousehold,
+    forceCheck: forceAccessibilityCheck,
+  });
+
+  const movementFindings = [
+    ...(simulation ? simulation.findings : []),
+    ...accessibilityResult.findings,
+  ];
   const privacyResult = validatePrivacySightlines({ house });
   const visibilityResult = validateTvVisibility({ house });
   const noiseResult = validateNoiseConflicts({
@@ -180,6 +194,7 @@ export function evaluateHouseholdExperience({
     categories,
     simulation,
     details: {
+      accessibilityChecks: accessibilityResult.checks,
       privacyChecks: privacyResult.checks,
       tvEvaluations: visibilityResult.evaluations,
       noiseEvaluations: noiseResult.evaluations,

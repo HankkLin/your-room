@@ -699,6 +699,7 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
         preferredFixture.position[2],
         0.85,
       );
+      hasDedicatedActivityAnchor = true;
     }
   }
 
@@ -735,13 +736,64 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
       );
       const comfortBonus = Math.min(clearance, 0.65) * 0.55;
       const score = distToRef - comfortBonus;
-      candidates.push({ pos, score, idx });
+      candidates.push({ pos, score, idx, col, row });
     }
   }
 
   if (candidates.length === 0) return null;
 
   candidates.sort((a, b) => a.score - b.score || a.idx - b.idx);
+
+  // Filter out tiny isolated furniture pockets inside the room by keeping cells connected to the room's largest walkable component
+  if (candidates.length > 1) {
+    const inRoomSet = new Set(candidates.map((c) => c.idx));
+    const visited = new Set();
+    let bestComponent = null;
+    const dirs = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    for (const cand of candidates) {
+      if (visited.has(cand.idx)) continue;
+      const comp = new Set([cand.idx]);
+      visited.add(cand.idx);
+      const queue = [cand.idx];
+      while (queue.length > 0) {
+        const cur = queue.pop();
+        const cc = cur % navigation.width;
+        const cr = (cur - cc) / navigation.width;
+        for (const [dc, dr] of dirs) {
+          const nc = cc + dc;
+          const nr = cr + dr;
+          if (!navigation.inGridBounds(nc, nr)) continue;
+          const nIdx = nr * navigation.width + nc;
+          // Allow stepping across CELL_DOOR thresholds inside the room bounds too
+          if (visited.has(nIdx)) continue;
+          if (
+            inRoomSet.has(nIdx) ||
+            (navigation.roomIndexGrid[nIdx] === roomIdx &&
+              navigation.clearanceGrid[nIdx] >= radius)
+          ) {
+            visited.add(nIdx);
+            comp.add(nIdx);
+            queue.push(nIdx);
+          }
+        }
+      }
+      if (!bestComponent || comp.size > bestComponent.size) {
+        bestComponent = comp;
+      }
+    }
+    if (bestComponent && bestComponent.size < candidates.length) {
+      const mainCandidates = candidates.filter((c) => bestComponent.has(c.idx));
+      if (mainCandidates.length > 0) {
+        candidates.length = 0;
+        candidates.push(...mainCandidates);
+      }
+    }
+  }
 
   // When an activity binds directly to dedicated movable furniture (e.g. `eat` at a dining table
   // while another occupant `cook`s at the stove), stand directly at that furniture's best spot

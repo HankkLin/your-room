@@ -9,6 +9,7 @@ export {
   DEFAULT_LONG_PATH_METERS,
   DEFAULT_MOVEMENT_SPEED_MPS,
   DEFAULT_PERSONAL_SPACE_RADIUS,
+  DEMO_CHECKPOINT_TYPES,
   EXPERIENCE_CATEGORIES,
   FINDING_TYPES,
   SIMULATION_EVENT_TYPES,
@@ -37,6 +38,7 @@ export { createHouseholdAgentState } from "./household-agent.js";
 
 export {
   getSimulationSnapshotAt,
+  interpolateHeadingRadians,
   runSimulation,
   simulateHouse,
 } from "./simulation-engine.js";
@@ -44,9 +46,13 @@ export {
 export {
   MORNING_ROUTINE_SCENARIO,
   createDemoHousehold,
+  createFamilyOfFourPersonas,
+  createFamilyOfFourSimulationHousehold,
   createWholeHomeDemoPersonas,
   runMorningRoutineDemo,
 } from "./demo-household.js";
+
+export { buildDemoCheckpoints } from "./demo-checkpoints.js";
 
 export {
   buildOpaqueWallSegments,
@@ -63,6 +69,14 @@ export { validateNoiseConflicts } from "./validators/noise.js";
 export { validateEvacuation } from "./validators/evacuation.js";
 export { validateSunlight } from "./validators/sunlight.js";
 export {
+  DEFAULT_WHEELCHAIR_RADIUS_METERS,
+  DEFAULT_WHEELCHAIR_WIDTH_METERS,
+  MIN_ACCESSIBLE_DOOR_WIDTH_METERS,
+  REQUIRED_TURN_DIAMETER_METERS,
+  REQUIRED_TURN_RADIUS_METERS,
+  validateAccessibility,
+} from "./validators/accessibility.js";
+export {
   evaluateHouseholdExperience,
   validateHouseholdExperience,
 } from "./validators/household-evaluation.js";
@@ -72,6 +86,14 @@ export {
   createDinnerPartyGuests,
   createDinnerPartyScenario,
 } from "./scenarios/dinner-party.js";
+export {
+  createGrandparentsVisitScenario,
+  createVisitingGrandparents,
+} from "./scenarios/grandparents-visit.js";
+export {
+  createFriendsArrivalScenario,
+  createFriendsArrivalWaves,
+} from "./scenarios/friends-arrival.js";
 export { runStressScenario } from "./scenarios/run-stress-scenario.js";
 
 export {

@@ -21,7 +21,7 @@ import {
   mockSimulationResult,
 } from "./demo-simulation-mock.js";
 
-test("Test 1 — Scenario selector renders all four required demo scenarios", () => {
+test("Test 1 — Scenario selector renders all six household & stress demo scenarios", () => {
   const html = renderControlPanelMarkup({});
   for (const scenario of DEMO_SCENARIOS) {
     assert(
@@ -35,6 +35,8 @@ test("Test 1 — Scenario selector renders all four required demo scenarios", ()
     [
       "Morning Routine",
       "Normal Day",
+      "Grandparents Visit — Accessibility",
+      "Friends Arrive — Staged Crowd",
       "Dinner Party — 8 Guests",
       "Fire Emergency",
     ],
