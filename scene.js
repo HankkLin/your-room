@@ -646,6 +646,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     getPlaybackStats() {
       return {
         avatarCount: simLayer.getAvatarCount(),
+        avatarStatuses: simLayer.getAvatarStatuses(),
         overlayCount: simLayer.getOverlayCount(),
       };
     },

@@ -391,12 +391,12 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
   }
   function first() {
     return (
-      '<div class="setup-start-grid"><section class="setup-welcome"><p class="eyebrow">Room setup</p><h1 tabindex="-1">Start with your room.</h1><p class="setup-lead">Bring in a room photo or build a floor plan. Then design around the furniture you own.</p>' +
-      '<label class="start-option start-option-photo"><span class="start-symbol">' +
+      '<div class="setup-start-grid"><section class="setup-welcome"><p class="eyebrow">Room setup</p><h1 tabindex="-1">Start with your home.</h1><p class="setup-lead">Import a floor plan or choose an existing layout. Then design around the furniture you own.</p>' +
+      '<label class="start-option start-option-photo" hidden aria-hidden="true"><span class="start-symbol">' +
       icon("image") +
       '</span><span><strong>Upload a room photo</strong><small>Review the furniture found in your photo.</small></span><span class="start-arrow">↗</span><input type="file" id="room-photo-upload" accept="image/*"></label>' +
       photoStatus() +
-      '<button class="text-btn sample-photo-link" id="try-sample-photo">Try a sample photo <span aria-hidden="true">→</span></button>' +
+      '<button class="text-btn sample-photo-link" id="try-sample-photo" hidden aria-hidden="true">Try a sample photo <span aria-hidden="true">→</span></button>' +
       '<label class="start-option start-option-floorplan"><span class="start-symbol">' +
       icon("cube") +
       '</span><span><strong>Import a whole-home floorplan</strong><small>Extract multi-room walls, doors, windows, and locked fixtures.</small></span><span class="start-arrow">↗</span><input type="file" id="floorplan-upload" accept="image/png,image/jpeg,image/webp"></label>' +

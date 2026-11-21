@@ -59,19 +59,19 @@ function normalizeDestinationSpec(entry) {
  * }>}
  */
 const DEFAULT_EVENT_LABELS = Object.freeze({
-  sleep: "Sleep",
-  wake: "Wake up",
-  bathroom: "Use bathroom",
-  cook: "Prepare meal",
-  breakfast: "Eat breakfast",
-  eat: "Sit to eat",
-  work: "WFH focus / call",
-  study: "Homework at desk",
-  watchTv: "Watch TV",
-  socialize: "Visit & chat",
-  relax: "Relax in room",
-  exercise: "Stretch / exercise",
-  other: "Household routine",
+  sleep: "Sleeping",
+  wake: "Waking up",
+  bathroom: "Brushing teeth",
+  cook: "Making breakfast",
+  breakfast: "Eating breakfast",
+  eat: "Packing lunch",
+  work: "Working from home",
+  study: "Studying at desk",
+  watchTv: "Watching TV",
+  socialize: "Visiting & chatting",
+  relax: "Relaxing",
+  exercise: "Stretching",
+  other: "Getting ready",
 });
 
 function resolveEventLabel(entry, activity) {

@@ -258,8 +258,8 @@ test("B5 — Slow human-readable 1× adaptive pacing vs fast 20× completion & C
   pb.step(1000); // 1 full real second during active walk
   const advancedAt1x = pb.getState().currentSecond - beforeStep;
   assert(
-    advancedAt1x <= 5.0 && advancedAt1x >= 2.0,
-    `Expected slow human-readable walking pace at 1× (2–5 sim s / real s), got ${advancedAt1x}`,
+    advancedAt1x <= 5.0 && advancedAt1x >= 1.2,
+    `Expected slow human-readable walking pace at 1× (1.2–5 sim s / real s), got ${advancedAt1x}`,
   );
 
   // Switch to 20× and verify full completion in < 3 real seconds

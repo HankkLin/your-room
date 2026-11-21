@@ -5,7 +5,10 @@ import {
   SUPPORTED_FRIEND_COUNTS,
   normalizeSimulationViewState,
 } from "../../contracts/simulation.js";
-import { formatFindingEvidenceChips } from "../avatar/simulation-scene-layer.js";
+import {
+  formatAvatarActivityStatus,
+  formatFindingEvidenceChips,
+} from "../avatar/simulation-scene-layer.js";
 
 const escapeHtml = (value) =>
   String(value ?? "").replace(
@@ -135,7 +138,7 @@ export function renderPersonaQuickViewMarkup(personas = []) {
       const schedSummary = summarizeScheduleSpan(p);
       const isWheelchair =
         Boolean(p?.wheelchair) || Number(p?.needs?.accessibility) >= 0.8;
-      return `<div class="twin-persona-item"${isWheelchair ? ' data-wheelchair="true"' : ""}>
+      return `<div class="twin-persona-item" data-persona-id="${escapeHtml(p.id || `p-${idx}`)}"${isWheelchair ? ' data-wheelchair="true"' : ""}>
         <div class="twin-persona-top">
           <span class="twin-persona-ident">
             <span class="twin-persona-dot" style="background:${escapeHtml(color)}" aria-hidden="true">${isWheelchair ? "♿" : ""}</span>
@@ -147,7 +150,7 @@ export function renderPersonaQuickViewMarkup(personas = []) {
             <small class="twin-persona-sched">${escapeHtml(schedSummary)}</small>
           </span>
         </div>
-        <span>${escapeHtml(summarizePersona(p))}</span>
+        <span data-persona-live-activity>${escapeHtml(summarizePersona(p))}</span>
       </div>`;
     })
     .join("");
@@ -973,7 +976,7 @@ export function mountDemoControls({
      * Fast in-place clock + scrubber update during 60fps animation frames.
      * Avoids replacing `controlHost.innerHTML` while buttons are being clicked.
      */
-    updateClockAndProgress({ currentTime, currentSecond, startSecond, endSecond } = {}) {
+    updateClockAndProgress({ currentTime, currentSecond, startSecond, endSecond, snapshots } = {}) {
       if (!visible || !controlHost) return;
       const clockEl = controlHost.querySelector("#sim-clock");
       if (clockEl && typeof currentTime === "string") {
@@ -984,6 +987,18 @@ export function mountDemoControls({
         if (Number.isFinite(Number(startSecond))) scrubber.min = String(startSecond);
         if (Number.isFinite(Number(endSecond))) scrubber.max = String(endSecond);
         scrubber.value = String(Math.round(Number(currentSecond)));
+      }
+      if (Array.isArray(snapshots) && snapshots.length > 0) {
+        for (const snap of snapshots) {
+          const row = controlHost.querySelector(
+            `[data-persona-id="${CSS.escape ? CSS.escape(String(snap.agentId)) : String(snap.agentId)}"] [data-persona-live-activity]`,
+          );
+          if (!row) continue;
+          const st = formatAvatarActivityStatus(snap);
+          row.textContent = st.destinationLabel && !st.isMoving
+            ? `${st.activityLabel} · ${st.destinationLabel}`
+            : st.activityLabel;
+        }
       }
     },
     setVisible(nextVisible) {

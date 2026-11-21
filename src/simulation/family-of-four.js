@@ -196,7 +196,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 432,
           activity: "wake",
           eventType: "wake_up",
-          eventLabel: "Wake up",
+          eventLabel: "Waking up",
           destination: { type: "room", roomId: bedroomId },
         },
         {
@@ -204,7 +204,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 444,
           activity: "bathroom",
           eventType: "use_bathroom",
-          eventLabel: "Morning bathroom",
+          eventLabel: "Using bathroom",
           destination: { type: "room", roomId: bathroomId },
         },
         {
@@ -212,7 +212,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 460,
           activity: "other",
           eventType: "dress_ready",
-          eventLabel: "Get dressed",
+          eventLabel: "Getting dressed",
           destination: { type: "room", roomId: bedroomId },
         },
         {
@@ -220,7 +220,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 490,
           activity: "cook",
           eventType: "prepare_breakfast",
-          eventLabel: "Prepare family breakfast",
+          eventLabel: "Making breakfast",
           destination: { type: "room", roomId: kitchenId },
         },
         {
@@ -296,7 +296,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 444,
           activity: "wake",
           eventType: "wake_up",
-          eventLabel: "Wake up & check schedule",
+          eventLabel: "Waking up",
           destination: { type: "room", roomId: bedroomId },
         },
         {
@@ -304,7 +304,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 458,
           activity: "bathroom",
           eventType: "use_bathroom",
-          eventLabel: "Use bathroom (crosses Dad in hallway)",
+          eventLabel: "Using bathroom",
           destination: { type: "room", roomId: bathroomId },
         },
         {
@@ -312,7 +312,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 492,
           activity: "eat",
           eventType: "sit_to_eat",
-          eventLabel: "Sit for breakfast & pack lunches",
+          eventLabel: "Packing lunch",
           destination: { type: "room", roomId: kitchenId },
         },
         {
@@ -320,7 +320,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 540,
           activity: "other",
           eventType: "school_dropoff",
-          eventLabel: hasExteriorDoor ? "Head out for errands" : "Morning check-in",
+          eventLabel: hasExteriorDoor ? "Heading out" : "Morning check-in",
           destination: hasExteriorDoor
             ? { type: "exit" }
             : { type: "room", roomId: livingId },
@@ -382,7 +382,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 458,
           activity: "sleep",
           eventType: "wake_up",
-          eventLabel: "Sleep in / wake up",
+          eventLabel: "Sleeping in",
           destination: { type: "room", roomId: bedroomId },
         },
         {
@@ -390,7 +390,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 470,
           activity: "bathroom",
           eventType: "use_bathroom",
-          eventLabel: "Teen bathroom turn",
+          eventLabel: "Brushing teeth",
           destination: { type: "room", roomId: bathroomId },
         },
         {
@@ -398,7 +398,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 512,
           activity: "study",
           eventType: "homework",
-          eventLabel: "Review homework at bedroom desk",
+          eventLabel: "Studying at desk",
           destination: { type: "room", roomId: bedroomId },
         },
         {
@@ -406,7 +406,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 540,
           activity: "relax",
           eventType: "leave_school",
-          eventLabel: "Pack backpack for school",
+          eventLabel: "Packing backpack",
           destination: { type: "room", roomId: bedroomId },
         },
         {
@@ -466,7 +466,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 448,
           activity: "sleep",
           eventType: "wake_up",
-          eventLabel: "Wake up",
+          eventLabel: "Waking up",
           destination: { type: "room", roomId: bedroomId },
         },
         {
@@ -474,7 +474,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 471,
           activity: "relax",
           eventType: "morning_play",
-          eventLabel: "Play in living room",
+          eventLabel: "Playing in living room",
           destination: { type: "room", roomId: livingId },
         },
         {
@@ -482,7 +482,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 484,
           activity: "bathroom",
           eventType: "use_bathroom",
-          eventLabel: "Brush teeth",
+          eventLabel: "Brushing teeth",
           destination: { type: "room", roomId: bathroomId },
         },
         {
@@ -490,7 +490,7 @@ export function createFamilyOfFourSimulationHousehold(house) {
           endMinute: 515,
           activity: "watchTv",
           eventType: "watch_tv",
-          eventLabel: "Watch morning cartoons",
+          eventLabel: "Watching TV",
           destination: { type: "room", roomId: livingId },
         },
         {

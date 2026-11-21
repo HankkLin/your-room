@@ -169,6 +169,7 @@ export function createSimulationPlaybackController({
         endSecond,
         progress,
         currentTime,
+        snapshots,
       });
     }
     return { currentTime, snapshots, visibleRoutes };
@@ -307,18 +308,38 @@ export function createSimulationPlaybackController({
     });
   }
 
+  function getNextRouteStartAfter(sec) {
+    const routes = payload?.simulation?.routes;
+    if (!Array.isArray(routes) || routes.length === 0) return Infinity;
+    let earliest = Infinity;
+    for (const r of routes) {
+      const s = Number(r.startTimestamp);
+      if (Number.isFinite(s) && s > sec && s < earliest) {
+        earliest = s;
+      }
+    }
+    return earliest;
+  }
+
   function resolveEffectiveSimRate(sec) {
+    const activeWalk = hasActiveWalkAt(sec);
     // Allow scenario-specific explicit speed rates when configured
     if (payload?.speedRates && Number.isFinite(Number(payload.speedRates[speed]))) {
       const baseRate = Number(payload.speedRates[speed]);
-      if (speed === 1 && payload.adaptiveWalkPacing !== false) {
-        const walkingRate = Number(payload.walkingSimSecondsPerRealSecond) || 3.2;
-        return hasActiveWalkAt(sec) ? Math.min(baseRate, walkingRate) : baseRate;
+      if (payload.adaptiveWalkPacing !== false && speed <= 5) {
+        const baseWalkRate = Number(payload.walkingSimSecondsPerRealSecond) || 1.8;
+        const walkingRate = speed === 1 ? baseWalkRate : Math.min(baseRate, baseWalkRate * 2.4);
+        return activeWalk ? Math.min(baseRate, walkingRate) : baseRate;
       }
       return baseRate;
     }
     const rate =
       Number(payload?.simSecondsPerRealSecond) || baseSimSecondsPerRealSecond;
+    if (payload?.adaptiveWalkPacing !== false && speed <= 5 && activeWalk) {
+      const baseWalkRate = Number(payload?.walkingSimSecondsPerRealSecond) || 1.8;
+      const walkingRate = speed === 1 ? baseWalkRate : Math.min(rate * speed, baseWalkRate * 2.4);
+      return Math.min(rate * speed, walkingRate);
+    }
     return rate * speed;
   }
 
@@ -327,7 +348,17 @@ export function createSimulationPlaybackController({
     const dtSec = Math.max(0, Number(deltaRealMs) || 0) / 1000;
     const prevSecond = currentSecond;
     const effectiveRate = resolveEffectiveSimRate(currentSecond);
-    currentSecond += dtSec * effectiveRate;
+    let nextSecond = currentSecond + dtSec * effectiveRate;
+
+    // Never jump right across the start of a walking route in a single fast stationary frame!
+    // Clamp right to `nextWalkStart` so the very next animation frame switches to slow walking pace at path[0].
+    if (speed <= 5 && payload?.adaptiveWalkPacing !== false && !hasActiveWalkAt(currentSecond)) {
+      const nextWalkStart = getNextRouteStartAfter(currentSecond);
+      if (Number.isFinite(nextWalkStart) && nextSecond > nextWalkStart + 0.05) {
+        nextSecond = nextWalkStart;
+      }
+    }
+    currentSecond = nextSecond;
 
     // Emit checkpoint notifications when crossing checkpoint timestamps
     for (const cp of checkpoints) {
