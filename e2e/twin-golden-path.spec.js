@@ -129,6 +129,8 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await expect(page.locator("#sim-approve-redesign")).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
   await page.locator("#sim-approve-redesign").click();
+  await expect(page.locator('[data-layout-view="after"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#sim-findings-list")).not.toContainText("Kitchen congestion");
   await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
   expect(redesignCallCount).toBe(2);
 
