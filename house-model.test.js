@@ -10,6 +10,8 @@ import {
   getRoomAtPoint,
   isObjectLocked,
   isWalkablePoint,
+  mergeHouseFixturesIntoItems,
+  normalizeHouse,
   roomToHouse,
   validateHouseScene,
 } from "./house-model.js";
@@ -17,6 +19,12 @@ import {
   createWholeHomeDemoHouse,
   createWholeHomeDemoState,
 } from "./house-demo.js";
+import {
+  clearConfirmedImportedHouse,
+  confirmImportedHouse,
+  getConfirmedImportedHouse,
+  importSampleFloorplan,
+} from "./src/spatial/floorplan-importer.js";
 
 test("sample whole-home contains multiple connected rooms including living room, kitchen, bedroom, and bathroom", () => {
   const house = createWholeHomeDemoHouse();
@@ -88,7 +96,7 @@ test("locked fixtures remain identifiable as locked and reject automated or manu
   const kinds = new Set(house.fixtures.map((f) => f.kind));
   assert(kinds.has("toilet"));
   assert(kinds.has("sink"));
-  assert(kinds.has("counter"));
+  assert(kinds.has("kitchen_counter"));
   assert(kinds.has("refrigerator") || kinds.has("stove"));
   assert(house.walls.every((w) => w.locked === true));
   assert(house.fixtures.every((f) => isObjectLocked(f) === true));
@@ -179,4 +187,32 @@ test("single-room adapter converts existing rectangular and alcove rooms into va
   const alcove = roomToHouse({ ...ROOM, shape: "alcove" }, []);
   assert.equal(alcove.rooms[0].polygon.length, 6);
   assert.equal(validateHouseScene(alcove).valid, true);
+});
+
+test("sample floorplan importer produces confirmed House JSON that normalizes cleanly for 3D rendering and room-to-room walking", () => {
+  clearConfirmedImportedHouse();
+  const session = importSampleFloorplan();
+  const confirmed = confirmImportedHouse(session);
+  const retrieved = getConfirmedImportedHouse();
+  assert.deepEqual(retrieved, confirmed);
+
+  const renderHouse = normalizeHouse(retrieved);
+  assert.equal(renderHouse.rooms.length, 5);
+  assert.equal(renderHouse.walls.length > 0, true);
+  assert.equal(renderHouse.doors.length, 6);
+  assert.equal(renderHouse.windows.length, 4);
+
+  const items = mergeHouseFixturesIntoItems(renderHouse, []);
+  assert.equal(items.length, 7);
+  assert.equal(items.every((i) => isObjectLocked(i)), true);
+
+  for (const door of renderHouse.doors.filter((d) => !d.exterior)) {
+    const pose = getDoorWorldPose(renderHouse, door);
+    assert.equal(
+      isWalkablePoint(renderHouse, pose.x, pose.z, { items }),
+      true,
+      `Imported interior door ${door.id} should be walkable`,
+    );
+  }
+  clearConfirmedImportedHouse();
 });

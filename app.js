@@ -28,6 +28,7 @@ import {
   getRoomAtPoint,
   getWallOpeningsInHouse,
   isObjectLocked,
+  mergeHouseFixturesIntoItems,
   normalizeHouse,
   syncHouseObjects,
 } from "./house-model.js";
@@ -36,6 +37,18 @@ import { icon } from "./icons.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
+import { showParsedGeometryModal } from "./floorplan-import-ui.js";
+import {
+  clearConfirmedImportedHouse,
+  getConfirmedImportedHouse,
+  onConfirmedHouseChange,
+  setConfirmedImportedHouse,
+} from "./src/spatial/floorplan-importer.js";
+
+export { getConfirmedImportedHouse };
+if (typeof window !== "undefined") {
+  window.getConfirmedImportedHouse = getConfirmedImportedHouse;
+}
 
 const $ = (selector) => document.querySelector(selector);
 const escape = (value) =>
@@ -62,6 +75,16 @@ const storageKey = "stillroom.project.v1";
 const demo = initialState();
 let state = demo;
 let hasProject = false;
+let syncingConfirmedHouse = false;
+function withSyncGuard(fn) {
+  syncingConfirmedHouse = true;
+  try {
+    return fn();
+  } finally {
+    syncingConfirmedHouse = false;
+  }
+}
+
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey));
   if (
@@ -73,6 +96,14 @@ try {
     state = { ...demo, ...saved };
     if (validatePersonas(state.personas, listPersonaRooms(state))) state.personas = [];
     hasProject = true;
+    if (state.importedHouse) {
+      try {
+        withSyncGuard(() => setConfirmedImportedHouse(state.importedHouse));
+        state.items = mergeHouseFixturesIntoItems(state.importedHouse, state.items);
+      } catch {
+        state.importedHouse = null;
+      }
+    }
   }
 } catch {
   /* A new local project also works with storage disabled. */
@@ -114,8 +145,30 @@ function persist() {
     $("#save-state").textContent = "Session only";
   }
 }
-const activeHouse = (s = state) =>
-  s.house ? (s.house.bounds ? s.house : normalizeHouse(s.house)) : null;
+const activeHouse = (s = state) => {
+  const raw =
+    s.importedHouse ||
+    (s === state ? getConfirmedImportedHouse() : null) ||
+    s.house ||
+    null;
+  return raw ? normalizeHouse(raw) : null;
+};
+
+onConfirmedHouseChange((confirmedHouse) => {
+  if (syncingConfirmedHouse) return;
+  const nextItems = mergeHouseFixturesIntoItems(confirmedHouse, state.items);
+  state = {
+    ...state,
+    roomName: confirmedHouse?.name || state.roomName,
+    house: null,
+    importedHouse: confirmedHouse,
+    items: nextItems,
+    spent: getSpend(nextItems),
+    hasLayout: Boolean(confirmedHouse) || state.hasLayout,
+  };
+  persist();
+  if (stage !== "setup" && stage !== "household") render();
+});
 
 function commit(next) {
   history.push(state);
@@ -155,23 +208,28 @@ function renderDraft() {
   }
 }
 function itemGlyph(item) {
-  const kind = ["bookcase", "storage", "shelf", "counter"].includes(item.kind)
+  const kind = ["bookcase", "storage", "shelf", "counter", "kitchen_counter", "closet"].includes(item.kind)
     ? "cabinet"
-    : item.kind;
+    : ["bathtub", "shower", "sink"].includes(item.kind)
+      ? "sink"
+      : item.kind;
   return `<span class="item-swatch" style="background:${/^#[\da-f]{3,8}$/i.test(item.color) ? item.color : "#cdc5b6"}">${icon(kind)}</span>`;
 }
 function render() {
   const house = activeHouse();
   $("#room-name").textContent = state.roomName;
   const room = state.room || ROOM;
-  $(".subtitle").textContent = house
-    ? `${house.bounds.width.toFixed(1)} × ${house.bounds.depth.toFixed(1)} m · ${house.rooms.length} rooms (${house.rooms.map((r) => r.name).join(", ")})`
-    : `${room.width} × ${room.depth} m · Living space`;
+  $("#studio .subtitle").textContent = state.importedHouse && house
+    ? `${house.bounds.width.toFixed(1)} × ${house.bounds.depth.toFixed(1)} m · ${house.rooms.length} rooms imported (${house.rooms.map((r) => r.name).join(", ")})`
+    : house
+      ? `${house.bounds.width.toFixed(1)} × ${house.bounds.depth.toFixed(1)} m · ${house.rooms.length} rooms (${house.rooms.map((r) => r.name).join(", ")})`
+      : `${room.width} × ${room.depth} m · Living space`;
   $("#whole-home-btn").hidden = Boolean(house);
   $("#item-count").textContent = state.items.length;
   $("#shop-count").textContent = state.savedProducts?.length || "";
   $("#undo").disabled = !history.length;
   $("#compare-photo").hidden = !state.roomPhoto;
+  $("#view-house-json").hidden = !state.importedHouse && !getConfirmedImportedHouse();
   const item = state.items.find((i) => i.id === selection);
   const locked = item && isObjectLocked(item);
   $("#objectbar").innerHTML = item
@@ -336,6 +394,10 @@ $("#compare-photo").onclick = () =>
     "Room reference",
     `<img class="room-reference-full" alt="Uploaded view of your room" src="${escape(state.roomPhoto)}">`,
   );
+$("#view-house-json").onclick = () => {
+  const house = state.importedHouse || getConfirmedImportedHouse();
+  if (house) showParsedGeometryModal(house);
+};
 $("#objectbar").onclick = (e) => {
   const action = e.target.closest("[data-action]")?.dataset.action;
   const item = state.items.find((i) => i.id === selection);
@@ -362,12 +424,24 @@ function styleActiveState(baseState, overrides = {}) {
   const house = activeHouse(baseState);
   if (!house) return autoStyle(baseState, overrides);
   const { style, budget, skipKinds, prioritizeKinds } = resolveBrief(baseState, overrides);
-  const kept = baseState.items.filter((i) => i.owned || isObjectLocked(i));
+  const primaryRoomId =
+    house.rooms.find((r) => r.kind === "living")?.id ||
+    house.rooms[0]?.id ||
+    "living-room";
+  const kept = mergeHouseFixturesIntoItems(
+    house,
+    baseState.items.filter((i) => i.owned || isObjectLocked(i)),
+  );
   const items = [...kept];
   let remaining = budget;
   const kinds = [...new Set([...prioritizeKinds, "sofa", "table", "chair", "rug", "lamp", "plant"])];
   for (const kind of kinds) {
-    if (skipKinds.includes(kind) || items.some((i) => !isObjectLocked(i) && i.roomId === "living-room" && i.kind === kind)) continue;
+    if (
+      skipKinds.includes(kind) ||
+      items.some((i) => !isObjectLocked(i) && i.roomId === primaryRoomId && i.kind === kind)
+    ) {
+      continue;
+    }
     const options = catalog.filter((p) => p.kind === kind && p.price <= remaining);
     const product = options.find((p) => p.style === style) ?? options.sort((a, b) => a.price - b.price)[0];
     if (!product) continue;
@@ -375,7 +449,7 @@ function styleActiveState(baseState, overrides = {}) {
       { ...createItem(product, { id: `suggested-${kind}` }), locked: false, type: "shopify" },
       house,
       items,
-      "living-room",
+      primaryRoomId,
     );
     if (placed) {
       items.push(placed);
@@ -631,6 +705,7 @@ function navigate(next) {
 function loadWholeHomeDemo() {
   hasProject = true;
   selection = null;
+  withSyncGuard(() => clearConfirmedImportedHouse());
   commit(createWholeHomeDemoState());
   syncForm();
   navigate("tour");
@@ -654,20 +729,42 @@ function beginSetup(fresh = false) {
         return;
       }
       hasProject = true;
+      const importedHouse = sample ? null : (next.importedHouse ?? null);
+      withSyncGuard(() => {
+        if (importedHouse) setConfirmedImportedHouse(importedHouse);
+        else clearConfirmedImportedHouse();
+      });
+      const items = importedHouse
+        ? mergeHouseFixturesIntoItems(importedHouse, next.items || [])
+        : next.items;
       commit({
         ...next,
+        house: null,
+        importedHouse,
+        items,
         personas: fresh ? [] : state.personas,
         flowVersion: 2,
-        hasLayout: sample || (!fresh && Boolean(next.hasLayout)),
+        hasLayout:
+          sample || Boolean(importedHouse) || (!fresh && Boolean(next.hasLayout)),
       });
       if (fresh) history = [];
       selection = null;
       syncForm();
-      const nextStage = sample ? "tour" : fresh ? "household" : "design";
+      const nextStage = sample
+        ? "tour"
+        : importedHouse
+          ? "design"
+          : fresh
+            ? "household"
+            : "design";
       navigate(nextStage);
       if (scene) {
-        changeView($("#view-interior").disabled ? "plan" : "interior");
-        jumpTo("entry");
+        if (importedHouse) {
+          changeView($("#view-3d").disabled ? "plan" : "3d");
+        } else {
+          changeView($("#view-interior").disabled ? "plan" : "interior");
+          jumpTo("entry");
+        }
       }
     },
   });

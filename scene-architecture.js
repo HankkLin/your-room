@@ -322,7 +322,8 @@ function buildHouseWall(shell, wall, house, materials, mats) {
   anchor.add(tall, low);
 
   const thickness = wall.thickness || wallThickness;
-  const zCenter = wall.exterior ? -thickness / 2 : 0;
+  const sign = wall.inwardSign ?? 1;
+  const zCenter = wall.exterior ? -sign * (thickness / 2) : 0;
   const wallMat = wall.exterior ? materials.back : materials.side;
   const lowHeight = wall.exterior ? 0.14 : 0.11;
   const edge = wall.length / 2;
@@ -334,9 +335,9 @@ function buildHouseWall(shell, wall, house, materials, mats) {
     buildHouseWallSegment(tall, wallMat, cursor, hole.left, 0, wall.height, thickness, zCenter);
     buildHouseWallSegment(low, materials.boundary, cursor, hole.left, 0, lowHeight, thickness, zCenter);
     if (hole.left - cursor > 0.02) {
-      box(tall, materials.trim, hole.left - cursor, 0.095, 0.024, (cursor + hole.left) / 2, 0.048, zCenter + thickness / 2 + 0.012).castShadow = false;
+      box(tall, materials.trim, hole.left - cursor, 0.095, 0.024, (cursor + hole.left) / 2, 0.048, zCenter + sign * (thickness / 2 + 0.012)).castShadow = false;
       if (!wall.exterior) {
-        box(tall, materials.trim, hole.left - cursor, 0.095, 0.024, (cursor + hole.left) / 2, 0.048, zCenter - thickness / 2 - 0.012).castShadow = false;
+        box(tall, materials.trim, hole.left - cursor, 0.095, 0.024, (cursor + hole.left) / 2, 0.048, zCenter - sign * (thickness / 2 + 0.012)).castShadow = false;
       }
     }
     buildHouseWallSegment(tall, wallMat, hole.left, hole.right, hole.top, wall.height, thickness, zCenter);
@@ -353,9 +354,9 @@ function buildHouseWall(shell, wall, house, materials, mats) {
   buildHouseWallSegment(tall, wallMat, cursor, edge, 0, wall.height, thickness, zCenter);
   buildHouseWallSegment(low, materials.boundary, cursor, edge, 0, lowHeight, thickness, zCenter);
   if (edge - cursor > 0.02) {
-    box(tall, materials.trim, edge - cursor, 0.095, 0.024, (cursor + edge) / 2, 0.048, zCenter + thickness / 2 + 0.012).castShadow = false;
+    box(tall, materials.trim, edge - cursor, 0.095, 0.024, (cursor + edge) / 2, 0.048, zCenter + sign * (thickness / 2 + 0.012)).castShadow = false;
     if (!wall.exterior) {
-      box(tall, materials.trim, edge - cursor, 0.095, 0.024, (cursor + edge) / 2, 0.048, zCenter - thickness / 2 - 0.012).castShadow = false;
+      box(tall, materials.trim, edge - cursor, 0.095, 0.024, (cursor + edge) / 2, 0.048, zCenter - sign * (thickness / 2 + 0.012)).castShadow = false;
     }
   }
   box(tall, materials.trim, wall.length, 0.04, thickness + 0.02, 0, wall.height - 0.02, zCenter).castShadow = false;
