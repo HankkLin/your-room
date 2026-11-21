@@ -45,6 +45,7 @@ async function createRoom(page) {
 
 async function saveHousehold(page) {
   await household(page).getByRole("button", { name: "Save and continue" }).click();
+  await page.locator("#setup-next").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
 }
 
@@ -87,6 +88,7 @@ test("a generated household can be edited, saved, and reopened after furnishing"
   await expect(page.locator("#room-name")).toHaveText("Family room");
   expect(await savedPersonas(page)).toEqual(approved);
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
   expect(await savedPersonas(page)).toEqual(approved);
   await page.locator("#household-step").click();
@@ -156,6 +158,7 @@ test("flexible activities and guests without a routine survive the design flow",
   expect(approved[2]).toMatchObject({ name: "Jordan", schedule: [] });
 
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
   await page.reload();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");

@@ -40,6 +40,7 @@ test("a household reviews two live alternatives, reapproves a changed offer, fix
   await page.goto("/");
   await page.getByRole("button", { name: "Try blocked-route replay demo", exact: true }).click();
   await page.getByRole("button", { name: "Save and continue" }).click();
+  await page.locator("#setup-next").click();
   const before = await project(page);
   await page.locator("#furnishing-shopify").click();
   const dialog = page.getByRole("dialog");
@@ -80,7 +81,8 @@ test("a household reviews two live alternatives, reapproves a changed offer, fix
   expect((await project(page)).items).toEqual(applied.items);
   await move.click();
   await expect(failures).toHaveText(["1", "0"]);
-  await page.locator("#save-room").click();
+  await page.locator("#continue-stress").click();
+  await page.locator("#tray-review-products").click();
   await page.getByRole("button", { name: "Start checkout", exact: true }).click();
   await expect(page.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", handoff);
   expect(checkouts).toEqual([{ lines: [{ ref, quantity: 1, priceMinor: 14200, currency: "USD" }] }]);

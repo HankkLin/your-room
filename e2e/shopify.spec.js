@@ -80,7 +80,8 @@ async function addLampAndSaveRoom(page) {
   await dialog.getByRole("button", { name: "Add to room" }).click();
   await expect(dialog).toBeHidden();
   await expect(page.locator("#inventory")).toContainText(lamp.title);
-  await page.getByRole("button", { name: "Save room & review products" }).click();
+  await page.locator("#continue-stress").click();
+  await page.locator("#tray-review-products").click();
   const card = page.locator(".shop-card").filter({ hasText: lamp.title });
   await expect(card).toBeVisible();
   return card;
@@ -203,8 +204,10 @@ test("a Shopify swap that has no clear placement preserves the layout", async ({
   await page.locator("#add-owned").click();
   await page.locator("#setup-next").click();
   await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#setup-next").click();
   await page.locator("#budget").fill("0");
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await page.getByRole("button", { name: "Add furniture" }).click();
   await page.locator('[data-product="brass-lamp"]').click();
   await expect(page.getByRole("dialog")).toBeHidden();
@@ -339,9 +342,10 @@ test("whole-home review saves room context and checks out exact quantities per m
   const b = page.getByRole("region", { name: rug.sellerDomain });
   const handoff = { name: "Continue to Shopify checkout" };
   const checkoutCalls = () => calls.filter(call => call.endpoint === "checkout");
-  const reviewEntries = ikea ? ["#tray-review-products", '[data-journey-action="shop"]'] : ["#save-room", "#save-room"];
+  const reviewEntries = ikea ? ["#tray-review-products", '[data-journey-action="shop"]'] : ["#continue-stress", "#continue-stress"];
   for (const [index, entry] of reviewEntries.entries()) {
     await page.locator(entry).click();
+    if (!ikea) await page.locator("#tray-review-products").click();
     await expect(a.getByRole("button", { name: "Start checkout" })).toBeEnabled();
     await expect(page.locator(".shop-card")).toHaveCount(4);
     const card = page.locator(".shop-card").filter({ has: page.locator('[data-include="home-lamp"]') });
@@ -419,7 +423,8 @@ test("whole-home review keeps legacy quantities and shows a partial subtotal for
     localStorage.setItem(key, JSON.stringify(saved));
   }, { ref, lampName: lamp.title });
   await page.reload();
-  await page.locator("#save-room").click();
+  await page.locator("#continue-stress").click();
+  await page.locator("#tray-review-products").click();
   await expect(page.locator(".shop-card")).toHaveCount(3);
   await expect(page.locator("#saved-total")).toHaveText("Partial estimated subtotal · $269");
   expect((await project(page)).savedProducts.find(row => row.id === "home-chair")).toMatchObject({ quantity: 2, price: 40 });
@@ -447,7 +452,8 @@ test("re-saving the same placement keeps the original unit quote and saved quant
   await page.reload();
   await expect(card).toContainText("Price changed since saving");
   await page.locator("#back-to-tour").click();
-  await page.locator("#save-room").click();
+  await page.locator("#continue-stress").click();
+  await page.locator("#tray-review-products").click();
   const again = (await project(page)).savedProducts.find(row => row.id === firstSave.id);
   expect(again.savedPrice).toEqual(firstSave.savedPrice);
   expect(again.quantity).toBe(3);

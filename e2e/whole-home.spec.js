@@ -142,6 +142,7 @@ test("sample floorplan imports into House JSON and renders as a connected 3D who
 
   await expect(page.locator("body")).toHaveAttribute("data-stage", "household");
   await page.locator("#skip-household").click();
+  await page.locator("#setup-next").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
   await expect(page.locator("#scene canvas")).toHaveAttribute(
     "data-engine",
@@ -162,6 +163,7 @@ test("sample floorplan imports into House JSON and renders as a connected 3D who
 
   // Auto-style places movable furniture while keeping all 7 imported locked fixtures
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
   const stateAfterStyle = await page.evaluate(() =>
@@ -237,8 +239,10 @@ test("auto-style furnishes basic needs across the imported home within budget", 
   await page.locator("#try-sample-floorplan").click();
   await page.locator("#fp-confirm-import").click();
   await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#setup-next").click();
   await page.locator("#budget").fill("4800");
   await page.locator("#generate").click();
+  await page.locator("#continue-explore").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
   const project = await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
   const kinds = roomId => project.items.filter(item => item.roomId === roomId).map(item => item.kind);
@@ -280,13 +284,13 @@ test("re-style shows progress, supports cancellation and explains an identical l
       .observe(status, { childList: true });
   });
   await page.locator("#generate").click();
-  await expect(page.locator("#restyle-tour-result")).toContainText("Layout updated");
+  await expect(page.locator("#restyle-design-result")).toContainText("Layout updated");
   const stages = await page.evaluate(() => window.restyleStages);
   for (const step of [1, 2, 3]) expect(stages.some(text => text.startsWith("Step " + step))).toBe(true);
   expect(stages.some(text => text.includes("Checking furniture fit in"))).toBe(true);
   await page.locator("#style-step").click();
   await page.locator("#generate").click();
-  await expect(page.locator("#restyle-tour-result")).toContainText("No layout changes");
+  await expect(page.locator("#restyle-design-result")).toContainText("No layout changes");
 });
 
 test("demo walkthrough carries the same house and style through furniture and design", async ({ page }) => {
@@ -299,26 +303,39 @@ test("demo walkthrough carries the same house and style through furniture and de
   await expect(page.locator("#household-members .household-member")).toHaveCount(4);
   await page.locator("#save-household").click();
   expect((await saved()).personas).toHaveLength(4);
-  await expect(page.locator("#style-step")).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("#furniture-step")).toHaveAttribute("aria-current", "step");
   const original = await saved();
-  await page.locator("#brief").fill("Quiet rooms and warm lighting");
-  await page.locator("#budget").fill("4200");
-  await page.locator("#continue-furniture").click();
   const plan = page.getByRole("img", { name: "Whole-home floor plan" });
   for (const room of original.house.rooms) await expect(plan).toContainText(room.name);
   await page.locator("#owned-kind").selectOption("lamp");
   await page.locator("#add-owned").click();
   await page.locator("[data-name]").last().fill("Hall lamp");
-  await page.getByRole("button", { name: /Continue to AI Design/ }).click();
-  await expect(page.locator("#ai-design-step")).toHaveAttribute("aria-current", "step");
-  await expect(page.locator("#brief")).toHaveValue("Quiet rooms and warm lighting");
-  await expect(page.locator("#budget")).toHaveValue("4200");
+  await page.locator("#setup-back").click();
+  await expect(page.locator("#household-step")).toHaveAttribute("aria-current", "step");
+  await page.locator("#furniture-step").click();
+  await page.reload();
+  await expect(page.locator("#furniture-step")).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("[data-name]").last()).toHaveValue("Hall lamp");
+  await page.locator("#setup-next").click();
+  await expect(page.locator("#style-step")).toHaveAttribute("aria-current", "step");
   const edited = await saved();
   const lamp = edited.items.find(item => item.name === "Hall lamp");
   expect(original.house.rooms.map(room => room.id)).toContain(lamp.roomId);
-  expect(edited.house.rooms).toEqual(original.house.rooms);
-  await page.locator("#generate").click();
-  await expect(page.locator("#tour-step")).toHaveAttribute("aria-current", "step");
+  expect(edited.personas).toEqual(original.personas);
+  const scene = page.locator("#scene canvas");
+  const firstPreview = await scene.screenshot();
+  const newStyle = original.style === "Soft modern" ? "Earthy eclectic" : "Soft modern";
+  await page.locator(`[data-style="${newStyle}"]`).click();
+  await expect.poll(async () => !(await scene.screenshot()).equals(firstPreview)).toBe(true);
+  expect((await saved()).style).toBe(newStyle);
+  expect((await saved()).items).toEqual(edited.items);
+  await page.locator("#brief").fill("Quiet rooms and warm lighting");
+  await page.locator("#budget").fill("4200");
+  await page.getByRole("button", { name: "Apply vision" }).click();
+  await expect(page.locator("#restyle-design-result")).toContainText("Layout updated");
+  await expect(page.locator("#style-step")).toHaveAttribute("aria-current", "step");
+  expect((await saved()).brief).toBe("Quiet rooms and warm lighting");
+  await page.locator("#continue-explore").click();
   const styled = await saved();
   expect(styled.items.find(item => item.id === lamp.id)).toMatchObject({ roomId: lamp.roomId, owned: true });
   expect(styled.house.rooms).toEqual(original.house.rooms);
@@ -329,4 +346,15 @@ test("demo walkthrough carries the same house and style through furniture and de
   await page.locator("#resume-room").click();
   await expect(page.locator("#tour-step")).toHaveAttribute("aria-current", "step");
   expect((await saved()).items).toEqual(styled.items);
+  await expect(page.locator("#demo-controls-panel")).toBeHidden();
+  await expect(page.locator("#twin-results-section")).toBeHidden();
+  await expect(page.locator("#tray-review-products")).toBeHidden();
+  await page.locator("#continue-stress").click();
+  await expect(page.locator("#stress-test-step")).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("#demo-controls-panel")).toBeVisible();
+  await expect(page.locator("#twin-results-section")).toBeVisible();
+  await page.reload();
+  await expect(page.locator("#stress-test-step")).toHaveAttribute("aria-current", "step");
+  await page.locator("#tray-review-products").click();
+  await expect(page.locator("#shop-page")).toBeVisible();
 });

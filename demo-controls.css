@@ -1,4 +1,4 @@
-/* Architectural Blueprint × Living Digital Twin — Guided 8-Step Product Workflow */
+/* Architectural Blueprint × Living Digital Twin — Guided 7-Step Product Workflow */
 
 :root {
   --bp-ink: #1e4466;
@@ -25,7 +25,7 @@
   color: #f7fafc;
 }
 
-/* Canonical 8-Step Header Bar */
+/* Canonical 7-Step Header Bar */
 .stage-nav.bp-eight-nav {
   display: flex;
   align-items: center;
@@ -180,7 +180,7 @@
   border-radius: 10px;
 }
 
-/* Step 3 & Step 5: Style Priority Chips & 7-Stage AI Design Pipeline */
+/* Step 3: Style Priority Chips & 7-Stage AI Design Pipeline */
 .bp-style-chips {
   display: flex;
   flex-wrap: wrap;
@@ -360,7 +360,7 @@
   margin: 0;
 }
 
-/* Step 7: Right Planning Dock — Stress Test Controls */
+/* Step 6: Right Planning Dock — Stress Test Controls */
 .twin-control-card {
   padding: 13px 14px;
   margin-bottom: 10px;
@@ -1545,7 +1545,7 @@
   margin-top: 10px;
 }
 
-/* Inventory Tray Actions & Step 8 Commerce Handoff */
+/* Inventory Tray Actions & Step 7 Commerce Handoff */
 .inventory-actions {
   display: inline-flex;
   align-items: center;

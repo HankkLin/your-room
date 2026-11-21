@@ -227,7 +227,7 @@ const shoppingList = createShoppingList({
 });
 const studioReplay = createStudioReplayPanel($("#studio-replay-panel"), {
   getContext: () => ({
-    inTour: stage === "tour",
+    inTour: activeBpStep === "5",
     house: state.importedHouse || state.house,
     items: state.items,
     personas: state.personas,
@@ -789,10 +789,12 @@ const demoControls = mountDemoControls({
 const householdPage = createHouseholdPage($("#household-page"), {
   onSave(personas) {
     state = { ...state, personas };
-    navigate("design");
+    delete state.householdDraft;
+    beginSetup(false, 3);
   },
   onSkip() {
-    navigate("design");
+    delete state.householdDraft;
+    beginSetup(false, 3);
   },
 });
 document.querySelectorAll("[data-icon]").forEach((node) => {
@@ -1289,7 +1291,6 @@ function render() {
     playbackController.reset();
   }
   studioReplay.update();
-  $("#studio-replay-panel").hidden = stage !== "tour" || !(state.importedHouse || state.house);
   const house = activeHouse();
   $("#room-name").textContent = state.roomName;
   const room = state.room || ROOM;
@@ -1306,7 +1307,7 @@ function render() {
   $("#view-house-json").hidden = !state.importedHouse;
   const selectAreaBtn = $("#select-area-shortcut");
   if (selectAreaBtn) {
-    selectAreaBtn.hidden = stage !== "tour" || !house;
+    selectAreaBtn.hidden = activeBpStep !== "5" || !house;
   }
   const item = state.items.find((i) => i.id === selection);
   const locked = item && isObjectLocked(item);
@@ -1377,7 +1378,6 @@ function render() {
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(estimate.total)} ${estimate.partial ? "partial estimate" : "estimated"}`;
   const household = house && resolveValidHouseholdForHouse(state, house);
   demoControls.setPersonas(household?.displayPersonas ?? state.personas ?? [], household?.usedFallbackPersonas);
-  demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
   const activeSceneItems = previewLayoutItems || state.items;
   renderFurnitureRail(activeSceneItems);
   syncProductPreviewCard();
@@ -1801,49 +1801,58 @@ $("#objectbar").onclick = (e) => {
   if (action === "remove")
     commit({ ...state, items: state.items.filter((i) => i.id !== selection) });
 };
+function previewStyle(style) {
+  draftStyle = style;
+  pickedStyle = true;
+  state = { ...state, style, reference };
+  persist();
+  renderDraft();
+  render();
+}
 $("#styles").onclick = (e) => {
   const btn = e.target.closest("[data-style]");
-  if (btn) {
-    draftStyle = btn.dataset.style;
-    pickedStyle = true;
-    renderDraft();
-  }
+  if (btn) previewStyle(btn.dataset.style);
 };
 $("#style-form").onsubmit = async (e) => {
   e.preventDefault();
   const budget = Number($("#budget").value);
+  const brief = $("#brief").value.trim();
+  const explore = e.submitter?.id === "continue-explore";
+  if (explore && state.hasLayout && !pickedStyle && brief === (state.brief || "") &&
+      budget === state.budget && reference === (state.reference || null)) {
+    navigate("tour");
+    return;
+  }
   const overrides = {};
   if (pickedStyle) overrides.style = draftStyle;
   if (editedDesignBudget || budget !== state.budget) overrides.budget = budget;
-  await applyRestyle({ ...state, style: draftStyle, budget, brief: $("#brief").value.trim(), reference }, overrides, true);
+  const applied = await applyRestyle({ ...state, style: draftStyle, budget, brief, reference }, overrides, true);
+  if (explore && applied) navigate("tour");
 };
 
-async function applyRestyle(project, overrides, openTour) {
+async function applyRestyle(project, overrides, fromStyle) {
   const progress = $("#restyle-progress");
-  if (progress.open) return;
-  const result = openTour ? $("#restyle-design-result") : $("#edit-result");
+  if (progress.open) return false;
+  const result = fromStyle ? $("#restyle-design-result") : $("#edit-result");
   result.textContent = "";
   try {
     await runRestyle(progress, { project, overrides, snapshot: candidateSession.read() }, next => {
       const summary = describeRestyle(state, next);
       commit({ ...state, ...next, reference: project.reference, brief: project.brief, hasLayout: true, notes: summary });
       syncForm();
-      if (openTour) {
-        navigate("tour");
-        changeView($("#view-interior").disabled ? "plan" : "interior");
-        jumpTo("entry");
-      }
       $("#restyle-tour-result").textContent = summary;
-      if (openTour) result.textContent = summary;
+      result.textContent = summary;
       toast(summary);
     });
+    return true;
   } catch (error) {
     result.textContent = error.name === "AbortError" ? "Re-style canceled." : "Re-style could not finish. Try again.";
+    return false;
   }
 }
 $("#undo").onclick = () => {
   if (history.length) {
-    state = { ...history.pop(), personas: state.personas, screen: stage, flowVersion: 2 };
+    state = { ...history.pop(), personas: state.personas, screen: stage, blueprintStep: activeBpStep, flowVersion: 4 };
     selection = null;
     $("#restyle-tour-result").textContent = "";
     $("#restyle-design-result").textContent = "";
@@ -1931,9 +1940,7 @@ $("#inspiration").onchange = async (e) => {
     const result = await readPhoto(e.target.files[0]);
     if (result) {
       reference = result.url;
-      draftStyle = result.style;
-      pickedStyle = true;
-      renderDraft();
+      previewStyle(result.style);
       toast("Style selected from photo colors");
     }
   } catch {
@@ -1943,6 +1950,8 @@ $("#inspiration").onchange = async (e) => {
 };
 $("#remove-ref").onclick = () => {
   reference = null;
+  state = { ...state, reference };
+  persist();
   renderDraft();
 };
 function changeView(mode) {
@@ -2003,13 +2012,13 @@ function defaultBpStepForStage(nextStage) {
     case "setup":
       return "1";
     case "design":
-      return "3";
+      return "4";
     case "tour":
-      return "6";
+      return "5";
     case "household":
       return "2";
     case "shop":
-      return "8";
+      return "7";
     default:
       return "1";
   }
@@ -2019,10 +2028,10 @@ function updateBpNavHighlight(bpStep) {
   activeBpStep = String(bpStep);
   document.querySelectorAll("[data-bp-step]").forEach((btn) => {
     const stepNum = btn.dataset.bpStep;
-    const isSetup = stage === "setup";
-    const requiresLayout = stepNum === "6" || stepNum === "7" || stepNum === "8";
+    const isSetup = stage === "setup" && activeBpStep !== "3";
+    const requiresLayout = stepNum === "5" || stepNum === "6" || stepNum === "7";
     btn.disabled =
-      (isSetup && stepNum !== activeBpStep && stepNum !== "1" && stepNum !== "4") ||
+      (isSetup && stepNum !== activeBpStep && stepNum !== "1" && !(stepNum === "3" && hasProject)) ||
       (requiresLayout && !state.hasLayout);
     if (stepNum === activeBpStep) btn.setAttribute("aria-current", "step");
     else btn.removeAttribute("aria-current");
@@ -2037,7 +2046,6 @@ function markStage(next, bpStep = null) {
   if (next === "design") designSearch.enter();
   else if (stage === "design") designSearch.leave();
   if (next !== stage) cancelTwinReview();
-  $("#studio-replay-panel").hidden = next !== "tour" || !(state.importedHouse || state.house);
   resetFurnishing();
   furnishingPanel.hidden = next !== "design" || !state.personas?.length;
   if (stage === "household" && next !== "household") householdPage.close();
@@ -2047,20 +2055,19 @@ function markStage(next, bpStep = null) {
   stage = next;
   document.body.dataset.stage = next;
   updateBpNavHighlight(bpStep || defaultBpStepForStage(next));
-  const houseStyleStep = next === "design" && activeBpStep === "3" && Boolean(activeHouse());
-  $("#design-step-label").textContent = activeBpStep === "5" ? "Step 5 · AI Design" : "Step 3 · Your Style";
-  $("#continue-furniture").hidden = !houseStyleStep;
-  $("#generate").className = houseStyleStep ? "secondary" : "primary";
   $("#studio").hidden = !["design", "tour"].includes(next);
   $("#shop-page").hidden = next !== "shop";
   $("#setup-page").hidden = next !== "setup";
   $("#household-page").hidden = next !== "household";
   $("#design-panel").hidden = next !== "design";
-  $("#tour-panel").hidden = next !== "tour";
-  $(".inventory").hidden = next !== "tour";
+  $("#tour-panel").hidden = activeBpStep !== "5";
+  $(".inventory").hidden = activeBpStep !== "5";
+  $("#stress-next").hidden = activeBpStep !== "6";
+  $("#stress-home-required").hidden = Boolean(state.importedHouse || state.house);
+  $("#studio-replay-panel").hidden = activeBpStep !== "5" || !(state.importedHouse || state.house);
   const overlayLegend = $("#studio-overlay-legend");
-  if (overlayLegend) overlayLegend.hidden = !Boolean(activeHouse());
-  demoControls.setVisible(Boolean(activeHouse()) && ["design", "tour"].includes(next));
+  if (overlayLegend) overlayLegend.hidden = activeBpStep !== "6" || !activeHouse();
+  demoControls.setVisible(activeBpStep === "6" && Boolean(state.importedHouse || state.house));
   if (!["design", "tour"].includes(next)) {
     previewHoverSource = null;
   }
@@ -2094,7 +2101,7 @@ function navigate(next, { householdDraft, bpStep = null } = {}) {
   if (next !== "household") delete state.householdDraft;
   else if (householdDraft) state = { ...state, householdDraft };
   markStage(next, bpStep);
-  state = { ...state, flowVersion: 2, screen: next };
+  state = { ...state, flowVersion: 4, screen: next, blueprintStep: activeBpStep };
   if (next === "shop") shoppingList.render(state);
   else if (next === "household") {
     householdPage.open({ personas: state.householdDraft ?? state.personas, rooms: listPersonaRooms(state) });
@@ -2102,7 +2109,8 @@ function navigate(next, { householdDraft, bpStep = null } = {}) {
     enterEditor();
     render();
     if (next === "design" && activeHouse()) changeView($("#view-3d").disabled ? "plan" : "3d");
-    if (next === "tour" && !$("#view-interior").disabled)
+    if (activeBpStep === "6") changeView($("#view-3d").disabled ? "plan" : "3d");
+    if (activeBpStep === "5" && !$("#view-interior").disabled)
       changeView("interior");
   }
   if (next === "tour" || next === "shop") void refreshShopifyQuotes();
@@ -2130,23 +2138,42 @@ function loadWholeHomeDemo() {
 }
 $("#whole-home-btn").onclick = loadWholeHomeDemo;
 function beginSetup(fresh = false, initialStep = null) {
-  const houseInventory = initialStep === 3 && !fresh && Boolean(activeHouse());
-  if (houseInventory && stage === "design") {
+  const editFurniture = initialStep === 3 && !fresh;
+  if (editFurniture && stage === "setup" && activeBpStep === "3" && closeSetup) return;
+  if (editFurniture && stage === "design") {
     if (!$("#style-form").reportValidity()) return;
     state = { ...state, style: draftStyle, budget: Number($("#budget").value), brief: $("#brief").value.trim(), reference };
-    persist();
   }
   const previous = stage === "setup" ? state.screen || "design" : stage;
-  markStage("setup", initialStep === 3 ? "4" : "1");
+  const previousStep = stage === "setup" ? state.returnStep : activeBpStep;
+  if (editFurniture) {
+    state = { ...state, blueprintStep: "3", returnStep: previousStep, flowVersion: 4 };
+    persist();
+  }
+  markStage("setup", initialStep === 3 ? "3" : "1");
   window.scrollTo(0, 0);
   closeSetup = openSetup({
     onEditCurrent: fresh && hasProject ? () => beginSetup(false) : null,
     state: fresh ? initialState() : state,
     isNew: fresh,
     initialStep,
-    onCancel: hasProject ? () => navigate(previous) : null,
+    onFurnitureDraft: editFurniture ? draft => {
+      state = { ...state, furnitureDraft: draft };
+      persist();
+    } : null,
+    onBackToHousehold: editFurniture ? () => navigate("household") : null,
+    onCancel: hasProject ? () => {
+      if (editFurniture) delete state.furnitureDraft;
+      navigate(previous, { bpStep: previousStep });
+    } : null,
     readPhoto,
     onApply(next, { demo: sample = false, wholeHome = false, householdDraft } = {}) {
+      if (editFurniture) {
+        delete state.furnitureDraft;
+        commit({ ...state, roomPhoto: next.roomPhoto, items: next.items, hasLayout: true });
+        navigate("design");
+        return;
+      }
       if (wholeHome) {
         loadWholeHomeDemo();
         return;
@@ -2174,15 +2201,15 @@ function beginSetup(fresh = false, initialStep = null) {
         importedHouse,
         items,
         personas: newProject ? [] : state.personas,
-        flowVersion: 2,
+        flowVersion: 4,
         hasLayout:
           sample || Boolean(importedHouse) || (!newProject && Boolean(next.hasLayout)),
       });
       if (newProject) history = [];
       selection = null;
-      if (!houseInventory) syncForm();
+      syncForm();
       const nextStage = sample || newProject ? "household" : "design";
-      navigate(nextStage, { householdDraft, bpStep: houseInventory ? "5" : null });
+      navigate(nextStage, { householdDraft });
       if (scene) {
         if (importedHouse || next.house) {
           changeView($("#view-3d").disabled ? "plan" : "3d");
@@ -2455,33 +2482,23 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) clearPressedWalkKeys();
 });
 $("#room-settings").onclick = () => beginSetup(true);
-$("#continue-furniture").onclick = $("#furniture-step").onclick = () => beginSetup(false, 3);
+$("#furniture-step").onclick = () => beginSetup(false, 3);
 $("#new-project").onclick = () => beginSetup(true);
 $("#household-step").onclick = () => navigate("household", { bpStep: "2" });
 $("#style-step").onclick = $("#revise-brief").onclick = () =>
-  navigate("design", { bpStep: "3" });
-$("#ai-design-step").onclick = () => {
-  navigate("design", { bpStep: "5" });
-  const target = !furnishingPanel.hidden
-    ? furnishingPanel.querySelector("[data-propose]") || $("#generate")
-    : $("#generate");
-  target?.focus({ preventScroll: false });
-};
+  navigate("design");
 $("#tour-step").onclick = $("#back-to-tour").onclick = () =>
+  navigate("tour", { bpStep: "5" });
+$("#continue-stress").onclick = $("#stress-test-step").onclick = () => {
   navigate("tour", { bpStep: "6" });
-$("#stress-test-step").onclick = () => {
-  navigate("tour", { bpStep: "7" });
-  if (activeHouse() && !$("#view-3d").disabled) {
-    changeView("3d");
-  }
   const host = $("#demo-controls-panel");
   if (host && !host.hidden) {
     host.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 };
-$("#shop").onclick = () => navigate("shop", { bpStep: "8" });
+$("#shop").onclick = () => navigate("shop", { bpStep: "7" });
 $("#select-area-shortcut").onclick = () => {
-  if (stage !== "tour") navigate("tour", { bpStep: "6" });
+  if (stage !== "tour") navigate("tour", { bpStep: "5" });
   const house = activeHouse();
   if (house && (!state.personas || state.personas.length === 0)) {
     navigate("household", { householdDraft: resolveValidHouseholdForHouse(state, house).displayPersonas });
@@ -2547,9 +2564,8 @@ function saveRoomAndOpenShop() {
     state.items.filter((i) => !i.owned && !isObjectLocked(i)),
     { replaceExisting: true },
   );
-  navigate("shop", { bpStep: "8" });
+  navigate("shop", { bpStep: "7" });
 }
-$("#save-room").onclick = saveRoomAndOpenShop;
 $("#tray-review-products").onclick = saveRoomAndOpenShop;
 async function refreshShopifyQuotes() {
   quoteRefresh?.abort();
@@ -2832,10 +2848,15 @@ window.__livingBlueprint = {
 };
 window.__stillroom = window.__livingBlueprint;
 syncForm();
-if (
-  hasProject &&
-  state.flowVersion === 2 &&
-  ["household", "tour", "design", "shop"].includes(state.screen)
-)
-  navigate(state.screen);
-else beginSetup(true);
+if (state.flowVersion === 3 && state.blueprintStep === "4") {
+  state.blueprintStep = "3";
+  if (state.screen === "design") state.returnStep = "4";
+  state.flowVersion = 4;
+}
+if (hasProject && state.flowVersion === 4 && state.blueprintStep === "3") {
+  beginSetup(false, 3);
+} else if (hasProject && [2, 3, 4].includes(state.flowVersion) &&
+    ["household", "tour", "design", "shop"].includes(state.screen)) {
+  const stressStep = state.flowVersion === 2 ? "7" : "6";
+  navigate(state.screen, { bpStep: state.screen === "tour" && state.blueprintStep === stressStep ? "6" : null });
+} else beginSetup(true);
