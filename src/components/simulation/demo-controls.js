@@ -126,9 +126,9 @@ function resolvePersonaRoleBadge(persona) {
   return null;
 }
 
-export function renderPersonaQuickViewMarkup(personas = []) {
+export function renderPersonaQuickViewMarkup(personas = [], sampleHousehold = false) {
   if (!Array.isArray(personas) || personas.length === 0) {
-    return `<div class="twin-personas" id="sim-persona-summary"><span class="section-label">Step 6 · Your Household</span><p class="muted" style="margin-top:5px">No household personas set yet. Open Step 6 (Your Household) to customize members.</p></div>`;
+    return `<div class="twin-personas" id="sim-persona-summary"><span class="section-label">Step 2 · Your Household</span><p class="muted" style="margin-top:5px">No household personas set yet. Open Step 2 (Your Household) to customize members.</p></div>`;
   }
   const items = personas
     .map((p, idx) => {
@@ -156,7 +156,7 @@ export function renderPersonaQuickViewMarkup(personas = []) {
     .join("");
   return `<div class="twin-personas" id="sim-persona-summary">
     <div class="twin-personas-head">
-      <span class="section-label">Step 6 · Your Household (${personas.length})</span>
+      <span class="section-label">${sampleHousehold ? "Sample simulation household" : "Step 2 · Your Household"} (${personas.length})</span>
       <span class="bp-dim-tag">SCALE 1:1 m</span>
     </div>
     <div class="twin-persona-list">${items}</div>
@@ -200,7 +200,7 @@ function renderScenarioCardsMarkup(state, disabled) {
 
 export function renderControlPanelMarkup(
   viewState,
-  { scenarios = DEMO_SCENARIOS, personas = [] } = {},
+  { scenarios = DEMO_SCENARIOS, personas = [], sampleHousehold = false } = {},
 ) {
   const state = normalizeSimulationViewState(viewState);
   const activeScenario =
@@ -326,7 +326,7 @@ export function renderControlPanelMarkup(
     </div>
     ${redesignButtonMarkup}
     ${scrubberMarkup}
-    ${renderPersonaQuickViewMarkup(personas)}
+    ${renderPersonaQuickViewMarkup(personas, sampleHousehold)}
   </div>`;
 }
 
@@ -873,6 +873,7 @@ export function mountDemoControls({
   onDismissRedesign = () => {},
 } = {}) {
   let visible = false;
+  let sampleHousehold = false;
 
   function renderDOM(state, personas) {
     if (controlHost) {
@@ -881,6 +882,7 @@ export function mountDemoControls({
         controlHost.innerHTML = renderControlPanelMarkup(state, {
           scenarios,
           personas,
+          sampleHousehold,
         });
       }
     }
@@ -1001,6 +1003,10 @@ export function mountDemoControls({
 
   return {
     ...controller,
+    setPersonas(personas, isSample = false) {
+      sampleHousehold = isSample;
+      controller.setPersonas(personas);
+    },
     /**
      * Fast in-place clock + scrubber update during 60fps animation frames.
      * Avoids replacing `controlHost.innerHTML` while buttons are being clicked.

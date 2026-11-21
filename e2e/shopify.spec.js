@@ -51,6 +51,8 @@ async function mockShopify(page, handlers = {}) {
 async function loadDemo(page) {
   await page.goto("/");
   await page.locator("#explore-demo").click();
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
   const existingLamp = (await project(page)).items.find(({ kind }) => kind === "lamp");
   await page.locator(`[data-item="${existingLamp.id}"]`).click();
@@ -113,6 +115,7 @@ test("a live Shopify swap preserves the whole-home room and locked fixtures", as
   await mockShopify(page);
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#save-household").click();
   await page.locator("#tour-step").click();
   const fixture = page.locator('[data-item="fixture-bathroom-toilet"]');
   await fixture.click();
@@ -314,6 +317,7 @@ test("whole-home review saves room context and checks out exact quantities per m
   });
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#save-household").click();
   await page.locator("#tour-step").click();
   const placements = [
     ["home-lamp", lamp], ["home-desk", lamp], ["home-coffee-table", shade], ["home-rug", rug],
@@ -398,6 +402,7 @@ test("whole-home review keeps legacy quantities and shows a partial subtotal for
   const calls = await mockShopify(page);
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#save-household").click();
   await page.locator("#tour-step").click();
   await page.evaluate(({ ref, lampName }) => {
     const key = "living-blueprint.project.v1";
@@ -581,6 +586,7 @@ test("a previously saved catalog layout offers Shopify checkout separately from 
   });
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#save-household").click();
   await page.locator("#shop").click();
   await page.evaluate(() => {
     const key = "living-blueprint.project.v1";

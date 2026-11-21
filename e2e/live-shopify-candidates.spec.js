@@ -31,6 +31,7 @@ async function setup(page, options = {}) {
   });
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#save-household").click();
   await page.locator("#tour-step").click();
   return seen;
 }

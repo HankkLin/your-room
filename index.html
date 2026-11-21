@@ -25,20 +25,20 @@
         <button id="room-settings" data-step="setup" data-bp-step="1">
           <span aria-hidden="true">1</span>Your Home
         </button>
-        <button id="style-step" data-step="design" data-bp-step="2">
-          <span aria-hidden="true">2</span>Your Style
+        <button id="household-step" data-step="household" data-bp-step="2">
+          <span aria-hidden="true">2</span>Your Household
         </button>
-        <button id="furniture-step" data-bp-step="3" type="button">
-          <span aria-hidden="true">3</span>Your Furniture
+        <button id="style-step" data-step="design" data-bp-step="3">
+          <span aria-hidden="true">3</span>Your Style
         </button>
-        <button id="ai-design-step" data-bp-step="4" type="button">
-          <span aria-hidden="true">4</span>AI Design
+        <button id="furniture-step" data-bp-step="4" type="button">
+          <span aria-hidden="true">4</span>Your Furniture
         </button>
-        <button id="tour-step" data-step="tour" data-bp-step="5">
-          <span aria-hidden="true">5</span>Explore room
+        <button id="ai-design-step" data-bp-step="5" type="button">
+          <span aria-hidden="true">5</span>AI Design
         </button>
-        <button id="household-step" data-step="household" data-bp-step="6">
-          <span aria-hidden="true">6</span>Your Household
+        <button id="tour-step" data-step="tour" data-bp-step="6">
+          <span aria-hidden="true">6</span>Explore room
         </button>
         <button id="stress-test-step" data-bp-step="7" type="button">
           <span aria-hidden="true">7</span>Stress Test
@@ -51,7 +51,7 @@
     <section id="setup-page" hidden></section>
     <main id="household-page" hidden aria-labelledby="household-title">
       <header class="household-heading">
-        <p class="eyebrow">Step 6 · Household Digital Twin</p>
+        <p class="eyebrow">Step 2 · Household Digital Twin</p>
         <h1 id="household-title" tabindex="-1">Your household</h1>
         <p class="subtitle">Describe who lives here and how they spend a typical day, or load the canonical Family of Four.</p>
       </header>
@@ -216,7 +216,7 @@
           <section id="demo-controls-panel" hidden></section>
           <section class="panel" id="design-panel">
             <div class="panel-head">
-              <span class="eyebrow">Step 2 &amp; 4 · Your Style &amp; AI Design</span>
+              <span class="eyebrow" id="design-step-label">Step 3 · Your Style</span>
               <h2>How should this home feel?</h2>
             </div>
             <form id="style-form">
@@ -298,7 +298,7 @@
             </section>
           </section>
           <section id="tour-panel" class="panel" hidden>
-            <p class="eyebrow">Step 5 · Explore &amp; Edit</p>
+            <p class="eyebrow">Step 6 · Explore &amp; Edit</p>
             <h2>Explore your layout</h2>
             <p class="restyle-result" id="restyle-tour-result" role="status"></p>
             <p id="walk-help">
@@ -336,7 +336,7 @@
       <section class="panel studio-replay" id="studio-replay-panel" aria-labelledby="studio-replay-title" hidden>
         <header class="studio-replay-header">
           <div>
-            <p class="eyebrow">Step 5 · Regional Blueprint Redesign &amp; Routine Replay</p>
+            <p class="eyebrow">Step 6 · Regional Blueprint Redesign &amp; Routine Replay</p>
             <h2 id="studio-replay-title">Replay your saved household &amp; edit a selected area</h2>
           </div>
           <div class="studio-replay-actions">

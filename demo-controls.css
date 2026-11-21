@@ -180,7 +180,7 @@
   border-radius: 10px;
 }
 
-/* Step 2 & Step 4: Style Priority Chips & 7-Stage AI Design Pipeline */
+/* Step 3 & Step 5: Style Priority Chips & 7-Stage AI Design Pipeline */
 .bp-style-chips {
   display: flex;
   flex-wrap: wrap;
@@ -285,7 +285,7 @@
   color: #9e3523;
 }
 
-/* Step 3: Owned Furniture Cards & Editable Dimensions */
+/* Step 4: Owned Furniture Cards & Editable Dimensions */
 .owned-entry,
 .review-entry {
   padding: 12px;
@@ -819,7 +819,7 @@
   color: var(--bp-ink);
 }
 
-/* Step 6 Quick View inside Studio Dock */
+/* Step 2 Quick View inside Studio Dock */
 .twin-personas {
   margin-top: 9px;
   padding-top: 9px;

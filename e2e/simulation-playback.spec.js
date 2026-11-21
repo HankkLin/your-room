@@ -36,6 +36,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
 
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#save-household").click();
   await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 

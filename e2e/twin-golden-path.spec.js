@@ -95,6 +95,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await page.locator("#view-3d").click();
   await expect(page.locator("#scene canvas")).toHaveAttribute("data-engine", /three/i);
   await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  await expect(page.locator("#sim-persona-summary")).toContainText("Sample simulation household");
   await expect(page.locator("#sim-persona-summary")).toContainText("Kevin");
   await expect(page.locator("#sim-persona-summary")).toContainText("Alice");
   await expect(page.locator("#sim-persona-summary")).toContainText("Leo");
@@ -231,32 +232,32 @@ test("Blueprint 8-Step Guided Workflow (U1, U5, U6, U7, U8, U9, U10): 8-step hea
   await expect(page.locator("#fp-status-card")).toContainText("Floorplan analyzed");
   await page.locator("#fp-confirm-import").click();
 
-  // Step 6: Load canonical Family of Four + Grandparents (♿ Wheelchair)
+  // Step 2: Load canonical Family of Four + Grandparents (♿ Wheelchair)
   await expect(page.locator("body")).toHaveAttribute("data-stage", "household");
-  await expect(nav.locator('[data-bp-step="6"]')).toHaveAttribute("aria-current", "step");
+  await expect(nav.locator('[data-bp-step="2"]')).toHaveAttribute("aria-current", "step");
   await page.locator("#load-family-of-four").click();
   await page.locator("#add-grandparents-wheelchair").click();
   await expect(page.locator("#household-members .household-member")).toHaveCount(6);
   await page.locator("#save-household").click();
 
-  // Step 2: StyleBrief priority chips update #brief cleanly
+  // Step 3: StyleBrief priority chips update #brief cleanly
   await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
-  await expect(nav.locator('[data-bp-step="2"]')).toHaveAttribute("aria-current", "step");
+  await expect(nav.locator('[data-bp-step="3"]')).toHaveAttribute("aria-current", "step");
   await page.locator('[data-brief-chip="wide step-free walkways"]').click();
   await expect(page.locator("#brief")).toHaveValue(/wide step-free walkways/);
 
-  // Step 3: Jump directly to Your Furniture via Step 3 nav button, add an Owned piece & edit W (m)
+  // Step 4: Jump directly to Your Furniture via Step 4 nav button, add an Owned piece & edit W (m)
   await page.locator("#furniture-step").click();
-  await expect(nav.locator('[data-bp-step="3"]')).toHaveAttribute("aria-current", "step");
+  await expect(nav.locator('[data-bp-step="4"]')).toHaveAttribute("aria-current", "step");
   await expect(page.locator("#furniture-photo-upload")).toBeAttached();
   await page.locator("#owned-kind").selectOption("chair");
   await page.locator("#add-owned").click();
   await page.locator("[data-name]").last().fill("Family heirloom armchair");
   await page.locator("#setup-next").click();
 
-  // Step 5: Explore room + Select area / Draw region opens floorplan region editor immediately
+  // Step 6: Explore room + Select area / Draw region opens floorplan region editor immediately
   await page.locator("#tour-step").click();
-  await expect(nav.locator('[data-bp-step="5"]')).toHaveAttribute("aria-current", "step");
+  await expect(nav.locator('[data-bp-step="6"]')).toHaveAttribute("aria-current", "step");
   await expect(page.locator("#select-area-shortcut")).toBeVisible();
   await page.locator("#select-area-shortcut").click();
   await expect(page.locator("#studio-region-editor .region-map")).toBeVisible();

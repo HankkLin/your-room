@@ -9,6 +9,7 @@ test("whole-home demo renders multiple connected rooms, enforces locked fixtures
   await page.goto("/");
   await expect(page.locator("#whole-home-demo")).toBeVisible();
   await page.locator("#whole-home-demo").click();
+  await page.locator("#save-household").click();
   await page.locator("#tour-step").click();
   await page.locator("#view-3d").click();
 
@@ -251,6 +252,7 @@ test("auto-style furnishes basic needs across the imported home within budget", 
 test("re-style shows progress, supports cancellation and explains an identical layout", async ({ page }) => {
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await page.locator("#save-household").click();
   await page.locator("#style-step").click();
   // Hold the first planning job so the pending state can be checked on fast machines.
   await page.evaluate(() => {
@@ -291,6 +293,12 @@ test("demo walkthrough carries the same house and style through furniture and de
   const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
   await page.goto("/");
   await page.locator("#whole-home-demo").click();
+  await expect(page.locator("#household-step")).toHaveAttribute("aria-current", "step");
+  expect((await saved()).personas).toEqual([]);
+  await page.reload();
+  await expect(page.locator("#household-members .household-member")).toHaveCount(4);
+  await page.locator("#save-household").click();
+  expect((await saved()).personas).toHaveLength(4);
   await expect(page.locator("#style-step")).toHaveAttribute("aria-current", "step");
   const original = await saved();
   await page.locator("#brief").fill("Quiet rooms and warm lighting");

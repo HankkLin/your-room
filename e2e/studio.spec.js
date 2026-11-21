@@ -7,6 +7,8 @@ const photo = "public/assets/sample-capture.jpg";
 async function startDemo(page) {
   await page.goto("/");
   await page.locator("#explore-demo").click();
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 }
 test("custom room flows through the brief, furnished tour and saved Shopify variants", async ({

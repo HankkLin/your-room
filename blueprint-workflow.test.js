@@ -21,11 +21,11 @@ test("U1 — Eight-step Blueprint navigation defines all 8 canonical steps in in
   const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
   const expected = [
     ["1", "Your Home"],
-    ["2", "Your Style"],
-    ["3", "Your Furniture"],
-    ["4", "AI Design"],
-    ["5", "Explore room"],
-    ["6", "Your Household"],
+    ["2", "Your Household"],
+    ["3", "Your Style"],
+    ["4", "Your Furniture"],
+    ["5", "AI Design"],
+    ["6", "Explore room"],
     ["7", "Stress Test"],
     ["8", "Furnish &amp; Buy"],
   ];
@@ -38,7 +38,7 @@ test("U1 — Eight-step Blueprint navigation defines all 8 canonical steps in in
   }
 });
 
-test("U2 — Step 2 StyleBrief handoff prepares validated furnishing input with prompt, photo reference, budget, and existing owned furniture", () => {
+test("U2 — Step 3 StyleBrief handoff prepares validated furnishing input with prompt, photo reference, budget, and existing owned furniture", () => {
   const demo = createWholeHomeDemoState();
   const personas = createFamilyOfFourPersonas(demo.house);
   const ownedSofa = {
@@ -69,7 +69,7 @@ test("U2 — Step 2 StyleBrief handoff prepares validated furnishing input with 
   );
 });
 
-test("U3 — Step 3 owned-furniture intake produces zero-cost owned SceneObjects with editable meter dimensions", () => {
+test("U3 — Step 4 owned-furniture intake produces zero-cost owned SceneObjects with editable meter dimensions", () => {
   const [item] = createOwnedItems("Chair", [], ROOM);
   assert.equal(item.owned, true);
   assert.equal(item.price, 0);
@@ -83,7 +83,7 @@ test("U3 — Step 3 owned-furniture intake produces zero-cost owned SceneObjects
   assert.match(setupSource, /bp-owned-badge">Owned</);
 });
 
-test("U4 — Step 4 AI Design loading stages render honest 7-step progression, completion, and failure states", () => {
+test("U4 — Step 5 AI Design loading stages render honest 7-step progression, completion, and failure states", () => {
   const activeHtml = renderAiDesignStagesMarkup(3);
   assert.equal((activeHtml.match(/class="bp-ai-stage"/g) || []).length, 7);
   assert.match(activeHtml, /data-ai-stage="0" data-stage-state="done"/);
@@ -98,7 +98,7 @@ test("U4 — Step 4 AI Design loading stages render honest 7-step progression, c
   assert.equal((completedHtml.match(/data-stage-state="done"/g) || []).length, 7);
 });
 
-test("U5 — Step 5 region-selection prompt builds bounded region redesign payload preserving locked fixtures", () => {
+test("U5 — Step 6 region-selection prompt builds bounded region redesign payload preserving locked fixtures", () => {
   const demo = createWholeHomeDemoState();
   const payload = buildRegionSuggestionInput(
     [-5.5, -0.5, 0.5, 4.5],
@@ -115,7 +115,7 @@ test("U5 — Step 5 region-selection prompt builds bounded region redesign paylo
   assert(lockedObjects.every((o) => !o.relocationHint));
 });
 
-test("U6 — Step 6 canonical Family of Four passes Persona contract validation and renders heights, roles, and schedule summaries", () => {
+test("U6 — Step 2 canonical Family of Four passes Persona contract validation and renders heights, roles, and schedule summaries", () => {
   const demo = createWholeHomeDemoState();
   const family = createFamilyOfFourPersonas(demo.house);
   assert.equal(family.length, 4);

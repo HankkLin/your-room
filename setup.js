@@ -661,7 +661,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       icon("image") +
       '</span><span><strong>Upload existing furniture photo</strong><small>Auto-detect sofa, table, chairs, bed, or plants.</small></span><span class="start-arrow">↗</span><input type="file" id="furniture-photo-upload" accept="image/*"></label>' +
       "</section>" +
-      '<section class="setup-controls"><p class="eyebrow">Step 3 · Your Furniture</p><h2>Pieces you already own</h2><p class="setup-help">Confirm detected pieces, edit dimensions in meters, or add items you are keeping.</p>' +
+      '<section class="setup-controls"><p class="eyebrow">Your Furniture</p><h2>Pieces you already own</h2><p class="setup-help">Confirm detected pieces, edit dimensions in meters, or add items you are keeping.</p>' +
       photoStatus() +
       '<div id="setup-inventory">' +
       (rows || '<p class="empty-pieces">Your furniture list is empty.</p>') +

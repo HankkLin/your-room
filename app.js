@@ -681,7 +681,8 @@ const demoControls = mountDemoControls({
     }
     const house = activeHouse();
     if (house) {
-      demoControls.setPersonas(resolveValidHouseholdForHouse(state, house).displayPersonas);
+      const household = resolveValidHouseholdForHouse(state, house);
+      demoControls.setPersonas(household.displayPersonas, household.usedFallbackPersonas);
     }
   },
   onFriendCountChange() {
@@ -944,10 +945,8 @@ function render() {
   const estimate = roomEstimate(state.items);
   $("#notes").textContent =
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(estimate.total)} ${estimate.partial ? "partial estimate" : "estimated"}`;
-  const effectivePersonas = house
-    ? resolveValidHouseholdForHouse(state, house).displayPersonas
-    : (state.personas || []);
-  demoControls.setPersonas(effectivePersonas);
+  const household = house && resolveValidHouseholdForHouse(state, house);
+  demoControls.setPersonas(household?.displayPersonas ?? state.personas ?? [], household?.usedFallbackPersonas);
   demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
   scene?.update(
     previewLayoutItems || state.items,
@@ -1368,11 +1367,11 @@ function defaultBpStepForStage(nextStage) {
     case "setup":
       return "1";
     case "design":
-      return "2";
+      return "3";
     case "tour":
-      return "5";
-    case "household":
       return "6";
+    case "household":
+      return "2";
     case "shop":
       return "8";
     default:
@@ -1385,9 +1384,9 @@ function updateBpNavHighlight(bpStep) {
   document.querySelectorAll("[data-bp-step]").forEach((btn) => {
     const stepNum = btn.dataset.bpStep;
     const isSetup = stage === "setup";
-    const requiresLayout = stepNum === "5" || stepNum === "7" || stepNum === "8";
+    const requiresLayout = stepNum === "6" || stepNum === "7" || stepNum === "8";
     btn.disabled =
-      (isSetup && stepNum !== activeBpStep && stepNum !== "1" && stepNum !== "3") ||
+      (isSetup && stepNum !== activeBpStep && stepNum !== "1" && stepNum !== "4") ||
       (requiresLayout && !state.hasLayout);
     if (stepNum === activeBpStep) btn.setAttribute("aria-current", "step");
     else btn.removeAttribute("aria-current");
@@ -1412,7 +1411,8 @@ function markStage(next, bpStep = null) {
   stage = next;
   document.body.dataset.stage = next;
   updateBpNavHighlight(bpStep || defaultBpStepForStage(next));
-  const houseStyleStep = next === "design" && activeBpStep === "2" && Boolean(activeHouse());
+  const houseStyleStep = next === "design" && activeBpStep === "3" && Boolean(activeHouse());
+  $("#design-step-label").textContent = activeBpStep === "5" ? "Step 5 · AI Design" : "Step 3 · Your Style";
   $("#continue-furniture").hidden = !houseStyleStep;
   $("#generate").className = houseStyleStep ? "secondary" : "primary";
   $("#studio").hidden = !["design", "tour"].includes(next);
@@ -1450,11 +1450,13 @@ window.addEventListener("keydown", (event) => {
     toggleExpanded(false);
 });
 function navigate(next, { householdDraft, bpStep = null } = {}) {
+  if (next !== "household") delete state.householdDraft;
+  else if (householdDraft) state = { ...state, householdDraft };
   markStage(next, bpStep);
   state = { ...state, flowVersion: 2, screen: next };
   if (next === "shop") shoppingList.render(state);
   else if (next === "household") {
-    householdPage.open({ personas: householdDraft ?? state.personas, rooms: listPersonaRooms(state) });
+    householdPage.open({ personas: state.householdDraft ?? state.personas, rooms: listPersonaRooms(state) });
   } else {
     enterEditor();
     render();
@@ -1479,10 +1481,11 @@ function loadWholeHomeDemo() {
   previewLayoutHouse = null;
   playbackController.reset();
   clearConfirmedImportedHouse();
-  commit(createWholeHomeDemoState());
+  const demo = createWholeHomeDemoState();
+  commit({ ...demo, personas: [] });
   history = [];
   syncForm();
-  navigate("design", { bpStep: "2" });
+  navigate("household", { householdDraft: demo.personas });
 }
 $("#whole-home-btn").onclick = loadWholeHomeDemo;
 function beginSetup(fresh = false, initialStep = null) {
@@ -1493,7 +1496,7 @@ function beginSetup(fresh = false, initialStep = null) {
     persist();
   }
   const previous = stage === "setup" ? state.screen || "design" : stage;
-  markStage("setup", initialStep === 3 ? "3" : "1");
+  markStage("setup", initialStep === 3 ? "4" : "1");
   window.scrollTo(0, 0);
   closeSetup = openSetup({
     onEditCurrent: fresh && hasProject ? () => beginSetup(false) : null,
@@ -1537,8 +1540,8 @@ function beginSetup(fresh = false, initialStep = null) {
       if (newProject) history = [];
       selection = null;
       if (!houseInventory) syncForm();
-      const nextStage = sample ? "tour" : newProject ? "household" : "design";
-      navigate(nextStage, { householdDraft, bpStep: houseInventory ? "4" : null });
+      const nextStage = sample || newProject ? "household" : "design";
+      navigate(nextStage, { householdDraft, bpStep: houseInventory ? "5" : null });
       if (scene) {
         if (importedHouse || next.house) {
           changeView($("#view-3d").disabled ? "plan" : "3d");
@@ -1747,18 +1750,18 @@ window.addEventListener("keydown", (event) => {
 $("#room-settings").onclick = () => beginSetup(true);
 $("#continue-furniture").onclick = $("#furniture-step").onclick = () => beginSetup(false, 3);
 $("#new-project").onclick = () => beginSetup(true);
-$("#household-step").onclick = () => navigate("household", { bpStep: "6" });
+$("#household-step").onclick = () => navigate("household", { bpStep: "2" });
 $("#style-step").onclick = $("#revise-brief").onclick = () =>
-  navigate("design", { bpStep: "2" });
+  navigate("design", { bpStep: "3" });
 $("#ai-design-step").onclick = () => {
-  navigate("design", { bpStep: "4" });
+  navigate("design", { bpStep: "5" });
   const target = !furnishingPanel.hidden
     ? furnishingPanel.querySelector("[data-propose]") || $("#generate")
     : $("#generate");
   target?.focus({ preventScroll: false });
 };
 $("#tour-step").onclick = $("#back-to-tour").onclick = () =>
-  navigate("tour", { bpStep: "5" });
+  navigate("tour", { bpStep: "6" });
 $("#stress-test-step").onclick = () => {
   navigate("tour", { bpStep: "7" });
   if (activeHouse() && !$("#view-3d").disabled) {
@@ -1771,13 +1774,11 @@ $("#stress-test-step").onclick = () => {
 };
 $("#shop").onclick = () => navigate("shop", { bpStep: "8" });
 $("#select-area-shortcut").onclick = () => {
-  if (stage !== "tour") navigate("tour", { bpStep: "5" });
+  if (stage !== "tour") navigate("tour", { bpStep: "6" });
   const house = activeHouse();
   if (house && (!state.personas || state.personas.length === 0)) {
-    const resolved = resolveValidHouseholdForHouse(state, house);
-    state = { ...state, personas: resolved.displayPersonas };
-    persist();
-    render();
+    navigate("household", { householdDraft: resolveValidHouseholdForHouse(state, house).displayPersonas });
+    return;
   }
   const captureBtn = $("#studio-replay-capture");
   const regionHost = $("#studio-region-editor");
