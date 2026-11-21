@@ -107,6 +107,7 @@ test("a real room photo produces reviewable owned furniture on mobile", async ({
   await expect(page.locator(".reference-preview")).toBeVisible();
   await page.locator("#budget").fill("0");
   await page.locator("#generate").click();
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
   expect(owned(await project(page))).toEqual(owned(initial));
   await expect(page.locator("[data-item]").filter({ hasText: "Photo-derived 3D preview" }).first()).toContainText("Estimated dimensions");
   expect((await project(page)).spent).toBe(0);

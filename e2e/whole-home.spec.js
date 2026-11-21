@@ -245,3 +245,42 @@ test("auto-style furnishes basic needs across the imported home within budget", 
   expect(kinds("bathroom")).toContain("toilet");
   expect(project.spent).toBeLessThanOrEqual(4800);
 });
+
+test("re-style shows progress, supports cancellation and explains an identical layout", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#whole-home-demo").click();
+  await page.locator("#style-step").click();
+  // Hold the first planning job so the pending state can be checked on fast machines.
+  await page.evaluate(() => {
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      constructor(...args) {
+        super(...args);
+        window.Worker = NativeWorker;
+      }
+      postMessage() {}
+    };
+  });
+  await page.locator("#generate").click();
+  const progress = page.locator("#restyle-progress");
+  await expect(progress).toBeVisible();
+  await expect(progress).toContainText("Local layout planner");
+  await expect(progress.locator(".image-processing")).toBeVisible();
+  await progress.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator("#restyle-design-result")).toHaveText("Re-style canceled.");
+
+  await page.evaluate(() => {
+    window.restyleStages = [];
+    const status = document.querySelector("#restyle-progress [role=status]");
+    new MutationObserver(() => window.restyleStages.push(status.textContent))
+      .observe(status, { childList: true });
+  });
+  await page.locator("#generate").click();
+  await expect(page.locator("#restyle-tour-result")).toContainText("Layout updated");
+  const stages = await page.evaluate(() => window.restyleStages);
+  for (const step of [1, 2, 3]) expect(stages.some(text => text.startsWith("Step " + step))).toBe(true);
+  expect(stages.some(text => text.includes("Checking furniture fit in"))).toBe(true);
+  await page.locator("#style-step").click();
+  await page.locator("#generate").click();
+  await expect(page.locator("#restyle-tour-result")).toContainText("No layout changes");
+});

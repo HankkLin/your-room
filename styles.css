@@ -334,3 +334,12 @@ dialog .actions { margin-top: 18px; gap: 8px; flex-wrap: wrap; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation-duration: .01ms !important; }
 }
+
+#restyle-progress [role="status"] { margin: 12px 0 20px; }
+.restyle-result:not(:empty) {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--clay-dark);
+  background: var(--card);
+}
+.restyle-result:empty { display: none; }

@@ -1,10 +1,8 @@
-import { applyScenePatch } from "./src/redesign/apply-scene-patch.js";
+import { runRestyle, describeRestyle } from "./src/spatial/restyle-feedback.js";
 import { createStudioReplayPanel } from "./src/components/simulation/studio-replay-panel.js";
 import {
   ROOM,
   initialState,
-  autoStyle,
-  resolveBrief,
   catalog,
   styles,
   createItem,
@@ -78,7 +76,6 @@ import {
   updateOwnedFurnitureDimensions,
   validateScopedRegionPatch,
 } from "./src/simulation/index.js";
-import { buildDeterministicFurnishingPlan } from "./src/spatial/spatial-design-engine.js";
 import { captureStudioLayout, runStudioReplay } from "./src/simulation/studio-replay.js";
 import {
   describeApprovedHouseholdReplay,
@@ -809,6 +806,8 @@ const activeHouse = (s = state) => {
 };
 
 function commit(next) {
+  $("#restyle-tour-result").textContent = "";
+  $("#restyle-design-result").textContent = "";
   history.push(state);
   if (history.length > 20) history.shift();
   const house = next.house ? syncHouseObjects(next.house, next.items) : null;
@@ -1165,44 +1164,6 @@ $("#objectbar").onclick = (e) => {
   if (action === "remove")
     commit({ ...state, items: state.items.filter((i) => i.id !== selection) });
 };
-function styleActiveState(baseState, overrides = {}) {
-  const house = activeHouse(baseState);
-  if (!house) return autoStyle(baseState, overrides);
-  const { style, budget } = resolveBrief(baseState, overrides);
-  const rawHouse = structuredClone(baseState.importedHouse || baseState.house);
-  const ownedAndLockedMovable = baseState.items.filter(
-    (i) => !i.fromHouseFixture && i.type !== "fixed" && (i.owned || isObjectLocked(i)),
-  );
-  rawHouse.objects = ownedAndLockedMovable;
-  const effectivePersonas = resolveValidHouseholdForHouse(baseState, house).displayPersonas;
-  const hasWheelchairNeed =
-    /wheelchair|accessible|accessibility|step-free/i.test(baseState.brief || "") ||
-    effectivePersonas.some(
-      (p) => Boolean(p?.usesWheelchair || p?.wheelchair) || Number(p?.needs?.accessibility ?? 0) >= 0.75,
-    );
-  const liveCandidates = furnishingCandidatesFromSession(candidateSession.read());
-  const candidateLookupList = getCandidateProducts({ candidateSnapshot: candidateSession.read() });
-  const planned = buildDeterministicFurnishingPlan({
-    house: rawHouse,
-    normalizedHouse: house,
-    styleBrief: { style, budget, brief: baseState.brief || "" },
-    personas: effectivePersonas,
-    existingObjects: ownedAndLockedMovable,
-    productCandidates: liveCandidates,
-    candidateLookupList,
-    hasWheelchairNeed,
-  });
-  const designedHouse = applyScenePatch(rawHouse, planned.patch, {
-    candidateProducts: candidateLookupList,
-  });
-  const items = mergeHouseFixturesIntoItems(house, designedHouse.objects || []);
-  const added = planned.patch.operations.length;
-  const styledRooms = new Set(planned.patch.operations.map(op => op.object.roomId)).size;
-  const notes = added
-    ? `Added ${added} ${added === 1 ? "piece" : "pieces"} across ${styledRooms} ${styledRooms === 1 ? "room" : "rooms"}. Fixed fixtures and owned pieces kept.`
-    : "No new pieces fit the budget and available space. Fixed fixtures and owned pieces kept.";
-  return { ...baseState, items, style, budget, spent: getSpend(items), notes };
-}
 $("#styles").onclick = (e) => {
   const btn = e.target.closest("[data-style]");
   if (btn) {
@@ -1211,33 +1172,44 @@ $("#styles").onclick = (e) => {
     renderDraft();
   }
 };
-$("#style-form").onsubmit = (e) => {
+$("#style-form").onsubmit = async (e) => {
   e.preventDefault();
   const budget = Number($("#budget").value);
   const overrides = {};
   if (pickedStyle) overrides.style = draftStyle;
   if (budget !== state.budget) overrides.budget = budget;
-  const next = styleActiveState(
-    {
-      ...state,
-      style: draftStyle,
-      budget,
-      brief: $("#brief").value.trim(),
-      reference,
-    },
-    overrides,
-  );
-  commit({ ...next, reference, hasLayout: true });
-  syncForm();
-  navigate("tour");
-  changeView($("#view-interior").disabled ? "plan" : "interior");
-  jumpTo("entry");
-  toast("Room styled · owned pieces kept");
+  await applyRestyle({ ...state, style: draftStyle, budget, brief: $("#brief").value.trim(), reference }, overrides, true);
 };
+
+async function applyRestyle(project, overrides, openTour) {
+  const progress = $("#restyle-progress");
+  if (progress.open) return;
+  const result = openTour ? $("#restyle-design-result") : $("#edit-result");
+  result.textContent = "";
+  try {
+    await runRestyle(progress, { project, overrides, snapshot: candidateSession.read() }, next => {
+      const summary = describeRestyle(state, next);
+      commit({ ...state, ...next, reference: project.reference, brief: project.brief, hasLayout: true, notes: summary });
+      syncForm();
+      if (openTour) {
+        navigate("tour");
+        changeView($("#view-interior").disabled ? "plan" : "interior");
+        jumpTo("entry");
+      }
+      $("#restyle-tour-result").textContent = summary;
+      if (openTour) result.textContent = summary;
+      toast(summary);
+    });
+  } catch (error) {
+    result.textContent = error.name === "AbortError" ? "Re-style canceled." : "Re-style could not finish. Try again.";
+  }
+}
 $("#undo").onclick = () => {
   if (history.length) {
     state = { ...history.pop(), personas: state.personas, screen: stage, flowVersion: 2 };
     selection = null;
+    $("#restyle-tour-result").textContent = "";
+    $("#restyle-design-result").textContent = "";
     persist();
     syncForm();
     render();
@@ -1921,7 +1893,7 @@ function updatePiece(candidate) {
   });
   return true;
 }
-$("#edit-request").onsubmit = (e) => {
+$("#edit-request").onsubmit = async (e) => {
   e.preventDefault();
   const text = $("#edit-text").value.trim().toLowerCase();
   const result = $("#edit-result");
@@ -2054,9 +2026,8 @@ $("#edit-request").onsubmit = (e) => {
       text,
     )
   ) {
-    commit(styleActiveState({ ...state, brief: text }));
-    syncForm();
-    message = state.notes;
+    await applyRestyle({ ...state, brief: text }, {}, false);
+    return;
   } else
     message =
       "Try “add a lamp”, “remove the rug”, “rotate this”, or “soft modern under $800”.";

@@ -209,7 +209,7 @@ test("gracefully handles Gemini API failure with sample and manual calibration r
   await page.goto("/");
   await page.locator("#floorplan-upload").setInputFiles("public/assets/sample-capture.jpg");
   const route = await analysisRequest;
-  const spinner = page.locator(".image-processing");
+  const spinner = page.locator("#setup-page .image-processing");
   await expect(spinner).toHaveText("Analyzing floorplan…");
   await route.fulfill({
     status: 503,

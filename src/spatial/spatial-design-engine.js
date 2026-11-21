@@ -58,6 +58,7 @@ export function buildDeterministicFurnishingPlan({
   productCandidates = [],
   candidateLookupList = [],
   hasWheelchairNeed = false,
+  onPlanRoom,
 }) {
   const fitHouse = normalizedHouse || normalizeHouse(house);
   const styleName = styleBrief?.style || "Warm minimal";
@@ -138,6 +139,8 @@ export function buildDeterministicFurnishingPlan({
       Number(b.style === styleName) - Number(a.style === styleName) || a.price - b.price,
     );
 
+    if (!matches.length) continue;
+    onPlanRoom?.(room.name || room.id);
     const occupied = mergeHouseFixturesIntoItems(fitHouse, workingHouse.objects);
     placement: for (const chosen of matches) {
       const kind = chosen.kind;

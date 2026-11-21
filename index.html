@@ -266,6 +266,7 @@
               <button type="submit" class="primary" id="generate">
                 <span data-icon="sparkles"></span> Auto-style room
               </button>
+              <p class="restyle-result" id="restyle-design-result" role="status"></p>
               <section id="household-furnishing" hidden aria-label="Household furnishing">
                 <div class="bp-furnishing-actions">
                   <button id="furnishing-shopify" type="button" class="secondary">Browse Shopify alternatives</button>
@@ -298,6 +299,7 @@
           <section id="tour-panel" class="panel" hidden>
             <p class="eyebrow">Step 5 · Explore &amp; Edit</p>
             <h2>Explore your layout</h2>
+            <p class="restyle-result" id="restyle-tour-result" role="status"></p>
             <p id="walk-help">
               Drag the background to look around. Use the numbered viewpoints or
               walk with W, A, S, D while the room is focused.
@@ -401,6 +403,12 @@
         ><strong id="saved-total"></strong>
       </div>
     </main>
+    <dialog id="restyle-progress" aria-labelledby="restyle-title">
+      <p class="eyebrow">Local layout planner</p>
+      <h2 id="restyle-title" class="image-processing">Re-styling your space</h2>
+      <p role="status" aria-atomic="true"></p>
+      <button type="button" class="secondary">Cancel</button>
+    </dialog>
     <dialog id="dialog" aria-labelledby="modal-title">
       <div class="modal-title">
         <h2 id="modal-title"></h2>
