@@ -23,6 +23,17 @@ import { icon } from "./icons.js";
 import { createHouseholdPage } from "./src/components/persona/household-page.js";
 import { validatePersonas } from "./src/contracts/persona.js";
 import { listPersonaRooms } from "./src/persona/rooms.js";
+import { showParsedGeometryModal } from "./floorplan-import-ui.js";
+import {
+  clearConfirmedImportedHouse,
+  getConfirmedImportedHouse,
+  setConfirmedImportedHouse,
+} from "./src/spatial/floorplan-importer.js";
+
+export { getConfirmedImportedHouse };
+if (typeof window !== "undefined") {
+  window.getConfirmedImportedHouse = getConfirmedImportedHouse;
+}
 
 const $ = (selector) => document.querySelector(selector);
 const escape = (value) =>
@@ -60,6 +71,13 @@ try {
     state = { ...demo, ...saved };
     if (validatePersonas(state.personas, listPersonaRooms(state))) state.personas = [];
     hasProject = true;
+    if (state.importedHouse) {
+      try {
+        setConfirmedImportedHouse(state.importedHouse);
+      } catch {
+        state.importedHouse = null;
+      }
+    }
   }
 } catch {
   /* A new local project also works with storage disabled. */
@@ -146,11 +164,14 @@ function itemGlyph(item) {
 function render() {
   $("#room-name").textContent = state.roomName;
   const room = state.room || ROOM;
-  $(".subtitle").textContent = `${room.width} × ${room.depth} m · Living space`;
+  $(".subtitle").textContent = state.importedHouse
+    ? `${state.importedHouse.bounds.width} × ${state.importedHouse.bounds.depth} m · ${state.importedHouse.rooms.length} rooms imported`
+    : `${room.width} × ${room.depth} m · Living space`;
   $("#item-count").textContent = state.items.length;
   $("#shop-count").textContent = state.savedProducts?.length || "";
   $("#undo").disabled = !history.length;
   $("#compare-photo").hidden = !state.roomPhoto;
+  $("#view-house-json").hidden = !state.importedHouse;
   const item = state.items.find((i) => i.id === selection);
   $("#objectbar").innerHTML = item
     ? `<strong>${escape(item.name)}</strong><span class="object-tools"><button data-action="rotate" title="Rotate 90 degrees">${icon("rotate")} Rotate</button>${item.owned ? "" : '<button data-action="save">Save piece</button>'}<button data-action="swap">${icon("swap")} Swap</button><button data-action="remove">${icon("trash")} Remove</button></span>`
@@ -263,6 +284,10 @@ $("#compare-photo").onclick = () =>
     "Room reference",
     `<img class="room-reference-full" alt="Uploaded view of your room" src="${escape(state.roomPhoto)}">`,
   );
+$("#view-house-json").onclick = () => {
+  const house = state.importedHouse || getConfirmedImportedHouse();
+  if (house) showParsedGeometryModal(house);
+};
 $("#objectbar").onclick = (e) => {
   const action = e.target.closest("[data-action]")?.dataset.action;
   const item = state.items.find((i) => i.id === selection);
@@ -524,9 +549,13 @@ function beginSetup(fresh = false) {
     readPhoto,
     onApply(next, { demo: sample = false } = {}) {
       hasProject = true;
+      const importedHouse = sample ? null : (next.importedHouse ?? null);
+      if (importedHouse) setConfirmedImportedHouse(importedHouse);
+      else clearConfirmedImportedHouse();
       commit({
         ...next,
         personas: fresh ? [] : state.personas,
+        importedHouse,
         flowVersion: 2,
         hasLayout: sample || (!fresh && Boolean(next.hasLayout)),
       });
