@@ -1,4 +1,5 @@
 import { personaActivities, validatePersonas } from "../../contracts/persona.js";
+import { maxPersonaImportBytes, parsePersonaImport } from "../../persona/import-personas.js";
 import { createSampleHousehold } from "../../persona/sample-household.js";
 
 function formatTime(minute) {
@@ -122,8 +123,10 @@ function memberCard(member, rooms, onRemoveGuest) {
       entry.activity = activity.value;
     });
     const room = document.createElement("select");
-    room.append(new Option("Choose a room", ""), ...rooms.map(({ id, name }) => new Option(name, id)));
-    room.value = rooms.some(({ id }) => id === entry.roomId) ? entry.roomId : "";
+    const knownRoom = rooms.some(({ id }) => id === entry.roomId);
+    const prompt = entry.roomId && !knownRoom ? `Reassign “${entry.roomId}”` : "Choose a room";
+    room.append(new Option(prompt, ""), ...rooms.map(({ id, name }) => new Option(name, id)));
+    room.value = knownRoom ? entry.roomId : "";
     room.addEventListener("change", () => {
       entry.roomId = room.value;
     });
@@ -208,6 +211,11 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
   const description = container.querySelector("#household-description");
   const generate = container.querySelector("#generate-household");
   const sample = container.querySelector("#sample-household");
+  const importPanel = container.querySelector("#household-import");
+  const importText = container.querySelector("#household-import-json");
+  const importFile = container.querySelector("#household-import-file");
+  const importPaste = container.querySelector("#household-import-paste");
+  const importStatus = container.querySelector("#household-import-status");
   const roomList = container.querySelector("#household-rooms-list");
   const review = container.querySelector("#household-review");
   const members = container.querySelector("#household-members");
@@ -229,6 +237,8 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
     const pending = Boolean(activeRequest);
     generate.disabled = pending || !rooms.length;
     sample.disabled = !rooms.length;
+    importPaste.disabled = !rooms.length;
+    importFile.disabled = !rooms.length;
     save.disabled = pending || !draft.length;
     members.disabled = pending;
     addGuest.disabled = pending;
@@ -261,6 +271,12 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
     });
     roomList.replaceChildren(...items);
     description.value = "";
+    importPanel.open = false;
+    importText.value = "";
+    importFile.value = "";
+    announce(importStatus);
+    container.querySelector("#household-import-example").textContent = JSON.stringify({ personas: createSampleHousehold(rooms).slice(0, 1) }, null, 2);
+    container.querySelector("#household-import-options").textContent = `Room IDs: ${rooms.map(({ id, name }) => `${name} (${id})`).join(", ")}. Activities: ${personaActivities.join(", ")}. Age groups: child, teen, adult, olderAdult.`;
     announce(generationStatus);
     replaceDraft(personas);
     title.focus({ preventScroll: true });
@@ -277,6 +293,7 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
     const request = new AbortController();
     activeRequest = request;
     updateControls();
+    announce(importStatus);
     announce(generationStatus, "Generating your household…");
     const fallbackError = "Could not generate a household. Please try again.";
 
@@ -311,8 +328,54 @@ export function createHouseholdPage(container, { onSave, onSkip }) {
     }
   });
 
+  function importDraft(text) {
+    const personas = parsePersonaImport(text, rooms);
+    const roomIds = new Set(rooms.map(({ id }) => id));
+    const unmapped = personas.some((member) => member.schedule.some((entry) => !roomIds.has(entry.roomId)));
+    replaceDraft(personas);
+    announce(generationStatus);
+    announce(importStatus, unmapped
+      ? "Draft imported. Reassign the marked rooms before saving."
+      : "Draft imported. Review your household before saving.");
+    members.querySelector("input")?.focus({ preventScroll: true });
+  }
+
+  importPaste.addEventListener("click", () => {
+    close();
+    try {
+      importDraft(importText.value);
+    } catch (error) {
+      announce(importStatus, error.message, true);
+    }
+    updateControls();
+  });
+
+  importFile.addEventListener("change", async () => {
+    const [file] = importFile.files;
+    if (!file) return;
+    importFile.value = "";
+    close();
+    const request = new AbortController();
+    activeRequest = request;
+    updateControls();
+    announce(importStatus, "Reading export…");
+    try {
+      if (file.size > maxPersonaImportBytes) throw new Error("Choose a JSON export up to 256 KB.");
+      const text = await file.text();
+      if (activeRequest === request) importDraft(text);
+    } catch (error) {
+      if (activeRequest === request) announce(importStatus, error.message || "Could not read the JSON file.", true);
+    } finally {
+      if (activeRequest === request) {
+        activeRequest = null;
+        updateControls();
+      }
+    }
+  });
+
   sample.addEventListener("click", () => {
     close();
+    announce(importStatus);
     replaceDraft(createSampleHousehold(rooms));
     announce(generationStatus, "Sample household loaded. Review it before saving.");
   });

@@ -60,6 +60,22 @@
           <ul id="household-rooms-list"></ul>
         </section>
       </div>
+      <details class="household-panel household-import" id="household-import">
+        <summary>Import from your agent</summary>
+        <p>Paste your agent’s JSON export or open its file to review the household here.</p>
+        <details class="household-import-format"><summary>Export format and example</summary>
+          <p>Ask your agent for a personas array like this example. Times are minutes after midnight. Omit a member’s ID to create one. For a flexible activity, use windowStartMinute, windowEndMinute and durationMinutes in place of startMinute and endMinute.</p>
+          <p id="household-import-options"></p>
+          <pre id="household-import-example"></pre>
+        </details>
+        <label class="field" for="household-import-json">Agent export JSON</label>
+        <textarea id="household-import-json" rows="4" spellcheck="false"></textarea>
+        <div class="household-buttons">
+          <button class="secondary" id="household-import-paste" type="button">Review pasted JSON</button>
+          <label class="field">Open JSON file<input id="household-import-file" type="file" accept=".json,application/json"></label>
+        </div>
+        <p class="household-status" id="household-import-status" role="status"></p>
+      </details>
       <section id="household-review" aria-labelledby="household-review-title" hidden>
         <header class="household-review-heading">
           <h2 id="household-review-title">Review your household</h2>
