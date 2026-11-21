@@ -6,7 +6,7 @@ import { createWholeHomeDemoState } from "../../house-demo.js";
 import { canPlaceInHouse } from "../../house-model.js";
 import { canPlaceItem, ROOM } from "../../model.js";
 import { createSampleHousehold } from "./sample-household.js";
-import { prepareFurnishing, previewFurnishing } from "./furnishing.js";
+import { furnishingCandidatesFromSession, prepareFurnishing, previewFurnishing } from "./furnishing.js";
 import { createFurnishingMiddleware } from "../agents/furnishing-api.js";
 import { furnishingPath } from "../agents/furnishing-contract.js";
 
@@ -33,6 +33,23 @@ test("fresh candidate fixture supplies identity, price and geometry; retained pa
   assert.ok(canPlaceItem(piece, ROOM, existing));
   assert.deepEqual(context.items, [locked, owned]);
   assert.equal(existing.length, 2);
+});
+
+test("a fresh commerce session supplies the selected kind and retains the exact merchant product and variant", () => {
+  const product = { ...live, title: "The Meridian", productId: "gid://shopify/Product/4812", sellerDomain: "Fixture.MyShopify.com" };
+  delete product.kind;
+  const snapshot = { kind: "desk", products: [product], expiresAt: 5000 };
+  assert.deepEqual(furnishingCandidatesFromSession(null), []);
+  assert.deepEqual(furnishingCandidatesFromSession(snapshot, 5000), []);
+  const liveCandidates = furnishingCandidatesFromSession(snapshot, 4999);
+  const context = prepareFurnishing({ ...options, liveCandidates });
+  const id = product.variantId + "|fixture.myshopify.com";
+  const result = previewFurnishing(context, proposal({ ...add, candidateId: id }));
+  const piece = result.additions[0].item;
+  assert.equal(piece.productId, product.productId);
+  assert.equal(piece.name, "The Meridian");
+  assert.equal(piece.kind, "desk");
+  assert.deepEqual(piece.shopify, { variantId: product.variantId, sellerDomain: product.sellerDomain });
 });
 
 test("the whole-home proposal fits its requested room and keeps every fixture and existing piece", () => {

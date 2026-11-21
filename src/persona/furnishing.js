@@ -3,16 +3,23 @@ import { fitItemInHouse, mergeHouseFixturesIntoItems, normalizeHouse } from "../
 import { listPersonaRooms } from "./rooms.js";
 import { validateFurnishingInput, validateFurnishingProposal } from "../agents/furnishing-contract.js";
 
+/** Supply liveCandidates: furnishingCandidatesFromSession(candidateSession.read()) at the design boundary. */
+export function furnishingCandidatesFromSession(snapshot, now = Date.now()) {
+  if (!snapshot || (snapshot.expiresAt != null && snapshot.expiresAt <= now) ||
+      !furniturePreviewKinds.includes(snapshot.kind) || !Array.isArray(snapshot.products)) return [];
+  return snapshot.products.map((product) => ({ ...product, kind: snapshot.kind }));
+}
+
 function liveOption(candidate) {
   const { sellerDomain, variantId, priceMinor, dimensions } = candidate;
   if (!sellerDomain || !variantId || !candidate.title || candidate.available !== true || candidate.currency !== "USD" ||
       !Number.isSafeInteger(priceMinor) || priceMinor < 0) return null;
-  const kind = furniturePreviewKinds.includes(candidate.kind) ? candidate.kind :
-    furniturePreviewKinds.find((value) => candidate.title.toLowerCase().includes(value));
-  if (!kind) return null;
+  const { kind } = candidate;
+  if (!furniturePreviewKinds.includes(kind)) return null;
   const id = variantId + "|" + sellerDomain.toLowerCase();
   const item = createShopifyPreview(kind, { sellerDomain, variantId }, {});
   item.name = candidate.title;
+  item.productId = candidate.productId ?? null;
   if (dimensions && ["width", "height", "depth"].every((key) => Number.isFinite(dimensions[key]) && dimensions[key] > 0)) {
     for (const key of ["width", "depth", "height"]) item[key] = dimensions[key];
     item.dimensionsSource = candidate.dimensionsSource === "merchant" ? "merchant" : "estimated";
