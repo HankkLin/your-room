@@ -75,3 +75,19 @@
 .studio-replay-proposal .studio-replay-actions {
   margin-top: 8px;
 }
+
+.region-editor { margin-top: 15px; }
+.region-editor summary { cursor: pointer; font-weight: 600; }
+.region-editor p, .region-editor output { font-size: 13px; color: var(--muted); margin: 8px 0; }
+.region-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px; }
+.region-map { width: 100%; height: 240px; background: var(--paper, #faf7f0); cursor: crosshair; touch-action: none; }
+.region-map polygon { fill: #eee7db; stroke: #84776b; stroke-width: .055; }
+.region-map text { fill: #4d463d; font: .28px sans-serif; paint-order: stroke; stroke: #eee7db; stroke-width: .07; }
+.region-fixed { fill: #aa9f92; }
+.region-movable { fill: #675d47; }
+.region-selection { fill: #597c6530; stroke: #325d41; stroke-width: .06; pointer-events: none; }
+.region-fields { display: grid; align-content: start; gap: 7px; }
+.region-fields label { display: grid; gap: 4px; font-size: 13px; }
+.region-fields textarea, .region-fields select { padding: 7px; font: inherit; }
+.region-fields button { justify-self: start; }
+#studio-replay-move { white-space: pre-line; }

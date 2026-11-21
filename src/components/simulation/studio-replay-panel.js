@@ -1,5 +1,6 @@
+import { createRegionEditor } from "./region-editor.js";
 import {
-  buildReplaySuggestionInput, previewReplaySuggestion, requestReplaySuggestion,
+  buildRegionSuggestionInput, buildReplaySuggestionInput, previewRegionPatch, previewReplaySuggestion, requestReplaySuggestion,
 } from "../../agents/replay-suggestion.js";
 import { prepareHouseholdReplay } from "../../contracts/persona.js";
 import { FINDING_TYPES } from "../../contracts/simulation.js";
@@ -77,6 +78,15 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
   let comparison = null;
   let pending = null;
   let proposal = null;
+  const regionEditor = createRegionEditor(container.querySelector("#studio-region-editor"), {
+    onChange() {
+      if (!pending && !proposal) return;
+      clearSuggestion();
+      announce("The redesign request changed. Preview it again.");
+      update();
+    },
+    onRequest: selection => void suggestMove(selection),
+  });
 
   function announce(message = "", isError = false) {
     status.textContent = message;
@@ -136,6 +146,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
 
   function clearBaseline(context, message) {
     baseline = null;
+    regionEditor.reset();
     activeRun = null;
     comparison = null;
     clearSuggestion();
@@ -172,6 +183,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     resetButton.disabled = !baseline;
     suggest.hidden = !baseline?.finding || baseline.items !== items;
     suggest.disabled = Boolean(pending || proposal || activeRun);
+    regionEditor.update(context, Boolean(baseline?.result && baseline.items === items), suggest.disabled);
   }
 
   function reset() {
@@ -243,44 +255,53 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     if (!compare.disabled) void compareCurrent(context);
   });
 
-  suggest.addEventListener("click", async () => {
+  async function suggestMove(selection) {
     const context = getContext();
     update(context);
-    if (suggest.hidden || suggest.disabled) return;
+    if (suggest.disabled || !baseline?.result || baseline.items !== context.items || (!selection && suggest.hidden)) return;
     const request = new AbortController();
     pending = request;
     announce("Asking Gemini for a move…");
     update(context);
     try {
-      const input = buildReplaySuggestionInput(baseline.finding, context.house, context.items);
+      const input = selection
+        ? buildRegionSuggestionInput(selection.region, selection.instruction, baseline.result.findings, context.house, context.items)
+        : buildReplaySuggestionInput(baseline.finding, context.house, context.items);
       const suggested = await requestReplaySuggestion(input, request.signal);
       const latest = getContext();
       update(latest);
       if (pending !== request) return;
 
-      const { before, after } = previewReplaySuggestion(suggested, latest.house, latest.items);
+      const moves = selection ? previewRegionPatch(suggested, input, latest.house, latest.items).moves
+        : [previewReplaySuggestion(suggested, latest.house, latest.items)];
       const roomNames = new Map(latest.rooms.map(({ id, name }) => [id, name]));
-      explanation.textContent = suggested.explanation;
-      proposedMove.textContent = (before.name || before.kind) + " · " +
-        describePosition(before, roomNames) + " → " + describePosition(after, roomNames);
-      proposal = suggested;
+      explanation.textContent = selection ? suggested.reasoning : suggested.explanation;
+      container.querySelector("#studio-replay-proposal-title").textContent = selection ? "Proposed regional changes" : "Proposed move";
+      approve.textContent = selection ? "Approve redesign" : "Approve move";
+      proposedMove.textContent = moves.map(({ before, after }) =>
+        (before.name || before.kind) + " · " + describePosition(before, roomNames) + " → " + describePosition(after, roomNames)
+      ).join("\n");
+      proposal = { suggested, input };
       review.hidden = false;
-      announce("Review the proposed move before approving.");
+      announce("Review the proposed changes before approving.");
     } catch (error) {
       if (pending === request) announce(error.message || "Gemini could not suggest a move. Try again.", true);
     } finally {
       if (pending === request) pending = null;
       update();
     }
-  });
+  }
 
+  suggest.addEventListener("click", () => void suggestMove());
   approve.addEventListener("click", () => {
     const context = getContext();
     update(context);
     if (!proposal || activeRun) return;
     try {
-      const { items } = previewReplaySuggestion(proposal, context.house, context.items);
-      const finding = baseline.finding;
+      const { input, suggested } = proposal;
+      const { items } = input.region ? previewRegionPatch(suggested, input, context.house, context.items)
+        : previewReplaySuggestion(suggested, context.house, context.items);
+      const finding = input.region ? null : baseline.finding;
       clearSuggestion();
       commitItems(items);
       void compareCurrent(getContext(), finding);
