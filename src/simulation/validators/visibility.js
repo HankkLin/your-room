@@ -25,13 +25,15 @@ function angleBetweenDegrees(u, v) {
  * @param {object} params
  * @param {object} params.house
  * @param {number} [params.maxViewingAngleDegrees=45]
- * @param {number} [params.maxDistanceMeters=4.8]
+ * @param {number} [params.maxDistanceMeters=4.8] Fallback when the TV has no modeled width.
+ * @param {number} [params.minScreenAngleDegrees=20] Simulation target for apparent horizontal width.
  * @param {number} [params.minBlockingHeight=0.95]
  */
 export function validateTvVisibility({
   house,
   maxViewingAngleDegrees = 45,
   maxDistanceMeters = 4.8,
+  minScreenAngleDegrees = 20,
   minBlockingHeight = 0.95,
 } = {}) {
   if (!house || typeof house !== "object") {
@@ -84,7 +86,22 @@ export function validateTvVisibility({
         excludeIds: [seat.id, tv.id],
       });
 
+      // Approximate the visible horizontal span using the TV body width projected toward the seat.
+      // This is a layout heuristic: the model may include the bezel and supplies no panel diagonal.
+      const width = tv.modeledTvWidthMeters;
+      const projectedWidth = width * Math.abs(Math.cos(screenOffAxisDeg * Math.PI / 180));
+      const hasScreenSize = width !== null && minScreenAngleDegrees > 0 && minScreenAngleDegrees < 180;
+      const distanceLimit = hasScreenSize
+        ? projectedWidth / (2 * Math.tan(minScreenAngleDegrees * Math.PI / 360))
+        : maxDistanceMeters;
+      const screenSizeEvidence = hasScreenSize ? {
+        modeledTvWidthMeters: width,
+        apparentScreenAngleDegrees: round1(2 * Math.atan2(projectedWidth, 2 * sight.distanceMeters) * 180 / Math.PI),
+        minScreenAngleDegrees,
+      } : {};
+
       const baseEvidence = {
+        ...screenSizeEvidence,
         viewerObjectId: seat.id,
         viewerType: seat.semanticType,
         tvObjectId: tv.id,
@@ -130,10 +147,10 @@ export function validateTvVisibility({
             maxViewingAngleDegrees,
           },
         });
-      } else if (sight.distanceMeters > maxDistanceMeters) {
+      } else if (sight.distanceMeters > distanceLimit) {
         usable = false;
         const excessRatio =
-          (sight.distanceMeters - maxDistanceMeters) / maxDistanceMeters;
+          (sight.distanceMeters - distanceLimit) / Math.max(0.01, distanceLimit);
         const severity = round2(clamp(0.38 + excessRatio * 0.42, 0.35, 0.85));
         findings.push({
           type: FINDING_TYPES.TV_TOO_FAR,
@@ -145,7 +162,7 @@ export function validateTvVisibility({
           },
           evidence: {
             ...baseEvidence,
-            maxDistanceMeters,
+            maxDistanceMeters: round2(distanceLimit),
           },
         });
       }

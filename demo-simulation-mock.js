@@ -7,7 +7,7 @@
  *
  * To connect the real simulation engine later, pass external engine callbacks
  * and state into `demoControls.setState(...)` (with `isMockData: false`) or
- * call `window.__stillroom.connectSimulationEngine(engine)`.
+ * call `window.__livingBlueprint.connectSimulationEngine(engine)`.
  */
 
 export const mockBeforeScores = Object.freeze({

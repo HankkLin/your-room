@@ -174,7 +174,29 @@ export function renderControlPanelMarkup(
   </div>`;
 }
 
-export function renderFindingsMarkup(viewState) {
+function householdImpact(finding, personas) {
+  const evidence = finding.evidence || {};
+  const person = personas.find(({ id }) => id === finding.agentId);
+  if (finding.type === "NOISE_CONFLICT" && person && evidence.workerAgentId === person.id && evidence.overlapMinutes > 0) {
+    return `${person.name}’s quiet work overlaps a modeled noise source for ${evidence.overlapMinutes} minutes.`;
+  }
+  if (finding.type === "NO_PATH" && person && finding.toRoomId && evidence.reason) {
+    return `${person.name} could not reach ${finding.toRoomId.replace(/[-_]+/g, " ")} during the simulated routine.`;
+  }
+  if (finding.type === "CONGESTION" && Array.isArray(evidence.agentIds) && evidence.durationSeconds > 0) {
+    const affected = personas.filter(({ id }) => evidence.agentIds.includes(id)).map(({ name }) => name);
+    if (affected.length) {
+      const names = new Intl.ListFormat("en", { type: "conjunction" }).format(affected);
+      return `${names} encountered congestion during a ${evidence.durationSeconds}-second episode.`;
+    }
+  }
+  if (finding.type === "NO_EVACUATION_PATH" && person && evidence.reason) {
+    return `${person.name} could not reach an exterior exit in the simulated evacuation.`;
+  }
+  return "";
+}
+
+export function renderFindingsMarkup(viewState, personas = []) {
   const state = normalizeSimulationViewState(viewState);
   if (state.status === "RUNNING" && state.findings.length === 0) {
     return `<div class="twin-empty" id="sim-findings-empty">Running scenario simulation… evaluating walkways, sightlines, and room schedules.</div>`;
@@ -193,6 +215,7 @@ export function renderFindingsMarkup(viewState) {
       const glyph = LEVEL_GLYPHS[finding.level] || LEVEL_GLYPHS.info;
       const isSelected = state.selectedFindingId === finding.id;
       const chips = formatFindingEvidenceChips(finding);
+      const impact = state.isMockData ? "" : householdImpact(finding, personas);
       const chipsMarkup =
         chips.length > 0
           ? `<div class="twin-evidence-chips">${chips
@@ -207,6 +230,7 @@ export function renderFindingsMarkup(viewState) {
             ${finding.location ? `<span class="twin-finding-loc">${escapeHtml(finding.location)}</span>` : ""}
           </div>
           ${finding.summary ? `<p>${escapeHtml(finding.summary)}</p>` : ""}
+          ${impact ? `<p class="twin-household-impact">${escapeHtml(impact)}</p>` : ""}
           ${chipsMarkup}
         </div>
       </article>`;
@@ -374,8 +398,14 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
     </div>`;
   }
 
+  const measuredOutcome = {
+    IMPROVED: "The replay measured an improvement.",
+    MIXED: "The replay measured both improvements and regressions.",
+    REGRESSION: "The replay measured a regression.",
+    NO_CHANGE: "The replay measured no change.",
+  }[state.redesignStatus];
   const fallbackBadge = state.isFallbackRedesign
-    ? '<span class="twin-fallback-pill" title="Verified deterministic ScenePatch applied while Gemini API was offline or unavailable">Deterministic fallback</span>'
+    ? '<span class="twin-fallback-pill" title="Deterministic ScenePatch generated when Gemini was unavailable">Deterministic fallback</span>'
     : "";
 
   return `<div class="twin-redesign-box" id="sim-redesign-panel">
@@ -383,6 +413,7 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
       <span class="section-label">Gemini redesign</span>
       ${fallbackBadge}
     </div>
+    ${measuredOutcome ? `<p id="sim-redesign-outcome">${measuredOutcome}</p>` : ""}
     ${state.redesignMessage ? `<p class="twin-redesign-note">${escapeHtml(state.redesignMessage)}</p>` : ""}
     <ul class="twin-redesign-list" id="sim-redesign-list">
       ${redesignActions
@@ -393,10 +424,14 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
         .join("")}
     </ul>
     ${renderAttemptTrailMarkup(state.attemptSummaries)}
+    ${state.redesignStatus === "REVIEW" ? `<div class="studio-replay-actions">
+      <button type="button" class="primary" id="sim-approve-redesign">Approve layout changes</button>
+      <button type="button" class="secondary" id="sim-dismiss-redesign">Dismiss layout changes</button>
+    </div>` : ""}
   </div>`;
 }
 
-export function renderResultsDeckMarkup(viewState) {
+export function renderResultsDeckMarkup(viewState, personas = []) {
   const state = normalizeSimulationViewState(viewState);
   const layoutToggleMarkup = state.hasLayoutToggle
     ? `<div class="twin-layout-toggle" role="group" aria-label="3D layout preview">
@@ -419,7 +454,7 @@ export function renderResultsDeckMarkup(viewState) {
         </div>
         ${state.isMockData ? '<span class="twin-mock-badge">Mock preview</span>' : ""}
       </div>
-      ${renderFindingsMarkup(state)}
+      ${renderFindingsMarkup(state, personas)}
       ${renderScorecardMarkup(state.scores)}
     </section>
     <section class="twin-deck-card" id="sim-comparison-panel" aria-labelledby="sim-compare-heading">
@@ -570,6 +605,8 @@ export function mountDemoControls({
   onSelectFinding = () => {},
   onSelectLayoutView = () => {},
   onProposeRedesign = () => {},
+  onApproveRedesign = () => {},
+  onDismissRedesign = () => {},
 } = {}) {
   let visible = false;
 
@@ -586,7 +623,7 @@ export function mountDemoControls({
     if (resultsHost) {
       resultsHost.hidden = !visible;
       if (visible) {
-        resultsHost.innerHTML = renderResultsDeckMarkup(state);
+        resultsHost.innerHTML = renderResultsDeckMarkup(state, personas);
       }
     }
   }
@@ -642,6 +679,8 @@ export function mountDemoControls({
   }
 
   function handleResultsClick(event) {
+    if (event.target.closest("#sim-approve-redesign")) return onApproveRedesign();
+    if (event.target.closest("#sim-dismiss-redesign")) return onDismissRedesign();
     const redesignBtn = event.target.closest(
       "#sim-propose-redesign-deck, #sim-propose-redesign-inline",
     );

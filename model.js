@@ -1,3 +1,4 @@
+import { glbUrl } from "./src/shopify/product-assets.js";
 import offers from "./offers.json" with { type: "json" };
 
 export const ROOM = { width: 5.4, depth: 4.2, height: 2.65 };
@@ -375,13 +376,23 @@ export function createItem(
 
 export const furniturePreviewKinds = Object.keys(ownedDefaults);
 
-export function createShopifyPreview(kind, ref, placement) {
+export function createShopifyPreview(kind, ref, placement, product = null) {
   if (!Object.hasOwn(ownedDefaults, kind)) return null;
   const item = createItem(
     { ...ownedDefaults[kind], kind, name: `Shopify ${kind}` },
     placement,
   );
-  return { ...item, price: null, shopify: ref, dimensionsSource: "estimated" };
+  const exact = product && product.variantId === ref.variantId && product.sellerDomain === ref.sellerDomain;
+  const dimensions = exact && product.dimensionsSource === "merchant" ? product.dimensions : null;
+  const measured = ["width", "height", "depth"].every((axis) => Number.isFinite(dimensions?.[axis]) && dimensions[axis] > 0);
+  const modelUrl = exact && glbUrl(product.modelUrl);
+  return {
+    ...item, name: (exact && product.title) || item.name, price: null, shopify: ref,
+    productId: (exact && product.productId) || null,
+    ...(measured ? { width: dimensions.width, height: dimensions.height, depth: dimensions.depth } : {}),
+    dimensionsSource: measured ? "merchant" : "estimated",
+    ...(modelUrl ? { modelUrl, modelScope: product.modelScope } : {}),
+  };
 }
 
 function halfExtents(item) {

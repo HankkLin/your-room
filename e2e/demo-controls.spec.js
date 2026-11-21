@@ -38,8 +38,8 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await page.locator("#whole-home-demo").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
-  // Single simulation UI check: legacy #studio-replay-panel is not rendered
-  await expect(page.locator("#studio-replay-panel")).toHaveCount(0);
+  // The saved-household comparison and scenario controls share the live tour.
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
 
   // Control panel is visible in sidebar and does NOT overlap the 3D scene canvas
   const controlCard = page.locator("#demo-controls-panel .twin-control-card");
@@ -85,6 +85,7 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
   await expect(page.locator(".twin-mock-badge")).toHaveCount(0);
   await expect(page.locator("#sim-run-btn")).toHaveText("Run Again");
@@ -96,10 +97,23 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   );
 
   // Click Propose Gemini Redesign -> applies ScenePatch, replays, and shows Before -> After improvement
+  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
   await page.locator("#sim-propose-redesign-btn").click();
+  await expect(page.locator("#sim-approve-redesign")).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")))).toEqual(beforeApproval);
+  // Leaving the captured scenario invalidates its pending operations.
+  await page.locator("#sim-scenario").selectOption("dinner-party-8-guests");
+  await expect(page.locator("#sim-approve-redesign")).toHaveCount(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")))).toEqual(beforeApproval);
+  await page.locator("#sim-scenario").selectOption("morning-routine");
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
+  await page.locator("#sim-propose-redesign-btn").click();
+  await page.locator("#sim-approve-redesign").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
   const movementRow = page.locator('[data-compare-category="movement"]');
   await expect(movementRow).toContainText("+");
@@ -112,8 +126,10 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
   await expect(page.locator("#sim-findings-list")).toContainText(/congestion/i);
+  await expect(page.locator("#sim-propose-redesign-btn")).toHaveCount(0);
 
   // Reset restores READY empty state cleanly
   await page.locator("#sim-reset-btn").click();
@@ -138,7 +154,7 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
 
   await page.locator("#view-interior").click();
   await page.evaluate(() => {
-    window.__stillroom.getScene().setEyePose(0.5, 1.8, Math.PI / 2);
+    window.__livingBlueprint.getScene().setEyePose(0.5, 1.8, Math.PI / 2);
   });
   for (let step = 0; step < 6; step += 1) {
     await page.keyboard.press("w");

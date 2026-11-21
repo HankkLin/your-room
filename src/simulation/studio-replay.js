@@ -1,4 +1,6 @@
+import { withFurnitureFootprint } from "../spatial/furniture-footprint.js";
 import { getObjectBoundingBox, syncHouseObjects } from '../../house-model.js';
+import { environmentInputs } from '../environment/environment-context.js';
 import { compareHouseholdLayouts } from '../persona/compare-household-layouts.js';
 
 function studioObstacle(object) {
@@ -6,22 +8,7 @@ function studioObstacle(object) {
     return { ...object, passable: true };
   }
 
-  const { x, z, width, depth, rotationRadians } = object;
-  const cos = Math.cos(rotationRadians[1]);
-  const sin = Math.sin(rotationRadians[1]);
-  const halfWidth = width / 2;
-  const halfDepth = depth / 2;
-  const corners = [
-    [-halfWidth, -halfDepth], [halfWidth, -halfDepth],
-    [halfWidth, halfDepth], [-halfWidth, halfDepth],
-  ];
-
-  // Project the Studio's Three.js Y rotation onto the X/Z floor plane.
-  const footprint = corners.map(([localX, localZ]) => [
-    x + localX * cos + localZ * sin,
-    z - localX * sin + localZ * cos,
-  ]);
-  return { ...object, footprint };
+  return withFurnitureFootprint(object);
 }
 
 export function captureStudioLayout(house, items) {
@@ -36,13 +23,25 @@ export function captureStudioLayout(house, items) {
 }
 
 export async function runStudioReplay({ beforeScene, afterScene, personas, rooms }) {
-  const { simulateHouse } = await import('./simulation-engine.js');
   return compareHouseholdLayouts({
     beforeScene,
     afterScene,
     personas,
     rooms,
-    // The Studio reports findings and metrics without displaying every timeline frame.
-    simulate: (house, household) => simulateHouse(house, household, { timelineSampleSeconds: 60 }),
+    simulate: (scene, household) => simulateStudioLayout(scene, household, beforeScene?.environment?.snapshot ?? null),
   });
+}
+
+export async function simulateStudioLayout(scene, resolvedHousehold, snapshot = scene.environment?.snapshot ?? null) {
+  const [{ simulateHouse }, { evaluateHouseholdExperience }] = await Promise.all([
+    import('./simulation-engine.js'), import('./validators/household-evaluation.js'),
+  ]);
+  // Keep the approved schedule available for replays after the layout changes.
+  const inputs = environmentInputs(snapshot);
+  const house = { ...scene, environment: { ...scene.environment, snapshot: inputs.environment } };
+  const result = simulateHouse(house, structuredClone(resolvedHousehold), { timelineSampleSeconds: 60, ...inputs });
+  const evaluation = evaluateHouseholdExperience({
+    house, household: resolvedHousehold, simulation: result, sun: inputs.sun,
+  });
+  return { ...result, evaluation, environment: inputs.environment };
 }

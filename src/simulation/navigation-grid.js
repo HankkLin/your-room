@@ -189,7 +189,7 @@ function extractObstaclePolygons(house) {
     }
   }
 
-  // 3. Optional legacy Stillroom `items` compatibility (`x, z, width, depth, rotation` in deg)
+  // 3. Optional legacy Living Blueprint `items` compatibility (`x, z, width, depth, rotation` in deg)
   for (const item of Array.isArray(house.items) ? house.items : []) {
     if (!item || item.kind === "rug" || item.passable === true) continue;
     if (Number.isFinite(item.x) && Number.isFinite(item.z)) {

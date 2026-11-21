@@ -82,17 +82,17 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
-  // Step 3 & 4: Whole-home 3D appears + Household personas available + no legacy replay panel
+  // Step 3 & 4: Whole-home 3D appears + Household personas and saved-routine controls available
   await page.locator("#view-3d").click();
   await expect(page.locator("#scene canvas")).toHaveAttribute("data-engine", /three/i);
-  await expect(page.locator("#studio-replay-panel")).toHaveCount(0);
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
   await expect(page.locator("#sim-persona-summary")).toContainText("Kevin");
   await expect(page.locator("#sim-persona-summary")).toContainText("Alice");
   await expect(page.locator("#sim-persona-summary")).toContainText("Leo");
   await expect(page.locator("#sim-persona-summary")).toContainText("Maya");
 
   const initialFixtureSnapshot = await page.evaluate(() =>
-    window.__stillroom
+    window.__livingBlueprint
       .getState()
       .items.filter((i) => i.locked || i.type === "fixed")
       .map((i) => ({ id: i.id, x: i.x, z: i.z })),
@@ -105,10 +105,10 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await page.locator("#sim-run-btn").click();
 
   await expect(page.locator(".twin-mock-badge")).toHaveCount(0);
-  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
 
   const avatarStats = await page.evaluate(() =>
-    window.__stillroom.getScene().getPlaybackStats(),
+    window.__livingBlueprint.getScene().getPlaybackStats(),
   );
   expect(avatarStats.avatarCount).toBe(4);
 
@@ -126,8 +126,14 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   expect(beforeMovementScore).toBeLessThan(95);
 
   // Step 9–12 (E5, E6, E9): Click "Propose Gemini Redesign" -> Attempt 1 (locked toilet) rejected -> Attempt 2 accepted & applied
+  const beforeApproval = await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
   await page.locator("#sim-propose-redesign-btn").click();
-  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+  await expect(page.locator("#sim-approve-redesign")).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")))).toEqual(beforeApproval);
+  await page.locator("#sim-approve-redesign").click();
+  await expect(page.locator('[data-layout-view="after"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#sim-findings-list")).not.toContainText("Kitchen congestion");
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
   expect(redesignCallCount).toBe(2);
 
   // Self-correction visibility rendered from actual attempts
@@ -142,7 +148,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   );
 
   // Verify locked fixtures remained completely unchanged (E9) while movable table moved & updated product (E6)
-  const afterState = await page.evaluate(() => window.__stillroom.getState());
+  const afterState = await page.evaluate(() => window.__livingBlueprint.getState());
   const afterFixtureSnapshot = afterState.items
     .filter((i) => i.locked || i.type === "fixed")
     .map((i) => ({ id: i.id, x: i.x, z: i.z }));
@@ -160,6 +166,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
       .textContent(),
   );
   expect(afterMovementScore).toBeGreaterThan(beforeMovementScore);
+  await expect(page.locator("#sim-redesign-outcome")).toHaveText("The replay measured an improvement.");
 
   await expect(page.locator("#sim-findings-diff")).toContainText(
     "Kitchen congestion resolved",

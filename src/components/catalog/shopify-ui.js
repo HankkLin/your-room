@@ -1,14 +1,5 @@
-export function shopifyHttpsUrl(value) {
-  if (typeof value !== "string" || !/^https:\/\//i.test(value) || /[\\\s\u0000-\u001f\u007f]/.test(value)) {
-    return null;
-  }
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password ? value : null;
-  } catch {
-    return null;
-  }
-}
+import { shopifyHttpsUrl } from "../../contracts/product.js";
+export { shopifyHttpsUrl };
 
 export function formatShopifyMoney(amountMinor, currency) {
   if (!Number.isSafeInteger(amountMinor) || typeof currency !== "string" || !/^[A-Z]{3}$/.test(currency)) {

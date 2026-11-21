@@ -6,8 +6,8 @@
  *   payloads so 3D avatars, route polylines, congestion hotspots, privacy sightline
  *   rays, fire evacuation paths, and Before/After redesign transitions can be
  *   inspected on this branch without importing or implementing A* / validators.
- * - Replaced at runtime via `window.__stillroom.connectSimulationPlayback(...)`
- *   or `window.__stillroom.connectSimulationEngine(...)` when desktop's real
+ * - Replaced at runtime via `window.__livingBlueprint.connectSimulationPlayback(...)`
+ *   or `window.__livingBlueprint.connectSimulationEngine(...)` when desktop's real
  *   `simulateHouse()` + `getSimulationSnapshotAt()` + `runStressScenario()` +
  *   `evaluateHouseholdExperience()` are merged.
  */

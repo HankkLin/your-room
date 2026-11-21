@@ -224,6 +224,9 @@ export function listSemanticEntities(house) {
       facing: [round3(facing[0]), round3(facing[1])],
       hasExplicitOrientation,
       dimensions: { width, height, depth },
+      ...(semanticType === "tv" ? {
+        modeledTvWidthMeters: !raw.widthDefaulted && Number(raw.dimensions?.width ?? raw.width) > 0 && Number.isFinite(width) ? width : null,
+      } : {}),
       blocksSightline: raw.blocksSightline ?? null,
       passable: Boolean(raw.passable || semanticType === "rug"),
       polygon,

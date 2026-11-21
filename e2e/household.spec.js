@@ -24,7 +24,7 @@ const personas = [
 ];
 
 const savedPersonas = (page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")).personas);
+  page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")).personas);
 const household = (page) => page.locator("#household-page");
 const generateButton = (page) =>
   household(page).getByRole("button", { name: "Generate", exact: true });

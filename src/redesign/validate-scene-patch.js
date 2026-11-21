@@ -1,3 +1,4 @@
+import { withFurnitureFootprint } from "../spatial/furniture-footprint.js";
 import { isObjectLocked, toSceneObject } from "../contracts/scene.js";
 import {
   MAX_SCENE_PATCH_OPERATIONS,
@@ -22,6 +23,7 @@ import {
 import {
   applyScenePatch,
   lookupCandidateProduct,
+  livePatchError,
   parsePositionTriple,
   parseRotationTriple,
 } from "./apply-scene-patch.js";
@@ -35,7 +37,7 @@ function patchError(code, message, operationIndex = null, objectId = null) {
   };
 }
 
-function objectFootprintPolygon(sceneObj) {
+function fixtureBoxPolygon(sceneObj) {
   const cx = sceneObj.position[0];
   const cz = sceneObj.position[2];
   const hw = sceneObj.dimensions.width / 2;
@@ -317,6 +319,18 @@ export function validateScenePatch(house, patch, options = {}) {
       return;
     }
 
+    if (opType === "add" || opType === "replace") {
+      const candidate = lookupCandidateProduct(op.productId ?? op.object?.productId, candidateProducts);
+      const message = livePatchError(op, candidate);
+      if (message) {
+        errors.push(patchError(PATCH_ERROR_CODES.INVALID_PATCH, message, index, objectId));
+        return;
+      }
+      if (candidate?.offerSignature && !isValidDimensions(candidate.dimensions, ceilingHeight)) {
+        errors.push(patchError(PATCH_ERROR_CODES.INVALID_DIMENSIONS, "This Shopify product does not fit the home.", index, objectId));
+        return;
+      }
+    }
     if (opType === "add") {
       if (lockedIds.has(objectId) || movableIds.has(objectId)) {
         errors.push(
@@ -552,7 +566,7 @@ export function validateScenePatch(house, patch, options = {}) {
         fix.footprint.length >= 3 &&
         fix.footprint.every(isFinitePoint2D)
           ? fix.footprint
-          : objectFootprintPolygon(normalized),
+          : fixtureBoxPolygon(normalized),
     };
   });
 
@@ -563,7 +577,7 @@ export function validateScenePatch(house, patch, options = {}) {
     const obj = allObjects.find((o) => o.id === objId);
     if (!obj) continue;
 
-    const poly = objectFootprintPolygon(obj);
+    const poly = withFurnitureFootprint(obj).footprint;
     const center2D = [obj.position[0], obj.position[2]];
     const minY = obj.position[1];
     const maxY = minY + obj.dimensions.height;
@@ -666,7 +680,7 @@ export function validateScenePatch(house, patch, options = {}) {
       const otherMaxY = otherMinY + other.dimensions.height;
       if (!verticalRangesOverlap(minY, maxY, otherMinY, otherMaxY)) continue;
 
-      const otherPoly = objectFootprintPolygon(other);
+      const otherPoly = withFurnitureFootprint(other).footprint;
       if (polygonsOverlap2D(poly, otherPoly)) {
         errors.push(
           patchError(

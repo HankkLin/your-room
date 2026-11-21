@@ -144,6 +144,11 @@ export const DEMO_SCENARIOS = Object.freeze([
     description: "Friends arrive in distinct waves at the entry, clustering from hallway into living room and kitchen.",
   },
   {
+    id: "saved-routine",
+    name: "Saved Household Routine",
+    description: "Replay the activities and times approved in your household.",
+  },
+  {
     id: "dinner-party-8-guests",
     name: "Dinner Party — 8 Guests",
     description: "High-occupancy gathering stressing kitchen and hallway clearance.",
@@ -245,6 +250,9 @@ export function formatFindingHeadline(finding = {}) {
   }
   const type = String(finding.type || "INFO").toUpperCase();
   const roomLabel = formatLocationLabel(finding.location, finding.roomId);
+  if (type === "TV_TOO_FAR" && Number.isFinite(finding.evidence?.modeledTvWidthMeters)) {
+    return "TV appears too small from this seat";
+  }
   if (type === "CONGESTION" && roomLabel) {
     return `${roomLabel} congestion`;
   }
@@ -307,7 +315,12 @@ export function formatFindingSummaryText(finding = {}) {
     case "TV_BAD_ANGLE":
       return "Seating faces the TV at an uncomfortable off-axis viewing angle.";
     case "TV_TOO_FAR":
-      return "Primary seating is positioned beyond comfortable TV viewing distance.";
+      if (Number.isFinite(ev.modeledTvWidthMeters) && Number.isFinite(ev.apparentScreenAngleDegrees) && Number.isFinite(ev.minScreenAngleDegrees)) {
+        return `At ${ev.distanceMeters} m, the modeled TV width of ${ev.modeledTvWidthMeters} m spans approximately ${ev.apparentScreenAngleDegrees}° from this seat. The simulation target is ${ev.minScreenAngleDegrees}°.`;
+      }
+      return Number.isFinite(ev.distanceMeters) && Number.isFinite(ev.maxDistanceMeters)
+        ? `The seat is ${ev.distanceMeters} m from the TV, beyond the ${ev.maxDistanceMeters} m distance check. Screen size is unknown.`
+        : "The seat exceeds the simulation’s TV viewing distance check.";
     case "EVACUATION_BOTTLENECK":
       return `Simultaneous occupants converge on ${ev.exitDoorId || "exterior exit"} during evacuation.`;
     case "NO_EVACUATION_PATH":
@@ -409,10 +422,10 @@ export function normalizeSimulationViewState(raw = {}) {
   const afterScores = normalizeScoreMap(raw?.afterScores);
   const scores = normalizeScoreMap(raw?.scores) ?? beforeScores;
 
-  const overallBeforeScore = Number.isFinite(Number(raw?.overallBeforeScore))
+  const overallBeforeScore = raw?.overallBeforeScore != null && Number.isFinite(Number(raw.overallBeforeScore))
     ? Math.round(Number(raw.overallBeforeScore))
     : null;
-  const overallAfterScore = Number.isFinite(Number(raw?.overallAfterScore))
+  const overallAfterScore = raw?.overallAfterScore != null && Number.isFinite(Number(raw.overallAfterScore))
     ? Math.round(Number(raw.overallAfterScore))
     : null;
 
