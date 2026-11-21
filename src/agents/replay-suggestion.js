@@ -1,3 +1,5 @@
+import { isRegionFinding } from "./regional-findings.js";
+import { intersectsRegion, parseRegionInput, parseRegionPatch, regionContainsItem, validRegion } from "./region-redesign.js";
 import {
   applyObjectOperation, fitItemInHouse, getDoorWorldPose, getRoomAtPoint,
   isObjectLocked, mergeHouseFixturesIntoItems, normalizeHouse,
@@ -37,19 +39,64 @@ export function buildReplaySuggestionInput(finding, rawHouse, items) {
     .filter(({ roomId }) => roomIds.has(roomId))
     .sort((a, b) => distanceToRoute(a) - distanceToRoute(b))
     .slice(0, replayContextLimits.objects)
-    .map((item) => {
-      const { id, name, kind, roomId, position, width, height, depth, rotation } = item;
-      const locked = isObjectLocked(item);
-      const fit = locked ? null : fitItemInHouse(item, house, placementItems, roomId);
-      const hint = fit && fit.rotation === rotation && (fit.x !== item.x || fit.z !== item.z)
-        ? [fit.x, position[1], fit.z] : null;
-      return {
-        id, name: (name || kind).slice(0, 160), kind, roomId, position,
-        dimensions: [width, height, depth], rotation, locked,
-        ...(hint ? { relocationHint: hint } : {}),
-      };
-    });
+    .map(item => describeItem(item, house, placementItems));
   return parseReplaySuggestionInput({ finding, rooms, doors, objects });
+}
+
+function describeItem(item, house, placementItems) {
+  const { id, name, kind, roomId, position, width, height, depth, rotation } = item;
+  const locked = isObjectLocked(item);
+  const fit = locked ? null : fitItemInHouse(item, house, placementItems, roomId);
+  const hint = fit && fit.rotation === rotation && (fit.x !== item.x || fit.z !== item.z)
+    ? [fit.x, position[1], fit.z] : null;
+  return {
+    id, name: (name || kind).slice(0, 160), kind, roomId, position,
+    dimensions: [width, height, depth], rotation, locked,
+    ...(hint ? { relocationHint: hint } : {}),
+  };
+
+}
+
+export function buildRegionSuggestionInput(region, instruction, findings, rawHouse, items) {
+  if (!validRegion(region)) throw new Error("Select an area on the floor plan.");
+  const house = normalizeHouse(rawHouse);
+  const relevantRooms = house.rooms.filter(room => intersectsRegion(region, room.bounds));
+  if (relevantRooms.length > replayContextLimits.rooms) throw new Error("Select an area with fewer rooms.");
+  const rooms = relevantRooms.map(({ id, name, bounds }) => ({
+    id, name: name.slice(0, 160), bounds: [bounds.minX, bounds.minZ, bounds.maxX, bounds.maxZ],
+  }));
+  const roomIds = new Set(rooms.map(room => room.id));
+  const doors = house.doors.filter(door => door.roomIds.some(id => roomIds.has(id)))
+    .map(door => getDoorWorldPose(house, door)).filter(Boolean).slice(0, replayContextLimits.doors)
+    .map(({ roomIds: connections, x, z, width }) => ({
+      roomIds: connections.filter(id => roomIds.has(id)), position: [x, z], width,
+    }));
+  const placement = mergeHouseFixturesIntoItems(house, items);
+  const nearby = placement.map(toSceneObject)
+    .map(item => ({ ...item, roomId: getRoomAtPoint(house, item.x, item.z)?.id ?? item.roomId }))
+    .filter(item => roomIds.has(item.roomId));
+  const selected = nearby.filter(item => regionContainsItem(region, item));
+  if (selected.length > replayContextLimits.objects) throw new Error("Select an area with fewer furniture pieces.");
+  const inScope = new Set(selected.map(item => item.id));
+  const objects = [...selected, ...nearby.filter(item => !inScope.has(item.id))]
+    .slice(0, replayContextLimits.objects).map(item => describeItem(item, house, placement));
+  const relevant = findings.filter(finding => isRegionFinding(finding, region, roomIds));
+  return parseRegionInput({ region, instruction, rooms, doors, objects, findings: relevant.slice(0, 16) });
+}
+
+export function previewRegionPatch(patch, input, house, items) {
+  const verified = parseRegionPatch(patch, input);
+  let afterItems = items;
+  const moves = [];
+  for (const op of verified.operations) {
+    const step = previewReplaySuggestion({ explanation: verified.reasoning, scenePatch: { operations: [op] } }, house, afterItems);
+    if (!regionContainsItem(input.region, step.before) || !regionContainsItem(input.region, step.after)) {
+      throw new Error("The furniture extends outside the selected area.");
+    }
+    moves.push({ before: step.before, after: step.after });
+    afterItems = step.items;
+  }
+  return { items: afterItems, moves };
 }
 
 export async function requestReplaySuggestion(input, signal) {
@@ -63,7 +110,7 @@ export async function requestReplaySuggestion(input, signal) {
   if (!response.ok) {
     throw new Error(payload?.error || "Gemini could not suggest a move. Try again.");
   }
-  return parseReplayProposal(payload, input.objects);
+  return input.region ? parseRegionPatch(payload, input) : parseReplayProposal(payload, input.objects);
 }
 
 export function previewReplaySuggestion(proposal, rawHouse, items) {

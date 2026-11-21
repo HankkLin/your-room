@@ -51,18 +51,13 @@ export function parseReplayProposal(value, objects) {
   return { explanation: value.explanation.trim(), scenePatch: { operations: [move] } };
 }
 
-export function parseReplaySuggestionInput(value) {
-  const { finding, rooms, doors, objects } = value ?? {};
-  const invalid = () => new Error("A measured blocked route and valid layout context are required.");
+export function parseReplayGeometry(value) {
+  const { rooms, doors, objects } = value ?? {};
+  const invalid = () => new Error("Valid room and furniture geometry is required.");
   if (!boundedList(rooms, replayContextLimits.rooms) || !boundedList(doors, replayContextLimits.doors) ||
       !boundedList(objects, replayContextLimits.objects)) throw invalid();
   if (rooms.some((room) => !isText(room?.id) || !isText(room.name) || !isVector(room.bounds, 4))) throw invalid();
   const roomIds = new Set(rooms.map(({ id }) => id));
-  const { type, fromRoomId, toRoomId, activity, location, evidence } = finding ?? {};
-  if (type !== FINDING_TYPES.NO_PATH || !roomIds.has(fromRoomId) || !roomIds.has(toRoomId) ||
-      !isText(activity) || !isVector(location?.position, 2) ||
-      !Number.isFinite(evidence?.timestampSeconds) || evidence.timestampSeconds < 0 ||
-      !isText(evidence.reason)) throw invalid();
   if (doors.some((door) => !boundedList(door?.roomIds, 2) || !door.roomIds.length ||
       door.roomIds.some((id) => !roomIds.has(id)) || !isVector(door.position, 2) ||
       !Number.isFinite(door.width) || door.width <= 0)) throw invalid();
@@ -78,16 +73,31 @@ export function parseReplaySuggestionInput(value) {
     objectIds.add(id);
   }
   return {
-    finding: {
-      type, fromRoomId, toRoomId, activity,
-      location: { position: location.position },
-      evidence: { timestampSeconds: evidence.timestampSeconds, reason: evidence.reason },
-    },
     rooms: rooms.map(({ id, name, bounds }) => ({ id, name, bounds })),
     doors: doors.map(({ roomIds, position, width }) => ({ roomIds, position, width })),
     objects: objects.map(({ id, name, kind, roomId, position, dimensions, rotation, locked, relocationHint }) => ({
       id, name, kind, roomId, position, dimensions, rotation, locked,
       ...(relocationHint ? { relocationHint } : {}),
     })),
+  };
+}
+
+export function parseReplaySuggestionInput(value) {
+  const geometry = parseReplayGeometry(value);
+  const roomIds = new Set(geometry.rooms.map(({ id }) => id));
+  const finding = value.finding;
+  const invalid = () => new Error("A measured blocked route and valid layout context are required.");
+  const { type, fromRoomId, toRoomId, activity, location, evidence } = finding ?? {};
+  if (type !== FINDING_TYPES.NO_PATH || !roomIds.has(fromRoomId) || !roomIds.has(toRoomId) ||
+      !isText(activity) || !isVector(location?.position, 2) ||
+      !Number.isFinite(evidence?.timestampSeconds) || evidence.timestampSeconds < 0 ||
+      !isText(evidence.reason)) throw invalid();
+  return {
+    finding: {
+      type, fromRoomId, toRoomId, activity,
+      location: { position: location.position },
+      evidence: { timestampSeconds: evidence.timestampSeconds, reason: evidence.reason },
+    },
+    ...geometry,
   };
 }
