@@ -20,6 +20,7 @@ import {
   updateOwnedFurnitureDimensions,
 } from "./src/simulation/index.js";
 import { importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
+import { buildDeterministicFurnishingPlan } from "./src/spatial/spatial-design-engine.js";
 import { runTwinScenario } from "./src/twin-integration.js";
 
 function createSampleShopifyCandidate({
@@ -520,4 +521,20 @@ test("D9 & D10 — Configurable crowd counts (4, 6, 8, 12, 16) and all believabi
       (c) => c.type === DEMO_CHECKPOINT_TYPES.WHEELCHAIR_ACCESS_CHECK,
     ),
   );
+});
+
+test("an empty apartment receives sleeping, dining and seating before decorative pieces", () => {
+  const { house } = importSampleFloorplan();
+  const plan = buildDeterministicFurnishingPlan({
+    house: { ...house, objects: [] },
+    styleBrief: { budget: 4800 },
+    hasWheelchairNeed: true,
+  });
+  const placements = plan.patch.operations.map(({ object }) => [object.roomId, object.kind]);
+  for (const [room, kinds] of [
+    ["bedroom", ["bed"]], ["kitchen", ["table"]], ["kitchen", ["chair"]], ["living-room", ["sofa", "chair"]],
+  ]) {
+    assert.ok(placements.some(([id, kind]) => id === room && kinds.includes(kind)), `Missing ${kinds} in ${room}`);
+  }
+  assert.ok(plan.spentUsd <= 4800);
 });

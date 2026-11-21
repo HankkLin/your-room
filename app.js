@@ -1197,7 +1197,10 @@ function styleActiveState(baseState, overrides = {}) {
   });
   const items = mergeHouseFixturesIntoItems(house, designedHouse.objects || []);
   const added = planned.patch.operations.length;
-  const notes = `${added} ${added === 1 ? "suggestion" : "suggestions"} in ${style.toLowerCase()} across ${house.rooms.length} rooms. Fixed fixtures and owned pieces kept.`;
+  const styledRooms = new Set(planned.patch.operations.map(op => op.object.roomId)).size;
+  const notes = added
+    ? `Added ${added} ${added === 1 ? "piece" : "pieces"} across ${styledRooms} ${styledRooms === 1 ? "room" : "rooms"}. Fixed fixtures and owned pieces kept.`
+    : "No new pieces fit the budget and available space. Fixed fixtures and owned pieces kept.";
   return { ...baseState, items, style, budget, spent: getSpend(items), notes };
 }
 $("#styles").onclick = (e) => {

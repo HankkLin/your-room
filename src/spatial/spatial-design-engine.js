@@ -1,4 +1,4 @@
-import { fitItemInHouse, isObjectLocked, mergeHouseFixturesIntoItems, normalizeHouse } from "../../house-model.js";
+import { canPlaceInHouse, fitItemInHouse, getRoomAtPoint, isObjectLocked, mergeHouseFixturesIntoItems, normalizeHouse } from "../../house-model.js";
 import { catalog } from "../../model.js";
 import { furnishingPath, validateFurnishingProposal } from "../agents/furnishing-contract.js";
 import { toSceneObject } from "../contracts/scene.js";
@@ -16,13 +16,38 @@ import { summarizeArchitecturalAccessibilityLimits } from "./region-selection.js
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
-const ROOM_ESSENTIAL_KINDS = Object.freeze({
-  living: ["sofa", "table", "rug", "lamp"],
-  bedroom: ["bed", "desk", "chair"],
-  kitchen: ["table", "chair"],
-  office: ["desk", "chair", "bookcase"],
-  dining: ["table", "chair"],
-});
+// Each pass serves every eligible room before moving on to less essential pieces.
+const FURNISHING_PASSES = [
+  { bedroom: ["bed"] },
+  { kitchen: ["table"], dining: ["table"], office: ["desk"] },
+  { kitchen: ["chair"], dining: ["chair"], office: ["chair"] },
+  { living: ["sofa", "chair"] },
+  { bedroom: ["lamp"], living: ["table"], dining: ["chair"] },
+  { living: ["lamp"], bedroom: ["console"], office: ["lamp"], kitchen: ["chair"] },
+  { living: ["rug"], bedroom: ["desk"], office: ["bookcase"], closet: ["bookcase"] },
+  { living: ["chair"], bedroom: ["chair"] },
+];
+
+function* roomPlacements(item, room, house, occupied) {
+  const { minX, maxX, minZ, maxZ } = polygonBounds(room.polygon);
+  // Try wall and corner positions first to keep through-routes and room centers free.
+  for (const rotation of [0, 90]) {
+    const halfX = (rotation ? item.depth : item.width) / 2;
+    const halfZ = (rotation ? item.width : item.depth) / 2;
+    const left = minX + halfX + 0.18, right = maxX - halfX - 0.18;
+    const top = minZ + halfZ + 0.18, bottom = maxZ - halfZ - 0.18;
+    if (left > right || top > bottom) continue;
+    for (const u of [0, 1, 0.5, 0.25, 0.75]) {
+      for (const v of [0, 1, 0.5, 0.25, 0.75]) {
+        const x = round2(left + u * (right - left));
+        const z = round2(top + v * (bottom - top));
+        if (getRoomAtPoint(house, x, z)?.id !== room.id) continue;
+        const placed = { ...item, x, z, rotation };
+        if (canPlaceInHouse(placed, house, occupied, 0.08)) yield placed;
+      }
+    }
+  }
+}
 
 export function buildDeterministicFurnishingPlan({
   house,
@@ -94,113 +119,106 @@ export function buildDeterministicFurnishingPlan({
   workingHouse.objects = [...existingObjects];
   let serial = 0;
 
-  for (const room of house.rooms || []) {
-    const desiredKinds = ROOM_ESSENTIAL_KINDS[room.kind] || [];
-    for (const kind of desiredKinds) {
-      const alreadyInRoom = workingHouse.objects.some(
-        (o) => o.roomId === room.id && o.kind === kind,
-      );
-      if (alreadyInRoom) continue;
+  const needs = FURNISHING_PASSES.flatMap(pass =>
+    (house.rooms || []).filter(room => pass[room.kind]).map(room => ({ room, kinds: pass[room.kind] })),
+  );
+  const requestedCounts = new Map();
+  for (const { room, kinds } of needs) {
+    const key = JSON.stringify([room.id, kinds]);
+    const count = (requestedCounts.get(key) || 0) + 1;
+    requestedCounts.set(key, count);
+    const inRoom = workingHouse.objects.filter(o => o.roomId === room.id);
+    if (inRoom.filter(o => kinds.includes(o.kind)).length >= count) continue;
 
-      // Pick best matching candidate within remaining budget
-      const remaining = budgetUsd - spentUsd;
-      const matches = pool
-        .filter((entry) => entry.kind === kind && entry.price <= remaining)
-        .sort(
-          (a, b) =>
-            Number(b.isLive) - Number(a.isLive) ||
-            Number(b.style === styleName) - Number(a.style === styleName) ||
-            a.price - b.price,
-        );
-      if (matches.length === 0) continue;
+    const remaining = budgetUsd - spentUsd;
+    const matches = pool.filter(entry => kinds.includes(entry.kind) && entry.price <= remaining);
+    matches.sort((a, b) =>
+      kinds.indexOf(a.kind) - kinds.indexOf(b.kind) ||
+      Number(b.isLive) - Number(a.isLive) ||
+      Number(b.style === styleName) - Number(a.style === styleName) || a.price - b.price,
+    );
 
-      const chosen = matches[0];
-      const objectId = `designed-${room.id}-${kind}-${++serial}`;
-      const rb = polygonBounds(room.polygon);
-      const baseSceneObj = productCandidateToSceneObject(chosen.candidate, {
-        id: objectId,
-        kind,
-        roomId: room.id,
-        position: [(rb.minX + rb.maxX) / 2, 0, (rb.minZ + rb.maxZ) / 2],
-      });
+    const occupied = mergeHouseFixturesIntoItems(fitHouse, workingHouse.objects);
+    placement: for (const chosen of matches) {
+      const kind = chosen.kind;
+      let objectId;
+      do {
+        objectId = `designed-${room.id}-${kind}-${++serial}`;
+      } while (workingHouse.objects.some(item => item.id === objectId));
+      const baseSceneObj = productCandidateToSceneObject(chosen.candidate, { id: objectId, kind, roomId: room.id });
+      for (const fitted of roomPlacements(baseSceneObj, room, fitHouse, occupied)) {
+        const pos = [fitted.x, 0, fitted.z];
+        const rot = [0, fitted.rotation * Math.PI / 180, 0];
 
-      const allItems = mergeHouseFixturesIntoItems(
-        fitHouse,
-        workingHouse.objects,
-      );
-      const fitted = fitItemInHouse(baseSceneObj, fitHouse, allItems, room.id);
-      if (!fitted) continue;
-
-      const pos = [round2(fitted.x), 0, round2(fitted.z)];
-      const rot = [0, round2(((Number(fitted.rotation) || 0) * Math.PI) / 180), 0];
-
-      // Respect Hank's `livePatchError` contract: live Shopify candidates supply placement only,
-      // while catalog items reference `productId: item.id` without forged Shopify fields.
-      const addOp = chosen.isLive && chosen.redesignId
-        ? {
-            type: "add",
-            objectId,
-            productId: chosen.redesignId,
-            position: pos,
-            rotation: rot,
-            object: {
-              id: objectId,
+        // Respect Hank's `livePatchError` contract: live Shopify candidates supply placement only,
+        // while catalog items reference `productId: item.id` without forged Shopify fields.
+        const addOp = chosen.isLive && chosen.redesignId
+          ? {
+              type: "add",
+              objectId,
               productId: chosen.redesignId,
-              roomId: room.id,
               position: pos,
               rotation: rot,
-            },
+              object: {
+                id: objectId,
+                productId: chosen.redesignId,
+                roomId: room.id,
+                position: pos,
+                rotation: rot,
+              },
+            }
+          : {
+              type: "add",
+              objectId,
+              productId: chosen.productId,
+              position: pos,
+              rotation: rot,
+              object: {
+                id: objectId,
+                kind: baseSceneObj.kind,
+                name: baseSceneObj.name,
+                roomId: room.id,
+                color: baseSceneObj.color,
+                price: baseSceneObj.price,
+                dimensions: { ...baseSceneObj.dimensions },
+              },
+            };
+
+        const candidatePatch = {
+          id: `step-${serial}`,
+          reasoning: `Place ${baseSceneObj.name} in ${room.name} (${styleName}).`,
+          targetFindings: [],
+          operations: [addOp],
+        };
+
+        const validation = validateScenePatch(workingHouse, candidatePatch, {
+          candidateProducts: candidateLookupList,
+        });
+        if (!validation.valid) continue;
+
+        const nextHouse = applyScenePatch(workingHouse, candidatePatch, {
+          candidateProducts: candidateLookupList,
+        });
+        if (hasWheelchairNeed) {
+          const beforeAcc = validateAccessibility({
+            house: workingHouse,
+            forceCheck: true,
+          });
+          const afterAcc = validateAccessibility({
+            house: nextHouse,
+            forceCheck: true,
+          });
+          // Reject any addition that introduces a new wheelchair route block or turning-circle failure
+          if (afterAcc.findings.length > beforeAcc.findings.length) {
+            continue;
           }
-        : {
-            type: "add",
-            objectId,
-            productId: chosen.productId,
-            position: pos,
-            rotation: rot,
-            object: {
-              id: objectId,
-              kind: baseSceneObj.kind,
-              name: baseSceneObj.name,
-              roomId: room.id,
-              color: baseSceneObj.color,
-              price: baseSceneObj.price,
-              dimensions: { ...baseSceneObj.dimensions },
-            },
-          };
-
-      const candidatePatch = {
-        id: `step-${serial}`,
-        reasoning: `Place ${baseSceneObj.name} in ${room.name} (${styleName}).`,
-        targetFindings: [],
-        operations: [addOp],
-      };
-
-      const validation = validateScenePatch(workingHouse, candidatePatch, {
-        candidateProducts: candidateLookupList,
-      });
-      if (!validation.valid) continue;
-
-      const nextHouse = applyScenePatch(workingHouse, candidatePatch, {
-        candidateProducts: candidateLookupList,
-      });
-      if (hasWheelchairNeed) {
-        const beforeAcc = validateAccessibility({
-          house: workingHouse,
-          forceCheck: true,
-        });
-        const afterAcc = validateAccessibility({
-          house: nextHouse,
-          forceCheck: true,
-        });
-        // Reject any addition that introduces a new wheelchair route block or turning-circle failure
-        if (afterAcc.findings.length > beforeAcc.findings.length) {
-          continue;
         }
-      }
 
-      workingHouse = nextHouse;
-      operations.push(addOp);
-      spentUsd = round2(spentUsd + baseSceneObj.price);
+        workingHouse = nextHouse;
+        operations.push(addOp);
+        spentUsd = round2(spentUsd + baseSceneObj.price);
+        break placement;
+      }
     }
   }
 

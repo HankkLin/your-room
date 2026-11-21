@@ -228,3 +228,20 @@ test("sample floorplan imports into House JSON and renders as a connected 3D who
 
   expect(errors).toEqual([]);
 });
+
+test("auto-style furnishes basic needs across the imported home within budget", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#try-sample-floorplan").click();
+  await page.locator("#fp-confirm-import").click();
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#budget").fill("4800");
+  await page.locator("#generate").click();
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
+  const project = await page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
+  const kinds = roomId => project.items.filter(item => item.roomId === roomId).map(item => item.kind);
+  expect(kinds("bedroom")).toContain("bed");
+  expect(kinds("kitchen")).toEqual(expect.arrayContaining(["table", "chair"]));
+  expect(kinds("living-room").some(kind => ["chair", "sofa"].includes(kind))).toBe(true);
+  expect(kinds("bathroom")).toContain("toilet");
+  expect(project.spent).toBeLessThanOrEqual(4800);
+});
