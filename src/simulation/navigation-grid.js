@@ -699,7 +699,6 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
         preferredFixture.position[2],
         0.85,
       );
-      hasDedicatedActivityAnchor = true;
     }
   }
 
@@ -755,10 +754,18 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
       [0, 1],
       [0, -1],
     ];
+    // Prefer the walkable component reachable from a walkable doorway cell of this room
+    const roomDoorIndices = new Set();
+    navigation.doors.forEach((d, dIdx) => {
+      if (d.roomA === roomId || d.roomB === roomId) roomDoorIndices.add(dIdx);
+    });
+
+    const components = [];
     for (const cand of candidates) {
       if (visited.has(cand.idx)) continue;
       const comp = new Set([cand.idx]);
       visited.add(cand.idx);
+      let touchesDoor = false;
       const queue = [cand.idx];
       while (queue.length > 0) {
         const cur = queue.pop();
@@ -769,23 +776,29 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
           const nr = cr + dr;
           if (!navigation.inGridBounds(nc, nr)) continue;
           const nIdx = nr * navigation.width + nc;
-          // Allow stepping across CELL_DOOR thresholds inside the room bounds too
+          if (navigation.clearanceGrid[nIdx] < radius) continue;
+          const dIdx = navigation.doorIndexGrid[nIdx];
+          if (dIdx >= 0 && roomDoorIndices.has(dIdx)) {
+            touchesDoor = true;
+            // Do NOT flood-fill through the doorway into an adjacent room so isolated pockets inside THIS room stay separate!
+            continue;
+          }
           if (visited.has(nIdx)) continue;
-          if (
-            inRoomSet.has(nIdx) ||
-            (navigation.roomIndexGrid[nIdx] === roomIdx &&
-              navigation.clearanceGrid[nIdx] >= radius)
-          ) {
+          if (inRoomSet.has(nIdx) || navigation.roomIndexGrid[nIdx] === roomIdx) {
             visited.add(nIdx);
             comp.add(nIdx);
             queue.push(nIdx);
           }
         }
       }
-      if (!bestComponent || comp.size > bestComponent.size) {
-        bestComponent = comp;
-      }
+      components.push({ comp, touchesDoor });
     }
+
+    const doorComponents = components.filter((c) => c.touchesDoor);
+    const chosenPool = doorComponents.length > 0 ? doorComponents : components;
+    chosenPool.sort((a, b) => b.comp.size - a.comp.size);
+    bestComponent = chosenPool[0]?.comp ?? null;
+
     if (bestComponent && bestComponent.size < candidates.length) {
       const mainCandidates = candidates.filter((c) => bestComponent.has(c.idx));
       if (mainCandidates.length > 0) {

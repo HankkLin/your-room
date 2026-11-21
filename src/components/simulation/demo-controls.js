@@ -2,6 +2,7 @@ import {
   DEMO_SCENARIOS,
   SCORE_CATEGORIES,
   SIMULATION_SPEEDS,
+  SUPPORTED_FRIEND_COUNTS,
   normalizeSimulationViewState,
 } from "../../contracts/simulation.js";
 import { formatFindingEvidenceChips } from "../avatar/simulation-scene-layer.js";
@@ -150,6 +151,19 @@ export function renderControlPanelMarkup(
       </select>
     </label>
     <p class="twin-scenario-desc" id="sim-scenario-desc">${escapeHtml(activeScenario?.description || "")}</p>
+    ${
+      state.scenarioId === "friends-arrival"
+        ? `<label class="twin-field" for="sim-friend-count">
+            <span class="section-label">Visiting friends</span>
+            <select id="sim-friend-count" aria-label="Visiting friends count" ${isRunning || state.redesignPending ? "disabled" : ""}>
+              ${SUPPORTED_FRIEND_COUNTS.map(
+                (cnt) =>
+                  `<option value="${cnt}"${cnt === state.friendCount ? " selected" : ""}>${cnt} friends (${cnt + 4} total in home)</option>`,
+              ).join("")}
+            </select>
+          </label>`
+        : ""
+    }
     <div class="twin-actions">
       <button type="button" class="primary" id="sim-run-btn" ${isRunning || state.redesignPending ? "disabled" : ""}>${escapeHtml(runLabel)}</button>
       <button type="button" class="secondary" id="sim-pause-btn" ${isRunning ? "" : "disabled"}>Pause</button>
@@ -549,6 +563,13 @@ export function createDemoControlsController({
       emit();
       return state;
     },
+    selectFriendCount(count) {
+      const numeric = Number(count);
+      if (!Number.isFinite(numeric) || numeric < 1) return state;
+      state = normalizeSimulationViewState({ ...state, friendCount: numeric });
+      emit();
+      return state;
+    },
     seekTimeline(second) {
       const numeric = Number(second);
       if (!Number.isFinite(numeric)) return state;
@@ -667,6 +688,8 @@ export function mountDemoControls({
   function handleControlChange(event) {
     if (event.target?.id === "sim-scenario") {
       controller.selectScenario(event.target.value);
+    } else if (event.target?.id === "sim-friend-count") {
+      controller.selectFriendCount(Number(event.target.value));
     } else if (event.target?.id === "sim-toggle-routes") {
       controller.toggleShowAllRoutes(event.target.checked);
     }

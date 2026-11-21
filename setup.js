@@ -20,6 +20,7 @@ import { openFloorplanImporter } from "./floorplan-import-ui.js";
 import { toSceneObject } from "./src/contracts/scene.js";
 import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
 import { confirmImportedHouse, importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
+import { OWNED_KIND_DEFAULTS, createOwnedFurnitureCandidate } from "./src/spatial/owned-furniture.js";
 import { createBlockedRouteDemo } from "./src/simulation/studio-replay-demo.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
@@ -557,15 +558,27 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         )
         .join("") +
       draft.additions
-        .map(
-          (i) =>
+        .map((i) => {
+          const def = OWNED_KIND_DEFAULTS[i.kind] || OWNED_KIND_DEFAULTS.chair;
+          const wVal = Number(i.customWidth ?? def.width).toFixed(2);
+          const dVal = Number(i.customDepth ?? def.depth).toFixed(2);
+          const srcLabel = i.userCorrectedDims ? "Corrected" : "Estimated";
+          return (
             '<div class="review-entry" data-draft="' +
             esc(i.id) +
             '"><label class="field">Piece<select data-kind>' +
             selectOptions(i.kind) +
             '</select></label><label class="field">Name<input maxlength="65" value="' +
             esc(i.name) +
-            '" data-name></label><label class="field">Qty<input type="number" min="1" max="8" step="1" value="' +
+            '" data-name></label><label class="field">W (m)<input type="number" min="0.2" max="4.5" step="0.01" value="' +
+            wVal +
+            '" data-dim-w title="' +
+            srcLabel +
+            ' width in meters"></label><label class="field">D (m)<input type="number" min="0.2" max="4.5" step="0.01" value="' +
+            dVal +
+            '" data-dim-d title="' +
+            srcLabel +
+            ' depth in meters"></label><label class="field">Qty<input type="number" min="1" max="8" step="1" value="' +
             i.count +
             '" data-count></label><button class="icon-btn" data-remove-draft="' +
             esc(i.id) +
@@ -573,8 +586,9 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
             esc(i.name) +
             '">' +
             icon("close") +
-            "</button></div>",
-        )
+            "</button></div>"
+          );
+        })
         .join("");
     return (
       '<div class="setup-grid setup-review-grid"><section class="setup-photo-pane">' +
@@ -763,27 +777,57 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
               ". Enlarge the room or reduce the furniture list.",
           );
         const hint = piece.positions?.[n];
-        let placed = item;
-        if (Number.isFinite(hint?.x) && Number.isFinite(hint?.y)) {
-          placed =
-            fitItem(
-              {
-                ...item,
-                // A single view estimates the front silhouette. Keep depth at the furniture-type estimate.
-                width: Number.isFinite(hint.aspectRatio) && hint.aspectRatio > 0
-                  ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
-                  : item.width,
-                x: (clamp(hint.x, 0, 1) - 0.5) * draft.room.width,
-                z: (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth,
-              },
-              draft.room,
-              items,
-            ) ?? item;
-        }
+        const ownedCand = createOwnedFurnitureCandidate({
+          kind: piece.kind,
+          name: piece.name || kinds[piece.kind],
+          color: hint?.color,
+          aspectRatio: hint?.aspectRatio,
+          ...(piece.userCorrectedDims
+            ? {
+                dimensions: {
+                  width: piece.customWidth ?? item.width,
+                  depth: piece.customDepth ?? item.depth,
+                  height: item.height,
+                },
+                dimensionSource: "user_corrected",
+              }
+            : {}),
+        });
+        const targetWidth = piece.userCorrectedDims
+          ? ownedCand.dimensions.width
+          : Number.isFinite(hint?.aspectRatio) && hint.aspectRatio > 0
+            ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
+            : item.width;
+        const targetDepth = piece.userCorrectedDims
+          ? ownedCand.dimensions.depth
+          : item.depth;
+
+        let placed =
+          fitItem(
+            {
+              ...item,
+              width: targetWidth,
+              depth: targetDepth,
+              x: Number.isFinite(hint?.x)
+                ? (clamp(hint.x, 0, 1) - 0.5) * draft.room.width
+                : item.x,
+              z: Number.isFinite(hint?.y)
+                ? (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth
+                : item.z,
+            },
+            draft.room,
+            items,
+          ) ?? item;
+
+        const dimSource = piece.userCorrectedDims ? "user_corrected" : "estimated";
         items.push({
           ...placed,
+          owned: true,
+          price: 0,
           color: hint?.color ?? placed.color,
-          ...(piece.detected && hint ? { photoPreview: true, dimensionsSource: "estimated" } : {}),
+          dimensionSource: dimSource,
+          dimensionsSource: dimSource,
+          ...(piece.detected && hint ? { photoPreview: true } : {}),
           name: piece.name || kinds[piece.kind],
           id: uid(),
         });
@@ -995,8 +1039,24 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       item.kind = node.value;
       item.name = kinds[item.kind];
       row.querySelector("[data-name]").value = item.name;
+      const def = OWNED_KIND_DEFAULTS[item.kind] || OWNED_KIND_DEFAULTS.chair;
+      delete item.customWidth;
+      delete item.customDepth;
+      item.userCorrectedDims = false;
+      const wIn = row.querySelector("[data-dim-w]");
+      const dIn = row.querySelector("[data-dim-d]");
+      if (wIn) wIn.value = def.width.toFixed(2);
+      if (dIn) dIn.value = def.depth.toFixed(2);
     }
     if (node.matches("[data-name]")) item.name = node.value;
+    if (node.matches("[data-dim-w]") && node.validity.valid && node.value) {
+      item.customWidth = Number(node.value);
+      item.userCorrectedDims = true;
+    }
+    if (node.matches("[data-dim-d]") && node.validity.valid && node.value) {
+      item.customDepth = Number(node.value);
+      item.userCorrectedDims = true;
+    }
     if (node.matches("[data-count]") && node.validity.valid && node.value)
       item.count = Math.floor(Number(node.value));
   };

@@ -4,6 +4,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import decoderJs from 'three/examples/jsm/libs/draco/gltf/draco_wasm_wrapper.js?url';
 import decoderWasm from 'three/examples/jsm/libs/draco/gltf/draco_decoder.wasm?url';
 import { glbUrl } from './src/shopify/product-assets.js';
+import { ASSET_REPRESENTATION_TIERS } from './src/spatial/product-scene-object.js';
 
 const modelFiles = {
   sofa: 'SheenWoodLeatherSofa.glb',
@@ -96,10 +97,15 @@ export function createFurnitureAssets(onReady) {
   }
 
   return {
+    hasFailedModelUrl(url) {
+      return Boolean(url && models.has(url) && models.get(url) === null);
+    },
     create(item) {
-      const url = item.shopify && glbUrl(item.modelUrl);
+      const url = glbUrl(item.modelUrl);
       if (url && !models.has(url)) void load(url, url, true);
-      const model = models.get(url) || models.get(item.kind);
+      const verifiedModel = url ? models.get(url) : null;
+      const representativeModel = models.get(item.kind);
+      const model = verifiedModel || representativeModel;
       if (!model) return null;
 
       const w = Math.max(0.07, Number(item.width) || 0.6);
@@ -128,6 +134,10 @@ export function createFurnitureAssets(onReady) {
       const group = new THREE.Group();
       group.add(fit);
       if (model.merchant) group.userData.modelUrl = url;
+      group.userData.assetRepresentation = model.merchant
+        ? ASSET_REPRESENTATION_TIERS.VERIFIED_3D_ASSET
+        : ASSET_REPRESENTATION_TIERS.REPRESENTATIVE_3D_ASSET;
+      group.userData.dimensionSource = item.dimensionSource || item.dimensionsSource || 'estimated';
       group.userData.itemId = item.id;
       group.userData.locked = Boolean(item.locked || item.type === 'fixed');
       group.userData.dimensions = { w, d, h };

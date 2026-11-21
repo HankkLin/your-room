@@ -160,6 +160,7 @@ export const DEMO_SCENARIOS = Object.freeze([
   },
 ]);
 
+export const SUPPORTED_FRIEND_COUNTS = Object.freeze([4, 6, 8, 12, 16]);
 export const SIMULATION_SPEEDS = Object.freeze([1, 5, 20]);
 
 export const SIMULATION_STATUSES = Object.freeze([
@@ -387,6 +388,11 @@ export function normalizeSimulationViewState(raw = {}) {
   const speed = SIMULATION_SPEEDS.includes(Number(raw?.speed))
     ? Number(raw.speed)
     : 1;
+  const friendCount = SUPPORTED_FRIEND_COUNTS.includes(Number(raw?.friendCount))
+    ? Number(raw.friendCount)
+    : Number.isFinite(Number(raw?.friendCount)) && Number(raw?.friendCount) >= 1
+      ? Math.min(24, Math.round(Number(raw.friendCount)))
+      : 8;
   const currentTime =
     typeof raw?.currentTime === "string" && raw.currentTime.trim()
       ? raw.currentTime.trim()
@@ -496,6 +502,7 @@ export function normalizeSimulationViewState(raw = {}) {
     status,
     scenarioId,
     speed,
+    friendCount,
     currentTime,
     hasTimeline: Boolean(raw?.hasTimeline && endSecond > startSecond),
     startSecond,

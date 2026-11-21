@@ -584,7 +584,11 @@ const demoControls = mountDemoControls({
           scenarioId === (activePlaybackDataset?.scenarioId || "morning-routine"),
       );
       const dataset = runTwinScenario(scenarioId, {
-        house, items: state.items, state, comparisonRun: preserveRedesign ? activePlaybackDataset : null,
+        house,
+        items: state.items,
+        state,
+        friendCount: demoControls.getState().friendCount,
+        comparisonRun: preserveRedesign ? activePlaybackDataset : null,
       });
       dataset.sourceItems = state.items;
       dataset.routineSignature = routineSignature();
@@ -1949,10 +1953,12 @@ window.__livingBlueprint = {
       playbackController.setPauseOnCheckpoints(flag),
     runScenario: (scenarioId, opts = {}) => {
       demoControls.selectScenario(scenarioId);
+      if (opts.friendCount) demoControls.selectFriendCount(opts.friendCount);
       if (opts.speed) demoControls.selectSpeed(opts.speed);
       demoControls.triggerRun();
       return playbackController.getCheckpoints();
     },
+    setFriendCount: (count) => demoControls.selectFriendCount(count),
   },
   captureStudioLayout: (house = activeHouse(), items = state.items) =>
     captureStudioLayout(house, items),
