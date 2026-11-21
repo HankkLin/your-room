@@ -821,9 +821,17 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
         occupiedPositions.every(
           (occ) =>
             Math.hypot(cand.pos[0] - occ[0], cand.pos[1] - occ[1]) >=
-            radius * 2.2,
+            Math.max(0.68, radius * 2.4),
         ),
-      ) || candidates[0];
+      ) ||
+      candidates.find((cand) =>
+        occupiedPositions.every(
+          (occ) =>
+            Math.hypot(cand.pos[0] - occ[0], cand.pos[1] - occ[1]) >=
+            radius * 2.1,
+        ),
+      ) ||
+      candidates[0];
     return { position: nonOverlapping.pos, roomId };
   }
 
@@ -831,13 +839,16 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
     return { position: candidates[0].pos, roomId };
   }
 
-  const selected = [candidates[0].pos];
+  const selected = [...occupiedPositions];
   const minRoomSpan = Math.min(rBounds.width, rBounds.depth);
   const desiredSeparation = Math.max(
     0.72,
     Math.min(2.25, minRoomSpan * 0.25),
   );
-  for (let s = 1; s <= slotIndex; s += 1) {
+  const targetCount = Math.max(1, slotIndex + 1);
+  let chosenPos = candidates[0].pos;
+
+  for (let s = 0; s < targetCount; s += 1) {
     const next =
       candidates.find((cand) =>
         selected.every(
@@ -850,14 +861,17 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
         selected.every(
           (prev) =>
             Math.hypot(cand.pos[0] - prev[0], cand.pos[1] - prev[1]) >=
-            radius * 2.1,
+            Math.max(0.62, radius * 2.2),
         ),
       ) ||
       candidates[Math.min(s, candidates.length - 1)];
-    selected.push(next.pos);
+    chosenPos = next.pos;
+    if (!selected.some((p) => Math.hypot(p[0] - next.pos[0], p[1] - next.pos[1]) < 0.05)) {
+      selected.push(next.pos);
+    }
   }
 
-  return { position: selected[slotIndex], roomId };
+  return { position: chosenPos, roomId };
 }
 
 /**

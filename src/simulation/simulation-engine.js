@@ -704,7 +704,7 @@ export function runSimulation({
     findings,
   };
 
-  return {
+  const result = {
     startMinute,
     endMinute,
     startSecond,
@@ -733,6 +733,11 @@ export function runSimulation({
     findings,
     summary,
   };
+  Object.defineProperty(result, "_navigation", {
+    value: navigation,
+    enumerable: false,
+  });
+  return result;
 }
 
 /**
@@ -797,12 +802,208 @@ function sampleSmoothPathMotion(path, traveledMeters, totalDistance) {
   };
 }
 
+function resolveVisualAgentRadius(info) {
+  if (info?.usesWheelchair) {
+    return Math.max(0.42, Number(info.radiusMeters) || 0.42);
+  }
+  if (info?.ageGroup === "child") {
+    return 0.24;
+  }
+  return Math.max(0.28, Math.min(0.32, Number(info?.radiusMeters) || 0.29));
+}
+
+function clampToWalkableOrKeep(nav, prevX, prevZ, candX, candZ, minClearance = 0.16) {
+  if (!nav) return [round3(candX), round3(candZ)];
+  if (nav.isPointWalkable(candX, candZ, minClearance)) {
+    return [round3(candX), round3(candZ)];
+  }
+  for (const frac of [0.65, 0.35]) {
+    const mx = prevX + (candX - prevX) * frac;
+    const mz = prevZ + (candZ - prevZ) * frac;
+    if (nav.isPointWalkable(mx, mz, minClearance)) {
+      return [round3(mx), round3(mz)];
+    }
+  }
+  return [round3(prevX), round3(prevZ)];
+}
+
 /**
- * Interpolate continuous `[x, z, yaw, roomId, activity, eventLabel, moving]`
- * for every agent at any `timestampSeconds` (including fractional sub-seconds)
- * by sampling directly along active `simulation.routes` polylines with smooth
- * corner-heading blending so agents walk continuously without teleporting.
+ * Deterministic local spacing, same-corridor following (`0.55–0.75 m` headway),
+ * opposing-corridor right-hand passing offset, and personal-space separation (`0.10 m` gap).
+ * Never mutates underlying `simulation` records and preserves exact determinism by `personId`.
  */
+function applyLocalAgentSeparation(rawEntries, nav = null) {
+  if (rawEntries.length <= 1) {
+    return rawEntries.map((e) => e.snap);
+  }
+
+  // Stable deterministic ordering by personId
+  const ordered = [...rawEntries].sort((a, b) =>
+    String(a.snap.personId).localeCompare(String(b.snap.personId)),
+  );
+
+  // Pass 1: Same-corridor following & opposing-traffic right-hand passing along active routes
+  const movingEntries = ordered
+    .filter((e) => e.routeCtx)
+    .sort(
+      (a, b) =>
+        a.routeCtx.start - b.routeCtx.start ||
+        b.routeCtx.traveled - a.routeCtx.traveled ||
+        String(a.snap.personId).localeCompare(String(b.snap.personId)),
+    );
+
+  const placedMoving = [];
+  for (const entry of movingEntries) {
+    const rc = entry.routeCtx;
+    let adjustedDist = rc.traveled;
+    let lateralOffset = 0;
+
+    for (const other of placedMoving) {
+      const orc = other.routeCtx;
+      const curSample = sampleSmoothPathMotion(rc.path, adjustedDist, rc.totalDist);
+      const otherPos = other.snap.position;
+      const dx = otherPos[0] - curSample.position[0];
+      const dz = otherPos[1] - curSample.position[1];
+      const dist = Math.hypot(dx, dz);
+      if (dist > 1.35) continue;
+
+      const fx = Math.sin(curSample.yaw);
+      const fz = Math.cos(curSample.yaw);
+      const ofx = Math.sin(other.snap.yaw);
+      const ofz = Math.cos(other.snap.yaw);
+      const headingDot = fx * ofx + fz * ofz;
+      const forwardProj = dx * fx + dz * fz; // > 0 means `other` is in front of `entry`
+
+      const desiredFollowDist = Math.max(
+        0.64,
+        entry.visualRadius + other.visualRadius + 0.14,
+      );
+
+      if (headingDot > 0.45 && forwardProj > -0.15 && dist < desiredFollowDist) {
+        // Same-direction corridor following: hold trailing walker ~0.64 m behind leader
+        const pullBack = desiredFollowDist - Math.max(0, forwardProj);
+        adjustedDist = Math.max(0, adjustedDist - pullBack);
+      } else if (headingDot < -0.35 && dist < 1.15) {
+        // Opposing corridor traffic: each walker shifts slightly to their own right-hand side
+        const approachFactor = Math.max(0, Math.min(1, (1.15 - dist) / 0.75));
+        lateralOffset += 0.19 * approachFactor;
+      }
+    }
+
+    if (adjustedDist !== rc.traveled || lateralOffset !== 0) {
+      const resampled = sampleSmoothPathMotion(rc.path, adjustedDist, rc.totalDist);
+      // Right-hand perpendicular vector in X/Z plane for heading `yaw` (`forward = [sin(yaw), cos(yaw)]`) is `[cos(yaw), -sin(yaw)]`
+      const rx = Math.cos(resampled.yaw);
+      const rz = -Math.sin(resampled.yaw);
+      const candX = resampled.position[0] + rx * lateralOffset;
+      const candZ = resampled.position[1] + rz * lateralOffset;
+      const minClear = entry.info?.usesWheelchair ? 0.36 : 0.16;
+      entry.snap.position = clampToWalkableOrKeep(
+        nav,
+        resampled.position[0],
+        resampled.position[1],
+        candX,
+        candZ,
+        minClear,
+      );
+      entry.snap.yaw = resampled.yaw;
+      rc.traveled = adjustedDist;
+    }
+
+    // Also shift opposing leader slightly to THEIR right when an oncoming agent is within 1.1m
+    placedMoving.push(entry);
+  }
+
+  // Symmetric right-hand pass nudge so the earlier-ordered oncoming walker also steps slightly right
+  for (let i = 0; i < movingEntries.length; i += 1) {
+    const a = movingEntries[i];
+    for (let j = i + 1; j < movingEntries.length; j += 1) {
+      const b = movingEntries[j];
+      const dx = b.snap.position[0] - a.snap.position[0];
+      const dz = b.snap.position[1] - a.snap.position[1];
+      const dist = Math.hypot(dx, dz);
+      if (dist >= 1.1) continue;
+      const dot =
+        Math.sin(a.snap.yaw) * Math.sin(b.snap.yaw) +
+        Math.cos(a.snap.yaw) * Math.cos(b.snap.yaw);
+      if (dot < -0.35) {
+        const nudge = 0.15 * Math.max(0, Math.min(1, (1.1 - dist) / 0.7));
+        const rx = Math.cos(a.snap.yaw);
+        const rz = -Math.sin(a.snap.yaw);
+        a.snap.position = clampToWalkableOrKeep(
+          nav,
+          a.snap.position[0],
+          a.snap.position[1],
+          a.snap.position[0] + rx * nudge,
+          a.snap.position[1] + rz * nudge,
+          a.info?.usesWheelchair ? 0.36 : 0.16,
+        );
+      }
+    }
+  }
+
+  // Pass 2: Iterative personal-space separation (`radiusA + radiusB + 0.10 m` gap)
+  // Wheelchair & stationary occupants have higher anchor weight so walkers yield around them.
+  const VISIBLE_GAP = 0.10;
+  for (let iter = 0; iter < 3; iter += 1) {
+    for (let i = 0; i < ordered.length; i += 1) {
+      for (let j = i + 1; j < ordered.length; j += 1) {
+        const a = ordered[i];
+        const b = ordered[j];
+        const minDist = a.visualRadius + b.visualRadius + VISIBLE_GAP;
+        let dx = b.snap.position[0] - a.snap.position[0];
+        let dz = b.snap.position[1] - a.snap.position[1];
+        let dist = Math.hypot(dx, dz);
+
+        if (dist >= minDist) continue;
+
+        if (dist < 1e-4) {
+          // Deterministic tie-break angle from stable pair index
+          const angle = ((i * 7 + j * 13) % 12) * ((Math.PI * 2) / 12);
+          dx = Math.cos(angle);
+          dz = Math.sin(angle);
+          dist = 1;
+        } else {
+          dx /= dist;
+          dz /= dist;
+        }
+
+        const overlap = minDist - dist;
+        const weightA = a.info?.usesWheelchair ? 0.15 : a.snap.isMoving ? 0.5 : 0.35;
+        const weightB = b.info?.usesWheelchair ? 0.15 : b.snap.isMoving ? 0.5 : 0.65;
+        const sumW = weightA + weightB || 1;
+        const shareA = weightA / sumW;
+        const shareB = weightB / sumW;
+
+        const nextAX = a.snap.position[0] - dx * overlap * shareA;
+        const nextAZ = a.snap.position[1] - dz * overlap * shareA;
+        const nextBX = b.snap.position[0] + dx * overlap * shareB;
+        const nextBZ = b.snap.position[1] + dz * overlap * shareB;
+
+        a.snap.position = clampToWalkableOrKeep(
+          nav,
+          a.snap.position[0],
+          a.snap.position[1],
+          nextAX,
+          nextAZ,
+          a.info?.usesWheelchair ? 0.34 : 0.14,
+        );
+        b.snap.position = clampToWalkableOrKeep(
+          nav,
+          b.snap.position[0],
+          b.snap.position[1],
+          nextBX,
+          nextBZ,
+          b.info?.usesWheelchair ? 0.34 : 0.14,
+        );
+      }
+    }
+  }
+
+  // Return in original agent order
+  const byId = new Map(ordered.map((e) => [e.snap.personId, e.snap]));
+  return rawEntries.map((e) => byId.get(e.snap.personId));
+}
 export function getSimulationSnapshotAt(simulation, timestampSeconds) {
   if (!simulation || !Array.isArray(simulation.timeline)) return [];
   const t = Number(timestampSeconds);
@@ -839,10 +1040,11 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
     });
   }
 
-  const snapshots = [];
+  const rawEntries = [];
   for (const [agentId, frames] of simulation._framesByAgent.entries()) {
     if (frames.length === 0) continue;
     const info = simulation._agentInfoById?.get(agentId) || null;
+    const visualRadius = resolveVisualAgentRadius(info);
     const enrich = (snap) => {
       const actLabel = snap.activityLabel || snap.eventLabel || snap.activity || "At home";
       const destLabel =
@@ -851,6 +1053,7 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
       return {
         ...snap,
         personId: agentId,
+        visualRadiusMeters: visualRadius,
         activityLabel: actLabel,
         destinationLabel: destLabel,
         isMoving,
@@ -870,12 +1073,22 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
     };
 
     if (t <= frames[0].timestamp) {
-      snapshots.push(enrich({ ...frames[0], position: [...frames[0].position] }));
+      rawEntries.push({
+        info,
+        visualRadius,
+        routeCtx: null,
+        snap: enrich({ ...frames[0], position: [...frames[0].position] }),
+      });
       continue;
     }
     const last = frames.at(-1);
     if (t >= last.timestamp) {
-      snapshots.push(enrich({ ...last, position: [...last.position] }));
+      rawEntries.push({
+        info,
+        visualRadius,
+        routeCtx: null,
+        snap: enrich({ ...last, position: [...last.position] }),
+      });
       continue;
     }
 
@@ -926,8 +1139,17 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
         ? `Going to the ${destLabel || "room"}`
         : `Walking to ${destLabel || activeRoute.activity || "room"}`;
 
-      snapshots.push(
-        enrich({
+      rawEntries.push({
+        info,
+        visualRadius,
+        routeCtx: {
+          path: activeRoute.path,
+          start,
+          end,
+          totalDist,
+          traveled: exactTraveled,
+        },
+        snap: enrich({
           timestamp: t,
           minute: round2(t / 60),
           agentId,
@@ -942,7 +1164,7 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
           isMoving: true,
           moving: true,
         }),
-      );
+      });
       continue;
     }
 
@@ -958,8 +1180,11 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
         : 0;
     const resolvedStationaryLabel = f0.eventLabel || f0.activity || "At home";
 
-    snapshots.push(
-      enrich({
+    rawEntries.push({
+      info,
+      visualRadius,
+      routeCtx: null,
+      snap: enrich({
         timestamp: t,
         minute: round2(t / 60),
         agentId,
@@ -979,7 +1204,7 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
         isMoving: isMovingBetween,
         moving: isMovingBetween,
       }),
-    );
+    });
   }
-  return snapshots;
+  return applyLocalAgentSeparation(rawEntries, simulation._navigation || null);
 }

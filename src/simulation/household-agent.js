@@ -146,26 +146,52 @@ export function createHouseholdAgentState(
 
   let initialPosition = null;
   if (isFinitePoint2D(rawAgent.currentPosition)) {
-    initialPosition = [
+    const basePos = [
       Number(rawAgent.currentPosition[0]),
       Number(rawAgent.currentPosition[1]),
     ];
     if (!rawAgent.currentRoomId) {
       initialRoomId =
-        navigation.getRoomIdAt(initialPosition[0], initialPosition[1]) ??
+        navigation.getRoomIdAt(basePos[0], basePos[1]) ??
         initialRoomId;
+    }
+    const existingList = roomSlotCounts.get(`pos:${initialRoomId}`) || [];
+    const overlapsExisting = existingList.some(
+      (p) => Math.hypot(p[0] - basePos[0], p[1] - basePos[1]) < Math.max(0.58, radiusMeters * 2.1),
+    );
+    if (!overlapsExisting) {
+      initialPosition = basePos;
+      existingList.push(basePos);
+      roomSlotCounts.set(`pos:${initialRoomId}`, existingList);
+    } else if (initialRoomId && navigation.roomsById.has(initialRoomId)) {
+      const safe = resolveSafeRoomPosition(navigation, initialRoomId, {
+        slotIndex: existingList.length,
+        agentRadius: radiusMeters,
+        activity: initialActivity,
+        house,
+        occupiedPositions: existingList,
+      });
+      initialPosition = safe ? safe.position : basePos;
+      existingList.push(initialPosition);
+      roomSlotCounts.set(`pos:${initialRoomId}`, existingList);
+    } else {
+      initialPosition = basePos;
     }
   } else if (initialRoomId && navigation.roomsById.has(initialRoomId)) {
     const slot = roomSlotCounts.get(initialRoomId) ?? 0;
     roomSlotCounts.set(initialRoomId, slot + 1);
+    const existingList = roomSlotCounts.get(`pos:${initialRoomId}`) || [];
     const safe = resolveSafeRoomPosition(navigation, initialRoomId, {
       slotIndex: slot,
       agentRadius: radiusMeters,
       activity: initialActivity,
       house,
+      occupiedPositions: existingList,
     });
     if (safe) {
       initialPosition = safe.position;
+      existingList.push(initialPosition);
+      roomSlotCounts.set(`pos:${initialRoomId}`, existingList);
     }
   }
 
