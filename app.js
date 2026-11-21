@@ -545,12 +545,12 @@ function showApprovedReplay(outcome, scenarioId) {
     agentRoutes: [],
     isEvacuation: false,
     clockMode: "clock",
-    simSecondsPerRealSecond: scenarioId === "normal-day" ? 28 : 14,
-    walkingSimSecondsPerRealSecond: 3.2,
+    simSecondsPerRealSecond: scenarioId === "normal-day" ? 28 : 18,
+    walkingSimSecondsPerRealSecond: 1.8,
     speedRates:
       scenarioId === "normal-day"
-        ? { 1: 28, 5: 180, 20: 27000 }
-        : { 1: 14, 5: 90, 20: 4200 },
+        ? { 1: 32, 5: 180, 20: 27000 }
+        : { 1: 18, 5: 90, 20: 4200 },
     findings: outcome.uiPayload.findings,
     showFindingsImmediately: true,
     scores: outcome.uiPayload.afterScores,
@@ -903,7 +903,7 @@ function render() {
   $("#item-count").textContent = state.items.length;
   $("#shop-count").textContent = state.savedProducts?.length || "";
   $("#undo").disabled = !history.length;
-  $("#compare-photo").hidden = !state.roomPhoto;
+  $("#compare-photo").hidden = true;
   $("#view-house-json").hidden = !state.importedHouse;
   const selectAreaBtn = $("#select-area-shortcut");
   if (selectAreaBtn) {

@@ -421,29 +421,124 @@ export function selectVisibleRoutes({
   return out;
 }
 
-function createNameLabelSprite(text, accentColor) {
+export function formatAvatarActivityStatus(snap = {}, meta = {}) {
+  const rawName = String(meta.name || snap.name || snap.agentId || "Member").trim();
+  const usesWheelchair = Boolean(snap.usesWheelchair ?? meta.usesWheelchair);
+  const shortBaseName = rawName.replace(/\s*\((?:Dad|Mom|Brother|Sister|Wheelchair|Wave\s*\d+)\)\s*$/i, "").trim() || rawName;
+  const displayName = usesWheelchair && !shortBaseName.includes("♿")
+    ? `${shortBaseName} ♿`
+    : shortBaseName;
+
+  const isMoving = Boolean(snap.isMoving ?? snap.moving);
+  const rawEvent = String(snap.activityLabel || snap.eventLabel || "").trim();
+  const rawActivity = String(snap.activity || "").trim();
+  const roomName = String(snap.destinationLabel || snap.roomId || "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+
+  if (isMoving) {
+    if (rawEvent && /^(walking|going|heading|evacuating)/i.test(rawEvent)) {
+      return {
+        personId: snap.personId || snap.agentId,
+        name: displayName,
+        activityLabel: rawEvent,
+        destinationLabel: roomName,
+        isMoving: true,
+      };
+    }
+    const target = rawActivity.startsWith("going-to-")
+      ? rawActivity.slice("going-to-".length).replace(/[-_]+/g, " ")
+      : roomName || "next room";
+    const moveText = usesWheelchair ? `Going to the ${target}` : `Walking to ${target}`;
+    return {
+      personId: snap.personId || snap.agentId,
+      name: displayName,
+      activityLabel: moveText,
+      destinationLabel: target,
+      isMoving: true,
+    };
+  }
+
+  const FRIENDLY_FALLBACKS = {
+    sleep: "Sleeping",
+    wake: "Waking up",
+    bathroom: "Brushing teeth",
+    cook: "Making breakfast",
+    breakfast: "Eating breakfast",
+    eat: "Packing lunch",
+    work: "Working from home",
+    study: "Studying at desk",
+    watchTv: "Watching TV",
+    socialize: "Visiting & chatting",
+    relax: "Relaxing",
+    exercise: "Stretching",
+    evacuate: "Evacuating",
+    idle: "At home",
+    other: "Getting ready",
+  };
+
+  const activityLabel =
+    rawEvent && !/^going-to-/i.test(rawEvent)
+      ? rawEvent
+      : FRIENDLY_FALLBACKS[rawActivity] || rawActivity || "At home";
+
+  return {
+    personId: snap.personId || snap.agentId,
+    name: displayName,
+    activityLabel,
+    destinationLabel: roomName,
+    isMoving: false,
+  };
+}
+
+function drawNameAndActivityLabel(ctx, canvas, { nameText, activityText, accentColor, isMoving }) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Crisp rounded pill readable against light architectural walls & wood floors
+  ctx.fillStyle = "rgba(28, 30, 27, 0.90)";
+  ctx.beginPath();
+  ctx.roundRect(10, 8, canvas.width - 20, canvas.height - 16, 20);
+  ctx.fill();
+
+  ctx.strokeStyle = isMoving ? accentColor : "rgba(255, 253, 248, 0.24)";
+  ctx.lineWidth = isMoving ? 3 : 1.5;
+  ctx.beginPath();
+  ctx.roundRect(10, 8, canvas.width - 20, canvas.height - 16, 20);
+  ctx.stroke();
+
+  // Persona color dot
+  ctx.fillStyle = accentColor;
+  ctx.beginPath();
+  ctx.arc(36, 40, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Line 1: Name
+  ctx.fillStyle = "#fffdf8";
+  ctx.font = "700 24px system-ui, -apple-system, Segoe UI, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(nameText || "Member").slice(0, 22), 56, 36);
+
+  // Line 2: Current activity
+  ctx.fillStyle = isMoving ? "#ffdca8" : "#d6dfd8";
+  ctx.font = "600 19px system-ui, -apple-system, Segoe UI, sans-serif";
+  ctx.fillText(String(activityText || "At home").slice(0, 28), 56, 68);
+}
+
+function createNameLabelSprite(nameText, accentColor, activityText = "At home") {
   if (typeof document === "undefined") return null;
   const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 64;
+  canvas.width = 384;
+  canvas.height = 104;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
-  ctx.clearRect(0, 0, 256, 64);
-  ctx.fillStyle = "rgba(38, 39, 34, 0.86)";
-  ctx.beginPath();
-  ctx.roundRect(18, 10, 220, 44, 22);
-  ctx.fill();
-
-  ctx.fillStyle = accentColor;
-  ctx.beginPath();
-  ctx.arc(44, 32, 9, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#fffdf8";
-  ctx.font = "600 22px system-ui, -apple-system, Segoe UI, sans-serif";
-  ctx.textBaseline = "middle";
-  ctx.fillText(String(text || "Member").slice(0, 14), 64, 33);
+  const initialKey = `${nameText}|${activityText}|0`;
+  drawNameAndActivityLabel(ctx, canvas, {
+    nameText,
+    activityText,
+    accentColor,
+    isMoving: false,
+  });
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -453,10 +548,10 @@ function createNameLabelSprite(text, accentColor) {
     depthTest: false,
   });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(0.95, 0.24, 1);
-  sprite.position.set(0, 1.88, 0);
+  sprite.scale.set(1.38, 0.37, 1);
+  sprite.position.set(0, 1.96, 0);
   sprite.renderOrder = 8;
-  return { sprite, texture, material };
+  return { sprite, texture, material, canvas, ctx, lastKey: initialKey };
 }
 
 /**
@@ -667,12 +762,15 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
 
     group.add(body);
 
-    const labelText = chairFlag ? `♿ ${resolvedName}` : resolvedName;
-    const label = createNameLabelSprite(labelText, style.color);
+    const statusInfo = formatAvatarActivityStatus(
+      { agentId, name: resolvedName, usesWheelchair: chairFlag },
+      { name: resolvedName, usesWheelchair: chairFlag },
+    );
+    const label = createNameLabelSprite(statusInfo.name, style.color, statusInfo.activityLabel);
     if (label) {
       label.sprite.position.set(
         0,
-        chairFlag ? 1.56 : Math.max(1.38, 1.38 * heightScale + 0.44),
+        chairFlag ? 1.64 : Math.max(1.48, 1.38 * heightScale + 0.52),
         0,
       );
       group.add(label.sprite);
@@ -694,9 +792,18 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
       pipMat,
       chairMat,
       label,
+      renderedYaw: null,
+      currentStatus: statusInfo,
     };
     avatarRecords.set(agentId, record);
     return record;
+  }
+
+  function shortestAngleDelta(fromRad, toRad) {
+    let diff = (Number(toRad) || 0) - (Number(fromRad) || 0);
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    return diff;
   }
 
   function updateAvatars(snapshots = [], agentMeta = new Map()) {
@@ -712,18 +819,41 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
         usesWheelchair: Boolean(snap.usesWheelchair ?? meta.usesWheelchair),
       });
       rec.group.position.set(Number(snap.position[0]), 0, Number(snap.position[1]));
+
+      const statusInfo = formatAvatarActivityStatus(snap, meta);
+      rec.currentStatus = statusInfo;
+      rec.group.userData.activityStatus = statusInfo;
+
+      // Update floating 2-line Name + Activity sprite only when text or motion state changes
+      if (rec.label?.ctx) {
+        const nextKey = `${statusInfo.name}|${statusInfo.activityLabel}|${statusInfo.isMoving ? 1 : 0}`;
+        if (rec.label.lastKey !== nextKey) {
+          rec.label.lastKey = nextKey;
+          drawNameAndActivityLabel(rec.label.ctx, rec.label.canvas, {
+            nameText: statusInfo.name,
+            activityText: statusInfo.activityLabel,
+            accentColor: rec.color,
+            isMoving: statusInfo.isMoving,
+          });
+          rec.label.texture.needsUpdate = true;
+        }
+      }
+
       // Subtle natural walking bob when actively walking (skipped for wheelchair users)
-      if (snap.moving && !rec.usesWheelchair) {
+      if (statusInfo.isMoving && !rec.usesWheelchair) {
         const phase = (Number(snap.timestamp) || 0) * 6.8 + (snap.agentId.charCodeAt(0) || 0);
-        rec.body.position.y = Math.abs(Math.sin(phase)) * 0.028;
+        rec.body.position.y = Math.abs(Math.sin(phase)) * 0.032;
       } else {
         rec.body.position.y = 0;
       }
       if (Number.isFinite(Number(snap.yaw))) {
-        // Simulation yaw = atan2(dx, dz) in X/Z plane -> Three.js +Z forward rotates by yaw or PI/2 - yaw:
-        // Note: samplePointAlongPath computes Math.atan2(dx, dz), where yaw=0 faces +Z and yaw=PI/2 faces +X!
-        // In Three.js, +Z forward rotated around Y by `yaw` faces `[sin(yaw), 0, cos(yaw)] = [dx, 0, dz]`!
-        rec.body.rotation.y = Number(snap.yaw);
+        const targetYaw = Number(snap.yaw);
+        if (rec.renderedYaw === null || !statusInfo.isMoving) {
+          rec.renderedYaw = targetYaw;
+        } else {
+          rec.renderedYaw += shortestAngleDelta(rec.renderedYaw, targetYaw) * 0.35;
+        }
+        rec.body.rotation.y = rec.renderedYaw;
       }
       rec.halo.visible = focusedAgentIds.has(snap.agentId);
     }
@@ -966,6 +1096,8 @@ export function createSimulationSceneLayer({ scene, invalidate = () => {} }) {
     dispose,
     getAvatarCount: () => avatarRecords.size,
     getAvatarMesh: (agentId) => avatarRecords.get(agentId)?.group ?? null,
+    getAvatarStatuses: () =>
+      [...avatarRecords.values()].map((r) => ({ ...r.currentStatus })),
     getOverlayCount: () => findingsGroup.children.length,
   };
 }

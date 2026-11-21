@@ -526,6 +526,10 @@ export function runSimulation({
 
         const initialSample = samplePointAlongPath(pathResult.path, 0);
         agent.yaw = initialSample.yaw;
+        const cleanDestName = String(resolvedDest.roomId || entry.activity).replace(/[-_]+/g, " ");
+        const moveLabel = agent.usesWheelchair
+          ? `Going to the ${cleanDestName}`
+          : `Walking to ${cleanDestName}`;
         agent.activeRoute = {
           path: pathResult.path,
           totalDistance: pathResult.distanceMeters,
@@ -538,7 +542,7 @@ export function runSimulation({
         };
         agent.moving = true;
         agent.activity = `going-to-${resolvedDest.roomId || entry.activity}`;
-        agent.eventLabel = `Walking to ${(resolvedDest.roomId || entry.activity).replace(/[-_]+/g, " ")}`;
+        agent.eventLabel = moveLabel;
         recordTimelineFrame(agent, t, true);
       }
     }
@@ -839,20 +843,31 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
   for (const [agentId, frames] of simulation._framesByAgent.entries()) {
     if (frames.length === 0) continue;
     const info = simulation._agentInfoById?.get(agentId) || null;
-    const enrich = (snap) => ({
-      ...snap,
-      ...(info
-        ? {
-            name: info.name,
-            role: info.role ?? null,
-            ageGroup: info.ageGroup ?? "adult",
-            heightMeters: info.heightMeters,
-            eyeHeightMeters: info.eyeHeightMeters,
-            usesWheelchair: Boolean(info.usesWheelchair),
-            speedMps: info.movementSpeedMps,
-          }
-        : {}),
-    });
+    const enrich = (snap) => {
+      const actLabel = snap.activityLabel || snap.eventLabel || snap.activity || "At home";
+      const destLabel =
+        snap.destinationLabel || String(snap.roomId || "").replace(/[-_]+/g, " ");
+      const isMoving = Boolean(snap.isMoving ?? snap.moving);
+      return {
+        ...snap,
+        personId: agentId,
+        activityLabel: actLabel,
+        destinationLabel: destLabel,
+        isMoving,
+        moving: isMoving,
+        ...(info
+          ? {
+              name: info.name,
+              role: info.role ?? null,
+              ageGroup: info.ageGroup ?? "adult",
+              heightMeters: info.heightMeters,
+              eyeHeightMeters: info.eyeHeightMeters,
+              usesWheelchair: Boolean(info.usesWheelchair),
+              speedMps: info.movementSpeedMps,
+            }
+          : {}),
+      };
+    };
 
     if (t <= frames[0].timestamp) {
       snapshots.push(enrich({ ...frames[0], position: [...frames[0].position] }));
@@ -895,20 +910,21 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
           ? Number(activeRoute.endTimestamp)
           : start + totalDist / speed;
       const routeSpan = Math.max(1e-4, end - start);
-      const progressDist = Math.min(
-        totalDist,
-        Math.max(0, Math.min((t - start) * speed, ((t - start) / routeSpan) * totalDist)),
-      );
-      // Use continuous time-proportional travel along the exact polyline so arrival at `end` aligns seamlessly
       const exactTraveled = Math.min(
         totalDist,
-        Math.max(progressDist, ((t - start) / routeSpan) * totalDist),
+        Math.max(0, ((t - start) / routeSpan) * totalDist),
       );
       const sampled = sampleSmoothPathMotion(
         activeRoute.path,
         exactTraveled,
         totalDist,
       );
+      const destLabel = activeRoute.toRoomId
+        ? String(activeRoute.toRoomId).replace(/[-_]+/g, " ")
+        : "";
+      const walkLabel = info?.usesWheelchair
+        ? `Going to the ${destLabel || "room"}`
+        : `Walking to ${destLabel || activeRoute.activity || "room"}`;
 
       snapshots.push(
         enrich({
@@ -918,8 +934,12 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
           position: sampled.position,
           yaw: sampled.yaw,
           roomId: f0.roomId,
+          destinationRoomId: activeRoute.toRoomId || null,
+          destinationLabel: destLabel,
           activity: f0.activity,
-          eventLabel: f0.eventLabel || activeRoute.eventLabel || f0.activity,
+          eventLabel: walkLabel,
+          activityLabel: walkLabel,
+          isMoving: true,
           moving: true,
         }),
       );
@@ -927,9 +947,16 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
     }
 
     const span = f1.timestamp - f0.timestamp;
-    const alpha = span > 1e-6 && f0.moving ? (t - f0.timestamp) / span : 0;
+    const isMovingBetween =
+      Boolean(f0.moving) &&
+      f1.moving !== false &&
+      Math.hypot(f1.position[0] - f0.position[0], f1.position[1] - f0.position[1]) > 1e-4;
+    const alpha = span > 1e-6 && isMovingBetween ? (t - f0.timestamp) / span : 0;
     const turnAlpha =
-      span > 1e-6 ? Math.min(1, (t - f0.timestamp) / Math.min(span, 0.75)) : 0;
+      span > 1e-6 && isMovingBetween
+        ? Math.min(1, (t - f0.timestamp) / Math.min(span, 0.75))
+        : 0;
+    const resolvedStationaryLabel = f0.eventLabel || f0.activity || "At home";
 
     snapshots.push(
       enrich({
@@ -940,13 +967,17 @@ export function getSimulationSnapshotAt(simulation, timestampSeconds) {
           round3(f0.position[0] + (f1.position[0] - f0.position[0]) * alpha),
           round3(f0.position[1] + (f1.position[1] - f0.position[1]) * alpha),
         ],
-        yaw: f0.moving
+        yaw: isMovingBetween
           ? interpolateHeadingRadians(f0.yaw, f1.yaw, turnAlpha)
           : f0.yaw,
         roomId: f0.roomId,
+        destinationRoomId: f0.roomId || null,
+        destinationLabel: String(f0.roomId || "").replace(/[-_]+/g, " "),
         activity: f0.activity,
-        eventLabel: f0.eventLabel || f0.activity,
-        moving: f0.moving,
+        eventLabel: resolvedStationaryLabel,
+        activityLabel: resolvedStationaryLabel,
+        isMoving: isMovingBetween,
+        moving: isMovingBetween,
       }),
     );
   }
