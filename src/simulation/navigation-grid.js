@@ -626,14 +626,63 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
     (rBounds.minZ + rBounds.maxZ) / 2,
   ];
 
-  // Bias activity reference toward relevant room fixtures when present (e.g. kitchen sink/stove)
+  // Bias activity reference toward relevant movable furniture or room fixtures when present
   let targetRef = centroid;
   const activity = String(options.activity || "").toLowerCase();
   const fixtures = Array.isArray(options.house?.fixtures)
     ? options.house.fixtures.filter((f) => f.roomId === roomId)
     : [];
+  const roomObjects = Array.isArray(options.house?.objects)
+    ? options.house.objects.filter((o) => {
+        if (!o || o.kind === "rug") return false;
+        if (o.roomId) return o.roomId === roomId;
+        const ox = Number(o.position?.[0] ?? o.x);
+        const oz = Number(o.position?.[2] ?? o.z);
+        return Number.isFinite(ox) && Number.isFinite(oz) && pointInPolygon([ox, oz], room.polygon);
+      })
+    : [];
 
-  if (fixtures.length > 0) {
+  const standInFrontOf = (px, pz, maxStandOff = 0.85, refPt = centroid) => {
+    const vx = refPt[0] - px;
+    const vz = refPt[1] - pz;
+    const vLen = Math.hypot(vx, vz) || 1;
+    const standOff = Math.min(maxStandOff, Math.max(0.42, vLen * 0.65));
+    return [px + (vx / vLen) * standOff, pz + (vz / vLen) * standOff];
+  };
+
+  let matchedObject = null;
+  let hasDedicatedActivityAnchor = false;
+  if (/eat|breakfast|dine/.test(activity)) {
+    matchedObject =
+      roomObjects.find((o) => o.kind === "chair") ||
+      roomObjects.find((o) => o.kind === "table") ||
+      null;
+  } else if (/work|study|wfh/.test(activity)) {
+    matchedObject =
+      roomObjects.find((o) => o.kind === "desk") ?? null;
+  } else if (/watchtv|relax/.test(activity)) {
+    matchedObject =
+      roomObjects.find((o) => o.kind === "sofa" || o.kind === "chair") ?? null;
+  }
+
+  if (matchedObject) {
+    const ox = Number(matchedObject.position?.[0] ?? matchedObject.x);
+    const oz = Number(matchedObject.position?.[2] ?? matchedObject.z);
+    if (Number.isFinite(ox) && Number.isFinite(oz)) {
+      const pairingTable =
+        matchedObject.kind === "chair"
+          ? roomObjects.find((o) => o.kind === "table")
+          : null;
+      const pullToward = pairingTable
+        ? [
+            Number(pairingTable.position?.[0] ?? pairingTable.x),
+            Number(pairingTable.position?.[2] ?? pairingTable.z),
+          ]
+        : centroid;
+      targetRef = standInFrontOf(ox, oz, 0.56, pullToward);
+      hasDedicatedActivityAnchor = true;
+    }
+  } else if (fixtures.length > 0) {
     let preferredFixture = null;
     if (/cook|breakfast|eat|kitchen/.test(activity)) {
       preferredFixture =
@@ -645,13 +694,11 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
         fixtures.find((f) => f.kind === "toilet");
     }
     if (preferredFixture && Array.isArray(preferredFixture.position)) {
-      const fx = preferredFixture.position[0];
-      const fz = preferredFixture.position[2];
-      const vx = centroid[0] - fx;
-      const vz = centroid[1] - fz;
-      const vLen = Math.hypot(vx, vz) || 1;
-      const standOff = Math.min(0.85, vLen * 0.65);
-      targetRef = [fx + (vx / vLen) * standOff, fz + (vz / vLen) * standOff];
+      targetRef = standInFrontOf(
+        preferredFixture.position[0],
+        preferredFixture.position[2],
+        0.85,
+      );
     }
   }
 
@@ -696,12 +743,35 @@ export function resolveSafeRoomPosition(navigation, roomId, options = {}) {
 
   candidates.sort((a, b) => a.score - b.score || a.idx - b.idx);
 
-  if (slotIndex === 0) {
+  // When an activity binds directly to dedicated movable furniture (e.g. `eat` at a dining table
+  // while another occupant `cook`s at the stove), stand directly at that furniture's best spot
+  // unless an already-occupied position is supplied in `occupiedPositions`.
+  const occupiedPositions = Array.isArray(options.occupiedPositions)
+    ? options.occupiedPositions.filter(isFinitePoint2D)
+    : [];
+
+  if (hasDedicatedActivityAnchor) {
+    const nonOverlapping =
+      candidates.find((cand) =>
+        occupiedPositions.every(
+          (occ) =>
+            Math.hypot(cand.pos[0] - occ[0], cand.pos[1] - occ[1]) >=
+            radius * 2.2,
+        ),
+      ) || candidates[0];
+    return { position: nonOverlapping.pos, roomId };
+  }
+
+  if (slotIndex === 0 && occupiedPositions.length === 0) {
     return { position: candidates[0].pos, roomId };
   }
 
   const selected = [candidates[0].pos];
-  const desiredSeparation = 0.72;
+  const minRoomSpan = Math.min(rBounds.width, rBounds.depth);
+  const desiredSeparation = Math.max(
+    0.72,
+    Math.min(2.25, minRoomSpan * 0.25),
+  );
   for (let s = 1; s <= slotIndex; s += 1) {
     const next =
       candidates.find((cand) =>

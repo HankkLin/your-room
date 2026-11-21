@@ -9,8 +9,10 @@ export {
   DEFAULT_LONG_PATH_METERS,
   DEFAULT_MOVEMENT_SPEED_MPS,
   DEFAULT_PERSONAL_SPACE_RADIUS,
+  EXPERIENCE_CATEGORIES,
   FINDING_TYPES,
   SIMULATION_EVENT_TYPES,
+  STRESS_SCENARIO_TYPES,
   isValidSimulationFinding,
 } from "../contracts/simulation.js";
 
@@ -42,10 +44,38 @@ export {
 export {
   MORNING_ROUTINE_SCENARIO,
   createDemoHousehold,
+  createWholeHomeDemoPersonas,
   runMorningRoutineDemo,
 } from "./demo-household.js";
 
 export {
+  buildOpaqueWallSegments,
+  checkSightline,
+  classifySemanticType,
+  countPartitionsCrossed,
+  extractBlockingSegments,
+  listSemanticEntities,
+} from "./validators/sightline.js";
+
+export { validatePrivacySightlines } from "./validators/privacy.js";
+export { validateTvVisibility } from "./validators/visibility.js";
+export { validateNoiseConflicts } from "./validators/noise.js";
+export { validateEvacuation } from "./validators/evacuation.js";
+export { validateSunlight } from "./validators/sunlight.js";
+export {
+  evaluateHouseholdExperience,
+  validateHouseholdExperience,
+} from "./validators/household-evaluation.js";
+
+export { createFireEvacuationScenario } from "./scenarios/fire-evacuation.js";
+export {
+  createDinnerPartyGuests,
+  createDinnerPartyScenario,
+} from "./scenarios/dinner-party.js";
+export { runStressScenario } from "./scenarios/run-stress-scenario.js";
+
+export {
+  formatHouseholdExperienceReport,
   formatSimulationDebugReport,
   renderSimulationDebugSvg,
 } from "./debug-visualization.js";

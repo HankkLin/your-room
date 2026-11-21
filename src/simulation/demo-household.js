@@ -129,6 +129,78 @@ export function createDemoHousehold(house) {
 }
 
 /**
+ * Create Persona-contract-valid whole-home demo personas (Kevin & Alice) mapped
+ * strictly to actual room IDs of `house` (never `room-1`), with both Morning
+ * Routine (`07:00–09:00`) and Normal Day (`09:00–22:00`) schedule coverage.
+ *
+ * Passes `validatePersonas(personas, rooms)` directly.
+ *
+ * @param {object} [house]
+ */
+export function createWholeHomeDemoPersonas(house) {
+  const rooms = Array.isArray(house?.rooms) ? house.rooms : [];
+  const bedroomId = pickRoomId(rooms, "bedroom", "bedroom");
+  const bathroomId = pickRoomId(rooms, "bathroom", "bathroom");
+  const kitchenId = pickRoomId(rooms, "kitchen", "kitchen");
+  const livingId = pickRoomId(rooms, "living-room", "living");
+  const hasHallway = rooms.some((r) => r.kind === "hallway" || r.id === "hallway");
+  const alicePostBreakfastRoomId = hasHallway
+    ? pickRoomId(rooms, "hallway", "hallway")
+    : bedroomId;
+
+  return [
+    {
+      id: "kevin",
+      name: "Kevin",
+      ageGroup: "adult",
+      preferences: ["WFH", "Quiet preferred"],
+      dislikes: ["Afternoon glare", "Crowded kitchen"],
+      needs: {
+        privacy: 0.8,
+        quiet: 0.9,
+        accessibility: 0.2,
+        daylight: 0.7,
+        social: 0.5,
+      },
+      schedule: [
+        { startMinute: 420, endMinute: 435, activity: "sleep", roomId: bedroomId },
+        { startMinute: 435, endMinute: 445, activity: "bathroom", roomId: bathroomId },
+        { startMinute: 445, endMinute: 460, activity: "other", roomId: bedroomId },
+        { startMinute: 460, endMinute: 490, activity: "cook", roomId: kitchenId },
+        { startMinute: 490, endMinute: 720, activity: "work", roomId: livingId },
+        { startMinute: 720, endMinute: 765, activity: "eat", roomId: kitchenId },
+        { startMinute: 765, endMinute: 1020, activity: "work", roomId: bedroomId },
+        { startMinute: 1080, endMinute: 1140, activity: "eat", roomId: kitchenId },
+        { startMinute: 1140, endMinute: 1320, activity: "relax", roomId: livingId },
+      ],
+    },
+    {
+      id: "alice",
+      name: "Alice",
+      ageGroup: "adult",
+      preferences: ["Early schedule", "Likes daylight"],
+      dislikes: ["Blocked kitchen walkway"],
+      needs: {
+        privacy: 0.6,
+        quiet: 0.5,
+        accessibility: 0.2,
+        daylight: 0.85,
+        social: 0.75,
+      },
+      schedule: [
+        { startMinute: 420, endMinute: 445, activity: "sleep", roomId: bedroomId },
+        { startMinute: 445, endMinute: 465, activity: "bathroom", roomId: bathroomId },
+        { startMinute: 465, endMinute: 495, activity: "eat", roomId: kitchenId },
+        { startMinute: 495, endMinute: 540, activity: "other", roomId: alicePostBreakfastRoomId },
+        { startMinute: 960, endMinute: 1080, activity: "watchTv", roomId: livingId },
+        { startMinute: 1080, endMinute: 1140, activity: "cook", roomId: kitchenId },
+        { startMinute: 1140, endMinute: 1320, activity: "watchTv", roomId: livingId },
+      ],
+    },
+  ];
+}
+
+/**
  * Execute the complete deterministic Morning Routine scenario against a House JSON
  * (defaulting to the bundled 5-room Mercer Street Apartment sample house).
  */

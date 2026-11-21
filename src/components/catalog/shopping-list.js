@@ -69,12 +69,21 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
 
   function makeCard(row, product) {
     const live = Boolean(row.shopify);
-    const title = live ? product?.title || row.name || "Saved Shopify piece" : product.name;
-    const merchant = live ? product?.merchant || row.shopify.sellerDomain : product.store;
-    const variant = live ? product?.variantTitle : product.variant;
-    const price = live ? formatShopifyMoney(product?.priceMinor, product?.currency) : formatUsd(product.price);
-    const photoUrl = live ? shopifyHttpsUrl(product?.imageUrl) : product.photo;
-    const productUrl = live ? shopifyHttpsUrl(product?.productUrl) : product.url;
+    const title = live
+      ? product?.title || row.name || "Saved Shopify piece"
+      : product?.name || row.name || "Saved piece";
+    const merchant = live
+      ? product?.merchant || row.shopify.sellerDomain
+      : product?.store || product?.merchant || row.merchant || row.store || "Merchant";
+    const variant = live ? product?.variantTitle : product?.variant || row.variant;
+    const numericPrice = Number(product?.price ?? row.price);
+    const price = live
+      ? formatShopifyMoney(product?.priceMinor, product?.currency)
+      : Number.isFinite(numericPrice)
+        ? formatUsd(numericPrice)
+        : null;
+    const photoUrl = live ? shopifyHttpsUrl(product?.imageUrl) : (product?.photo || row.photo || null);
+    const productUrl = live ? shopifyHttpsUrl(product?.productUrl) : (product?.url || row.url || null);
     const card = element("article", "shop-card");
     const photo = element("div", "shop-photo");
     if (photoUrl) {
@@ -171,7 +180,12 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     if (!project) return;
     current = project;
     const saved = (project.savedProducts ?? []).flatMap((row) => {
-      const product = row.shopify ? quotes.get(row.shopify) : catalog.find((piece) => piece.id === row.productId);
+      const product = row.shopify
+        ? quotes.get(row.shopify)
+        : catalog.find((piece) => piece.id === row.productId) ||
+          (row.name && (row.merchant || row.store || row.url || Number.isFinite(Number(row.price)))
+            ? row
+            : null);
       return row.shopify || product ? [{ row, product }] : [];
     });
     intro.textContent = saved.length

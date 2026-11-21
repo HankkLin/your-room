@@ -1,6 +1,7 @@
 import { ROOM, styles } from './model.js';
 import { constrainToRoom, footprintCorners, normalizeArchitecture, roomWalls, wallOpenings } from './scene-architecture.js';
 import { constrainToHouse, getWallOpeningsInHouse, isObjectLocked, normalizeHouse } from './house-model.js';
+import { deriveAgentStyle, mapFindingToOverlaySpec } from './src/components/avatar/simulation-scene-layer.js';
 
 // Keep editing available on devices where the browser cannot create a WebGL context.
 export function createPlanScene(host, { onSelect, onMove }) {
@@ -18,6 +19,13 @@ export function createPlanScene(host, { onSelect, onMove }) {
   let drag = null;
   let width = 0;
   let height = 0;
+  let playbackSnapshots = [];
+  let playbackRoutes = [];
+  let playbackAgentMeta = new Map();
+  let playbackFindings = [];
+  let playbackFocusedId = null;
+  let playbackFocusedAgents = new Set();
+  let playbackPatchChanges = [];
 
   function furniture(item) {
     const w = item.width;
@@ -99,7 +107,95 @@ export function createPlanScene(host, { onSelect, onMove }) {
       for (const wall of roomWalls(room)) drawWall(wall);
     }
     items.forEach(furniture);
+    drawPlaybackOverlays();
     ctx.restore();
+  }
+
+  function drawPlaybackOverlays() {
+    for (const ch of playbackPatchChanges) {
+      if (!Array.isArray(ch?.from) || !Array.isArray(ch?.to)) continue;
+      ctx.save();
+      ctx.strokeStyle = '#4e7a52';
+      ctx.lineWidth = 0.035;
+      ctx.beginPath();
+      ctx.moveTo(ch.from[0], ch.from[1]);
+      ctx.lineTo(ch.to[0], ch.to[1]);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    for (const route of playbackRoutes) {
+      if (!Array.isArray(route?.path) || route.path.length < 2) continue;
+      const meta = playbackAgentMeta.get(route.agentId) || {};
+      const color = route.evacuation ? '#c9532e' : deriveAgentStyle(route.agentId, meta.color).color;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = route.active ? 0.9 : 0.45;
+      ctx.lineWidth = 0.045;
+      ctx.beginPath();
+      route.path.forEach(([px, pz], idx) => {
+        if (idx === 0) ctx.moveTo(px, pz);
+        else ctx.lineTo(px, pz);
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    for (const f of playbackFindings) {
+      const spec = mapFindingToOverlaySpec(f, { house, items });
+      if (!spec) continue;
+      const focused = playbackFocusedId && spec.id === playbackFocusedId;
+      ctx.save();
+      if (spec.kind === 'sightline' || spec.kind === 'view-ray') {
+        ctx.strokeStyle = spec.color;
+        ctx.lineWidth = focused ? 0.055 : 0.038;
+        ctx.setLineDash([0.14, 0.1]);
+        ctx.beginPath();
+        ctx.moveTo(spec.from[0], spec.from[1]);
+        ctx.lineTo(spec.to[0], spec.to[1]);
+        ctx.stroke();
+      } else if (spec.position) {
+        const r = spec.radius * (focused ? 1.2 : 1.0);
+        ctx.fillStyle = spec.color;
+        ctx.globalAlpha = focused ? 0.3 : 0.16;
+        ctx.beginPath();
+        ctx.arc(spec.position[0], spec.position[1], r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = focused ? 0.95 : 0.72;
+        ctx.strokeStyle = spec.color;
+        ctx.lineWidth = 0.04;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    for (const snap of playbackSnapshots) {
+      if (!snap?.agentId || !Array.isArray(snap.position)) continue;
+      const meta = playbackAgentMeta.get(snap.agentId) || {};
+      const label = meta.name || snap.name || snap.agentId;
+      const { color } = deriveAgentStyle(snap.agentId, meta.color);
+      const [ax, az] = snap.position;
+      ctx.save();
+      if (playbackFocusedAgents.has(snap.agentId)) {
+        ctx.strokeStyle = '#d96236';
+        ctx.lineWidth = 0.045;
+        ctx.beginPath();
+        ctx.arc(ax, az, 0.31, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = color;
+      ctx.strokeStyle = '#fffdf8';
+      ctx.lineWidth = 0.03;
+      ctx.beginPath();
+      ctx.arc(ax, az, 0.21, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#262722';
+      ctx.font = '600 0.2px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(label).slice(0, 12), ax, az - 0.3);
+      ctx.restore();
+    }
   }
 
   function drawHouse() {
@@ -270,6 +366,46 @@ export function createPlanScene(host, { onSelect, onMove }) {
     setView() { draw(); },
     zoom(delta) { zoom = Math.max(.65, Math.min(2, zoom + delta * .15)); draw(); },
     reset() { zoom = 1; draw(); },
+    setPlaybackFrame({ snapshots = [], visibleRoutes = [], agentMeta = new Map() } = {}) {
+      playbackSnapshots = [...snapshots];
+      playbackRoutes = [...visibleRoutes];
+      playbackAgentMeta = agentMeta;
+      draw();
+    },
+    setPlaybackFindings(findings = []) {
+      playbackFindings = Array.isArray(findings) ? [...findings] : [];
+      draw();
+    },
+    focusFinding(findingOrNull = null) {
+      if (!findingOrNull) {
+        playbackFocusedId = null;
+        playbackFocusedAgents = new Set();
+      } else {
+        const spec = mapFindingToOverlaySpec(findingOrNull, { house, items });
+        playbackFocusedId = findingOrNull.id || spec?.id || null;
+        playbackFocusedAgents = new Set(spec?.relatedAgentIds || []);
+      }
+      draw();
+    },
+    showPatchTransition(changes = []) {
+      playbackPatchChanges = Array.isArray(changes) ? [...changes] : [];
+      draw();
+    },
+    clearPlayback() {
+      playbackSnapshots = [];
+      playbackRoutes = [];
+      playbackFindings = [];
+      playbackFocusedId = null;
+      playbackFocusedAgents = new Set();
+      playbackPatchChanges = [];
+      draw();
+    },
+    getPlaybackStats() {
+      return {
+        avatarCount: playbackSnapshots.length,
+        overlayCount: playbackFindings.filter((f) => Boolean(mapFindingToOverlaySpec(f, { house, items }))).length,
+      };
+    },
     dispose() { resize.disconnect(); canvas.remove(); }
   };
 }
