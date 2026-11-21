@@ -195,7 +195,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await expect(walnutCard).toBeVisible();
   await expect(walnutCard).toContainText("Sundays");
   await expect(
-    walnutCard.getByRole("link", { name: /Shop at Sundays/i }),
+    walnutCard.getByRole("link", { name: /View product at Sundays/i }),
   ).toHaveAttribute("href", /sundays-company\.com.*variant=41588406419527/);
 
   expect(errors).toEqual([]);

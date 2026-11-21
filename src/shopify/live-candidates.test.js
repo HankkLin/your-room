@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import { createShopifyApiMiddleware } from "./shopify-api.js";
 import { createProductCandidate, productCandidateId } from "../contracts/product.js";
 import { refreshPatchCandidates, savedProductsForPatch, toRedesignCandidate } from "./scene-candidate.js";
+import { catalogCheckoutRow } from "./catalog-checkout.js";
 import { getCandidateProducts } from "./candidate-products.js";
 import { applyScenePatch, createRedesignDemoHouse, validateScenePatch } from "../redesign/index.js";
 
@@ -142,4 +143,18 @@ test("live product patches reject provider-supplied identity, facts, dimensions 
       assert.throws(() => applyScenePatch(house, patch, options), /Shopify/);
     }
   }
+});
+
+test("saved catalog pieces recover exact Shopify references and keep their saved quantities", () => {
+  const row = { id: "saved-table", productId: "walnut-table", quantity: 2 };
+  const updated = catalogCheckoutRow(row);
+  assert.deepEqual(updated.shopify, { sellerDomain: "sundays-company-production.myshopify.com", variantId: "gid://shopify/ProductVariant/41588406419527" });
+  assert.equal(updated.quantity, 2);
+  const previous = { ...updated, savedPrice: { priceMinor: 67500, currency: "USD" } };
+  assert.deepEqual(catalogCheckoutRow({ id: row.id, productId: row.productId }, previous), previous);
+  for (const changed of [
+    { ...row, url: "https://unrelated.example/products/table?variant=41588406419527" },
+    { ...row, url: "https://www.sundays-company.com/pages/help?variant=41588406419527" },
+    { ...row, variantId: "gid://shopify/ProductVariant/999" },
+  ]) assert.equal(catalogCheckoutRow(changed), changed);
 });

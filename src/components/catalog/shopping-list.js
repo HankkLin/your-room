@@ -64,7 +64,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       if (href) panel.append(externalLink(href, label, "text-btn"));
     }
     if (attempt.continueUrl)
-      panel.append(externalLink(attempt.continueUrl, "Continue to checkout", "primary"));
+      panel.append(externalLink(attempt.continueUrl, "Continue to Shopify checkout", "primary"));
     return panel;
   }
 
@@ -74,17 +74,17 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       ? product?.title || row.name || "Saved Shopify piece"
       : product?.name || row.name || "Saved piece";
     const merchant = live
-      ? product?.merchant || row.shopify.sellerDomain
+      ? product?.merchant || row.merchant || row.shopify.sellerDomain
       : product?.store || product?.merchant || row.merchant || row.store || "Merchant";
-    const variant = live ? product?.variantTitle : product?.variant || row.variant;
+    const variant = live ? product?.variantTitle ?? row.variant : product?.variant || row.variant;
     const numericPrice = Number(product?.price ?? row.price);
     const price = live
       ? formatShopifyMoney(product?.priceMinor, product?.currency)
       : Number.isFinite(numericPrice)
         ? formatUsd(numericPrice)
         : null;
-    const photoUrl = live ? shopifyHttpsUrl(product?.imageUrl) : (product?.photo || row.photo || null);
-    const productUrl = live ? shopifyHttpsUrl(product?.productUrl) : (product?.url || row.url || null);
+    const photoUrl = shopifyHttpsUrl((live ? product?.imageUrl : product?.photo) ?? row.photo);
+    const productUrl = shopifyHttpsUrl((live ? product?.productUrl : product?.url) ?? row.url);
     const card = element("article", "shop-card");
     const photo = element("div", "shop-photo");
     if (photoUrl) {
@@ -126,7 +126,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       footer.append(label);
     }
     if (productUrl)
-      footer.append(externalLink(productUrl, `Shop at ${merchant} ↗`, live ? "text-btn" : "primary"));
+      footer.append(externalLink(productUrl, `View product at ${merchant} ↗`, "text-btn"));
     const remove = element("button", "text-btn", "Remove");
     remove.type = "button";
     remove.dataset.unsave = row.id;

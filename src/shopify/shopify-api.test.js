@@ -290,6 +290,8 @@ test("checkout stops for unavailable variants and protects checkout capabilities
   const badResponses = [
     () => toolResponse(checkoutDocument({ line_items: [{ item: { id: otherRef.variantId }, quantity: 1 }] })),
     () => toolResponse(checkoutDocument({ status: "completed" })),
+    () => toolResponse(checkoutDocument({ continue_url: productUrl })),
+    () => toolResponse(checkoutDocument({ continue_url: "https://other.example/checkouts/wrong" })),
     () => toolResponse(checkoutDocument({ continue_url: `http://oak.example/private-checkout-id` })),
     () => toolResponse(undefined, {
       isError: true,
@@ -445,4 +447,14 @@ test("Shop MCP HTTP throttling, tool throttling, malformed data and timeouts ret
   const timeout = await requestApi((_, { signal }) => delay(100, null, { signal }), { timeoutMs: 5 });
   assert.equal(timeout.statusCode, 504);
   assert.match(timeout.json.error, /too long/);
+});
+
+test("Shop Pay and verified merchant checkouts can be shared with the buyer", async () => {
+  for (const continue_url of ["https://shop.app/checkouts/example", "https://oak-and-co.myshopify.com/checkouts/cn/example", checkoutUrl]) {
+    const result = await requestApi((_, options) => JSON.parse(options.body).params.name === "get_product"
+      ? toolResponse({ product: catalogProduct(catalogVariant()) })
+      : toolResponse(checkoutDocument({ continue_url })), { route: "checkout", input: { ref } });
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.json.continueUrl, continue_url);
+  }
 });

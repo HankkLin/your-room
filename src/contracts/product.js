@@ -88,3 +88,24 @@ export function validCandidateRow(product) {
     (product.dimensions == null || ["width", "height", "depth"].every((axis) =>
       Number.isFinite(product.dimensions[axis]) && product.dimensions[axis] > 0)));
 }
+
+/**
+ * Extract a numeric Shopify variant ID from a merchant product URL query string
+ * (e.g. `https://www.sundays-company.com/...?variant=41588223803463` -> `gid://shopify/ProductVariant/41588223803463`).
+ *
+ * @param {string | null | undefined} url
+ * @returns {string | null}
+ */
+export function extractVariantIdFromProductUrl(url) {
+  if (typeof url !== "string" || !url.trim()) return null;
+  try {
+    const parsed = new URL(url);
+    const rawVariant = parsed.searchParams.get("variant");
+    if (rawVariant && /^\d+$/.test(rawVariant)) {
+      return `gid://shopify/ProductVariant/${rawVariant}`;
+    }
+  } catch {
+    // Ignore malformed URLs
+  }
+  return null;
+}
