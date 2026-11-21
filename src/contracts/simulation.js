@@ -212,6 +212,9 @@ export function formatFindingHeadline(finding = {}) {
   }
   const type = String(finding.type || "INFO").toUpperCase();
   const roomLabel = formatLocationLabel(finding.location, finding.roomId);
+  if (type === "TV_TOO_FAR" && Number.isFinite(finding.evidence?.modeledTvWidthMeters)) {
+    return "TV appears too small from this seat";
+  }
   if (type === "CONGESTION" && roomLabel) {
     return `${roomLabel} congestion`;
   }
@@ -264,7 +267,12 @@ export function formatFindingSummaryText(finding = {}) {
     case "TV_BAD_ANGLE":
       return "Seating faces the TV at an uncomfortable off-axis viewing angle.";
     case "TV_TOO_FAR":
-      return "Primary seating is positioned beyond comfortable TV viewing distance.";
+      if (Number.isFinite(ev.modeledTvWidthMeters) && Number.isFinite(ev.apparentScreenAngleDegrees) && Number.isFinite(ev.minScreenAngleDegrees)) {
+        return `At ${ev.distanceMeters} m, the modeled TV width of ${ev.modeledTvWidthMeters} m spans approximately ${ev.apparentScreenAngleDegrees}° from this seat. The simulation target is ${ev.minScreenAngleDegrees}°.`;
+      }
+      return Number.isFinite(ev.distanceMeters) && Number.isFinite(ev.maxDistanceMeters)
+        ? `The seat is ${ev.distanceMeters} m from the TV, beyond the ${ev.maxDistanceMeters} m distance check. Screen size is unknown.`
+        : "The seat exceeds the simulation’s TV viewing distance check.";
     case "EVACUATION_BOTTLENECK":
       return `Simultaneous occupants converge on ${ev.exitDoorId || "exterior exit"} during evacuation.`;
     case "NO_EVACUATION_PATH":

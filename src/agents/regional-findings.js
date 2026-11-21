@@ -30,7 +30,11 @@ const schemas = {
   EVACUATION_BOTTLENECK: { exitDoorId: text, exitDoorWidthMeters: nonnegative, convergingAgentCount: nonnegative,
     collisionCountNearExit: nonnegative, estimatedQueueDelaySeconds: nonnegative },
 };
+const screenSize = { modeledTvWidthMeters: nonnegative, apparentScreenAngleDegrees: nonnegative, minScreenAngleDegrees: nonnegative };
 const optional = {
+  TV_OCCLUDED: screenSize,
+  TV_BAD_ANGLE: screenSize,
+  TV_TOO_FAR: screenSize,
   LONG_PATH: { doorsTraversed: strings },
   CONGESTION: { agentIds: strings },
   PRIVACY_SIGHTLINE: { observerPosition: pair, targetPosition: pair, exposedSources: strings },

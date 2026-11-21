@@ -21,6 +21,24 @@ import {
   mockSimulationResult,
 } from "./demo-simulation-mock.js";
 
+test("unified finding text names only households linked by measured evidence", () => {
+  const personas = [{ id: "a", name: "Sam <A>" }, { id: "b", name: "Jordan" }];
+  const findings = [
+    { type: "NOISE_CONFLICT", agentId: "a", evidence: { workerAgentId: "a", sourceAgentId: "b", overlapMinutes: 15 } },
+    { type: "NO_PATH", agentId: "absent", toRoomId: "office", evidence: { reason: "NO_PATH" } },
+    { type: "CONGESTION", evidence: { agentIds: ["b", "unknown-guest"], durationSeconds: 42 } },
+    { type: "TV_TOO_FAR", evidence: { modeledTvWidthMeters: 0.45, apparentScreenAngleDegrees: 8.6, minScreenAngleDegrees: 20, distanceMeters: 3 } },
+    { type: "TV_TOO_FAR", evidence: { maxDistanceMeters: 4.8, distanceMeters: 7 } },
+  ];
+  const html = renderResultsDeckMarkup({ findings }, personas);
+  assert.match(html, /Sam &lt;A&gt;’s quiet work.+15 minutes/);
+  assert.match(html, /Jordan encountered congestion during a 42-second episode/);
+  assert.equal((html.match(/twin-household-impact/g) || []).length, 2);
+  assert.match(html, /modeled TV width of 0.45 m spans approximately 8.6°/);
+  assert.match(html, /7 m from the TV.+4.8 m distance check.+Screen size is unknown/);
+  assert.doesNotMatch(renderResultsDeckMarkup({ findings, isMockData: true }, personas), /twin-household-impact/);
+});
+
 test("Test 1 — Scenario selector renders all four required demo scenarios", () => {
   const html = renderControlPanelMarkup({});
   for (const scenario of DEMO_SCENARIOS) {
