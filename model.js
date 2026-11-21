@@ -408,7 +408,10 @@ export function footprintsOverlap(a, b, clearance = 0) {
 
 export function getSpend(items) {
   return items.reduce(
-    (total, item) => (item.owned ? total : total + (item.price ?? 0)),
+    (total, item) =>
+      item.owned || item.locked || item.type === "fixed"
+        ? total
+        : total + (item.price ?? 0),
     0,
   );
 }
@@ -558,7 +561,7 @@ export function autoStyle(state, overrides) {
     state,
     overrides,
   );
-  const owned = state.items.filter((item) => item.owned);
+  const owned = state.items.filter((item) => item.owned || item.locked);
   const items = [...owned];
   const room = state.room ?? ROOM;
   const use = (state.roomName || "") + " " + (state.brief || "");

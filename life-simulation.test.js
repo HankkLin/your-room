@@ -20,6 +20,7 @@ import {
   simulateHouse,
 } from "./src/simulation/index.js";
 import { importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
+import { captureStudioLayout, runStudioReplay } from "./src/simulation/studio-replay.js";
 
 function createTwoRoomTestHouse({ withDoor = true, gapWidth = null } = {}) {
   const walls = [
@@ -714,4 +715,68 @@ test("replaying one approved household shows that moving a sofa restores the rou
   assert.deepEqual(input, original);
   assert.deepEqual(afterScene.fixtures, beforeScene.fixtures);
   assert(afterScene.fixtures.every(({ locked }) => locked));
+});
+
+test("Studio capture uses current poses while retaining canonical locked fixtures and room IDs", () => {
+  const { house } = importSampleFloorplan();
+  const fixture = house.fixtures.find(({ kind }) => kind === "bathtub");
+  const chair = {
+    id: "studio-chair", kind: "chair", owned: true,
+    roomId: "living-room", x: 1.4, z: 7.6, width: 2, depth: 0.6, height: 0.85, rotation: 30,
+  };
+  const rug = { ...chair, id: "studio-rug", kind: "rug", owned: false, height: 0.02 };
+  const items = [{ ...fixture, fromHouseFixture: true }, chair, rug];
+  const staleHouse = { ...house, items: [{ ...chair, x: 8 }] };
+  const captured = captureStudioLayout(staleHouse, items);
+
+  assert.deepEqual(captured.rooms.map(({ id }) => id), house.rooms.map(({ id }) => id));
+  assert.equal(captured.fixtures.length, house.fixtures.length);
+  assert.deepEqual(captured.fixtures.find(({ id }) => id === fixture.id).position, fixture.position);
+  assert(captured.fixtures.every(({ locked }) => locked));
+  assert(!captured.objects.some(({ id }) => id === fixture.id));
+  assert(!Object.hasOwn(captured, "items"));
+  const obstacle = captured.objects.find(({ id }) => id === chair.id);
+  assert.equal(obstacle.roomId, "bedroom");
+  assert.equal(obstacle.type, "existing");
+  assert.deepEqual(obstacle.position, [1.4, 0, 7.6]);
+  assert.equal(obstacle.rotation, 30);
+  assert(Math.abs(obstacle.footprint[1][0] - 2.116) < 0.001);
+  assert(Math.abs(obstacle.footprint[1][1] - 6.840) < 0.001);
+  assert.equal(captured.objects.find(({ id }) => id === rug.id).passable, true);
+
+  chair.x = 8;
+  assert.deepEqual(obstacle.position, [1.4, 0, 7.6]);
+  assert.equal(captureStudioLayout(null, []), null);
+});
+
+test("Studio replay reports the restored route after a committed sofa move", async () => {
+  const { house } = importSampleFloorplan();
+  const sofa = {
+    id: "studio-sofa", kind: "sofa", owned: true,
+    x: 3.2, z: 6, width: 2.1, height: 0.85, depth: 0.9, rotation: 0,
+  };
+  const profile = {
+    ageGroup: "adult", preferences: [], dislikes: [],
+    needs: { privacy: 0.6, quiet: 0.6, accessibility: 0.2, daylight: 0.6, social: 0.6 },
+  };
+  const personas = [
+    {
+      ...profile, id: "alex", name: "Alex", schedule: [
+        { activity: "sleep", roomId: "bedroom", startMinute: 470, endMinute: 485 },
+        { activity: "cook", roomId: "kitchen", windowStartMinute: 480, windowEndMinute: 515, durationMinutes: 15 },
+      ],
+    },
+    { ...profile, id: "guest", name: "Guest", schedule: [] },
+  ];
+  const beforeScene = captureStudioLayout(house, [sofa]);
+  const afterScene = captureStudioLayout(house, [{ ...sofa, x: 1.4, z: 7.6 }]);
+  const { before, after } = await runStudioReplay({ beforeScene, afterScene, personas, rooms: house.rooms });
+
+  assert.equal(before.summary.pathFailures, 1);
+  assert.equal(after.summary.pathFailures, 0);
+  assert.deepEqual(before.agents.map(({ id }) => id), ["alex"]);
+  assert.equal(before.findings.find(({ type }) => type === FINDING_TYPES.NO_PATH).toRoomId, "kitchen");
+  assert(after.events.some(({ type, roomId }) => type === SIMULATION_EVENT_TYPES.ARRIVED && roomId === "kitchen"));
+  const starts = ({ events }) => events.filter(({ type }) => type === SIMULATION_EVENT_TYPES.SCHEDULE_START);
+  assert.deepEqual(starts(before), starts(after));
 });

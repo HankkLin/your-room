@@ -1,6 +1,7 @@
 export function listPersonaRooms(project) {
-  if (project.importedHouse?.rooms?.length) {
-    return project.importedHouse.rooms.map(({ id, name }, index) => ({
+  const rooms = (project.importedHouse || project.house)?.rooms;
+  if (rooms?.length) {
+    return rooms.map(({ id, name }, index) => ({
       id,
       name: String(name ?? '').trim().slice(0, 80) || `Room ${index + 1}`,
     }));

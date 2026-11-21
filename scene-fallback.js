@@ -1,5 +1,6 @@
 import { ROOM, styles } from './model.js';
 import { constrainToRoom, footprintCorners, normalizeArchitecture, roomWalls, wallOpenings } from './scene-architecture.js';
+import { constrainToHouse, getWallOpeningsInHouse, isObjectLocked, normalizeHouse } from './house-model.js';
 
 // Keep editing available on devices where the browser cannot create a WebGL context.
 export function createPlanScene(host, { onSelect, onMove }) {
@@ -8,6 +9,7 @@ export function createPlanScene(host, { onSelect, onMove }) {
   host.replaceChildren(canvas);
   const ctx = canvas.getContext('2d');
   let room = normalizeArchitecture(ROOM);
+  let house = null;
   let items = [];
   let selectedId = null;
   let style = styles['Warm minimal'];
@@ -82,14 +84,62 @@ export function createPlanScene(host, { onSelect, onMove }) {
     ctx.setTransform(dpi, 0, 0, dpi, 0, 0);
     ctx.fillStyle = '#ece9de';
     ctx.fillRect(0, 0, width, height);
-    scale = Math.min((width - 46) / room.width, (height - 60) / room.depth) * zoom;
+    const spanW = house ? house.bounds.width : room.width;
+    const spanD = house ? house.bounds.depth : room.depth;
+    const centerX = house ? house.bounds.centerX : 0;
+    const centerZ = house ? house.bounds.centerZ : 0;
+    scale = Math.min((width - 46) / spanW, (height - 60) / spanD) * zoom;
     ctx.save();
-    ctx.translate(width / 2, height / 2);
+    ctx.translate(width / 2 - centerX * scale, height / 2 - centerZ * scale);
     ctx.scale(scale, scale);
-    drawFloor();
-    for (const wall of roomWalls(room)) drawWall(wall);
+    if (house) {
+      drawHouse();
+    } else {
+      drawFloor();
+      for (const wall of roomWalls(room)) drawWall(wall);
+    }
     items.forEach(furniture);
     ctx.restore();
+  }
+
+  function drawHouse() {
+    for (const r of house.rooms) {
+      const [[fx, fz], ...rest] = r.polygon;
+      const path = new Path2D();
+      path.moveTo(fx, fz);
+      for (const [x, z] of rest) path.lineTo(x, z);
+      path.closePath();
+      ctx.fillStyle = r.floorFinish === 'stone' ? '#c3beb5' : r.floorFinish === 'walnut' ? '#967255' : style.floor;
+      ctx.fill(path);
+      ctx.save();
+      ctx.fillStyle = '#434139b0';
+      ctx.font = '600 0.24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(r.name, r.bounds.centerX, r.bounds.centerZ);
+      ctx.restore();
+    }
+    for (const wall of house.walls) {
+      ctx.save();
+      ctx.translate(wall.cx, wall.cz);
+      ctx.rotate(-wall.angle);
+      ctx.lineWidth = wall.exterior ? 0.085 : 0.065;
+      let left = -wall.length / 2;
+      const stroke = (start, end, color) => {
+        if (end - start <= 0.005) return;
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(start, 0);
+        ctx.lineTo(end, 0);
+        ctx.stroke();
+      };
+      for (const hole of getWallOpeningsInHouse(house, wall)) {
+        stroke(left, hole.left, '#57574b');
+        stroke(hole.left, hole.right, hole.kind === 'window' ? '#619298' : '#b49664');
+        left = hole.right;
+      }
+      stroke(left, wall.length / 2, '#57574b');
+      ctx.restore();
+    }
   }
 
   function drawFloor() {
@@ -158,7 +208,12 @@ export function createPlanScene(host, { onSelect, onMove }) {
 
   function pointer(event) {
     const rect = canvas.getBoundingClientRect();
-    return { x:(event.clientX - rect.left - width / 2) / scale, z:(event.clientY - rect.top - height / 2) / scale };
+    const centerX = house ? house.bounds.centerX : 0;
+    const centerZ = house ? house.bounds.centerZ : 0;
+    return {
+      x: (event.clientX - rect.left - width / 2) / scale + centerX,
+      z: (event.clientY - rect.top - height / 2) / scale + centerZ,
+    };
   }
   function hit(item, point) {
     const theta = item.rotation * Math.PI / 180;
@@ -173,7 +228,7 @@ export function createPlanScene(host, { onSelect, onMove }) {
     const point = pointer(e);
     const item = items.findLast(i => hit(i, point));
     onSelect(item?.id ?? null);
-    if (!item) return;
+    if (!item || isObjectLocked(item)) return;
     const theta = item.rotation * Math.PI / 180;
     const cos = Math.abs(Math.cos(theta));
     const sin = Math.abs(Math.sin(theta));
@@ -187,7 +242,9 @@ export function createPlanScene(host, { onSelect, onMove }) {
   canvas.onpointermove = e => {
     if (drag?.pointer !== e.pointerId) return;
     const point = pointer(e);
-    [drag.x, drag.z] = constrainToRoom(room, point.x + drag.offsetX, point.z + drag.offsetZ, drag.halfX, drag.halfZ);
+    [drag.x, drag.z] = house
+      ? constrainToHouse(house, point.x + drag.offsetX, point.z + drag.offsetZ, drag.halfX, drag.halfZ)
+      : constrainToRoom(room, point.x + drag.offsetX, point.z + drag.offsetZ, drag.halfX, drag.halfZ);
     draw();
   };
   canvas.onpointerup = e => {
@@ -202,8 +259,9 @@ export function createPlanScene(host, { onSelect, onMove }) {
   resize.observe(host);
   draw();
   return {
-    update(nextItems, id, styleName, nextRoom = ROOM) {
+    update(nextItems, id, styleName, nextRoom = ROOM, nextHouse = null) {
       room = normalizeArchitecture(nextRoom);
+      house = nextHouse ? (nextHouse.bounds ? nextHouse : normalizeHouse(nextHouse)) : null;
       items = [...nextItems].sort((a,b) => Number(b.kind === 'rug') - Number(a.kind === 'rug'));
       selectedId = id;
       style = styles[styleName] || style;

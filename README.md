@@ -25,15 +25,15 @@ For live household generation, copy `.env.example` to `.env.local` and set `GEMI
 - `src/contracts/persona.js` validates household schedules at generation and save. The Gemini adapter runs on the local server, and approved households are saved in the browser with the project.
 - Flexible activities fit into the earliest free slot inside their window. The resolver reserves fixed activities first and places flexible activities by earliest window opening, breaking ties in entry order. An activity must fit for its full duration. Profiles with no routine stay saved and have no activity in the daily replay.
 
-### Whole-home integration incomplete
+### Studio replay
 
-Confirmed floor plans supply the canonical room IDs used in Household. Room settings edit the studio preview and preserve the imported geometry and IDs. The studio still renders one primary room. A confirmed replacement floor plan starts a new household.
+Confirm an imported floor plan and save a Household with scheduled activities. In Design or Explore room, choose **Capture baseline**. Move, rotate, or remove furniture in the studio, then choose **Compare current layout**. The panel reports measured path failures, collisions, and congestion for both layouts. A baseline lasts for the current tab session. Saving a different routine or replacing the floor plan requires a new baseline.
 
-`compareHouseholdLayouts` in `src/persona/compare-household-layouts.js` resolves the approved activities once and passes the same times and destination IDs to both runs. The real simulator in `src/simulation/` tests an imported Bedroom-to-Kitchen trip with a sofa blocking the bedroom door, then reruns the same schedule after moving the sofa. Whole-home rendering and launching replay from the studio remain open.
+Both runs use the same approved activities, resolved times, and canonical room IDs. Each layout captures the actual world-space furniture currently in the studio, with the imported walls, doors, and locked fixtures. Room settings preserve the confirmed whole-home geometry. A confirmed replacement floor plan starts a new household.
 
 ## Verification
 
-Run `npm test` for model, floor-plan, simulation, contract, and API tests, `npm run test:e2e` for browser flows, and `npm run build` for the production bundle. Run `node --test life-simulation.test.js` to check the real simulator and before/after replay in isolation. The automated tests run without Gemini credentials. To try the integrated Household flow, confirm the sample floor plan, load the sample household, choose a room such as Kitchen for an activity, and save. Edit the project name in Room settings, reload, then open Household to confirm the destination persists. The browser tests use Chrome or the installed Chromium channel selected by `PLAYWRIGHT_CHANNEL`.
+Run `npm test` for model, floor-plan, simulation, contract, and API tests, `npm run test:e2e` for browser flows, and `npm run build` for the production bundle. Run `node --test life-simulation.test.js` to verify the simulator and replay in isolation. The browser replay test uses the imported sample home and the real simulator. It removes a movable sofa and verifies that the saved Bedroom-to-Kitchen trip changes from blocked to passable. The automated tests run without Gemini credentials. Browser tests use Chrome or the installed Chromium channel selected by `PLAYWRIGHT_CHANNEL`.
 
 [Asset credits](public/assets/CREDITS.md)
 

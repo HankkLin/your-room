@@ -35,6 +35,8 @@ export const FIXTURE_KINDS = Object.freeze([
   "kitchen_counter",
   "stove",
   "closet",
+  "refrigerator",
+  "ac",
 ]);
 
 export const ROOM_KINDS = Object.freeze([
@@ -48,6 +50,36 @@ export const ROOM_KINDS = Object.freeze([
   "closet",
   "other",
 ]);
+
+export const ALLOWED_PATCH_OPS = new Set([
+  "move",
+  "rotate",
+  "add",
+  "remove",
+  "replace",
+  "lock",
+  "unlock",
+]);
+
+export const IMMUTABLE_LOCKED_OPS = new Set([
+  "move",
+  "rotate",
+  "remove",
+  "replace",
+]);
+
+const FIXTURE_COLORS = {
+  toilet: "#f2efe9",
+  sink: "#d9d0c1",
+  bathtub: "#f3f0ea",
+  shower: "#dce5e7",
+  kitchen_counter: "#c5ab8b",
+  counter: "#c5ab8b",
+  stove: "#515356",
+  closet: "#b99d7c",
+  refrigerator: "#c8ccd0",
+  ac: "#f4f3ee",
+};
 
 /**
  * Normalize shorthand calibration source labels into canonical enum values.
@@ -92,4 +124,82 @@ export function houseFixturesAsSceneObjects(house) {
     },
     locked: true,
   }));
+}
+
+/**
+ * Determine whether a scene object or architectural element is locked.
+ * @param {object | null | undefined} target
+ * @returns {boolean}
+ */
+export function isObjectLocked(target) {
+  if (!target) return false;
+  return Boolean(target.locked || target.type === "fixed");
+}
+
+/**
+ * Check whether an operation is permitted on a scene object.
+ * Fixed architectural fixtures cannot be unlocked or mutated automatically.
+ * @param {object | null | undefined} target
+ * @param {string} operationType
+ * @returns {boolean}
+ */
+export function canModifyObject(target, operationType) {
+  if (!ALLOWED_PATCH_OPS.has(operationType)) return false;
+  if (!target) return operationType === "add";
+  if (target.type === "fixed") return false;
+  if (isObjectLocked(target) && IMMUTABLE_LOCKED_OPS.has(operationType)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Normalize either a canonical FixedFixture / SceneObject (position: [x,y,z], rotation: [0,yawRad,0])
+ * or a Stillroom flat item (x, z, rotation in degrees) into a unified renderable SceneObject.
+ * @param {object} item
+ * @returns {object}
+ */
+export function toSceneObject(item) {
+  const x = Number(item.x ?? item.position?.[0]) || 0;
+  const y = Number(item.elevation ?? item.y ?? item.position?.[1]) || 0;
+  const z = Number(item.z ?? item.position?.[2]) || 0;
+  const width = Math.max(0.05, Number(item.width ?? item.dimensions?.width) || 0.6);
+  const height = Math.max(0.008, Number(item.height ?? item.dimensions?.height) || 0.75);
+  const depth = Math.max(0.05, Number(item.depth ?? item.dimensions?.depth) || 0.6);
+
+  let deg = 0;
+  let yawRad = 0;
+  if (Array.isArray(item.rotation)) {
+    yawRad = Number(item.rotation[1]) || 0;
+    deg = (yawRad * 180) / Math.PI;
+  } else {
+    deg = Number(item.rotation) || 0;
+    yawRad = (deg * Math.PI) / 180;
+  }
+
+  const type =
+    item.type || (item.locked ? "fixed" : item.owned ? "existing" : "shopify");
+  const locked = Boolean(item.locked || type === "fixed");
+  const kind = item.kind || "console";
+
+  return {
+    ...item,
+    kind,
+    type,
+    locked,
+    owned: Boolean(item.owned || type === "fixed"),
+    price: locked || item.owned ? 0 : (Number(item.price) || 0),
+    color: item.color || FIXTURE_COLORS[kind] || "#c5b69e",
+    x,
+    y,
+    elevation: y,
+    z,
+    width,
+    height,
+    depth,
+    rotation: deg,
+    position: [x, y, z],
+    rotationRadians: [0, yawRad, 0],
+    dimensions: { width, height, depth },
+  };
 }
