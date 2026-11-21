@@ -385,6 +385,12 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
     </div>`;
   }
 
+  const measuredOutcome = {
+    IMPROVED: "The replay measured an improvement.",
+    MIXED: "The replay measured both improvements and regressions.",
+    REGRESSION: "The replay measured a regression.",
+    NO_CHANGE: "The replay measured no change.",
+  }[state.redesignStatus];
   const fallbackBadge = state.isFallbackRedesign
     ? '<span class="twin-fallback-pill" title="Deterministic ScenePatch generated when Gemini was unavailable">Deterministic fallback</span>'
     : "";
@@ -394,6 +400,7 @@ export function renderRedesignMarkup(redesignActions = [], viewState = {}) {
       <span class="section-label">Gemini redesign</span>
       ${fallbackBadge}
     </div>
+    ${measuredOutcome ? `<p id="sim-redesign-outcome">${measuredOutcome}</p>` : ""}
     ${state.redesignMessage ? `<p class="twin-redesign-note">${escapeHtml(state.redesignMessage)}</p>` : ""}
     <ul class="twin-redesign-list" id="sim-redesign-list">
       ${redesignActions

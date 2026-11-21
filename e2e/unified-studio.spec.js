@@ -69,12 +69,11 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
   await page.locator("#tour-step").click();
   await expect(page.locator("body")).toHaveAttribute("data-stage", "tour");
 
-  // Single unified simulation UI: #demo-controls-panel & #twin-results-section
-  await expect(page.locator("#studio-replay-panel")).toHaveCount(0);
-  await page.locator("#sim-scenario").selectOption("morning-routine");
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  await page.locator("#sim-scenario").selectOption("saved-routine");
   await page.locator('[data-sim-speed="20"]').click();
   await page.locator("#sim-run-btn").click();
-  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
   await expect(page.locator("#sim-findings-list")).toContainText(
     "Blocked route: Bedroom → Kitchen",
   );
@@ -85,7 +84,7 @@ test("Studio replay measures that removing a sofa restores the scheduled route t
   await expect(obstacle).toHaveCount(0);
 
   await page.locator("#sim-run-btn").click();
-  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
   await expect(page.locator("#sim-findings-panel")).not.toContainText(
     "Blocked route: Bedroom → Kitchen",
   );

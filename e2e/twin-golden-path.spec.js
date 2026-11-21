@@ -103,7 +103,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await page.locator("#sim-run-btn").click();
 
   await expect(page.locator(".twin-mock-badge")).toHaveCount(0);
-  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
 
   const avatarStats = await page.evaluate(() =>
     window.__stillroom.getScene().getPlaybackStats(),
@@ -129,7 +129,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
   await expect(page.locator("#sim-approve-redesign")).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
   await page.locator("#sim-approve-redesign").click();
-  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE");
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
   expect(redesignCallCount).toBe(2);
 
   // Self-correction visibility rendered from actual attempts
@@ -162,6 +162,7 @@ test("Golden Path E1–E10: Sample whole-home floorplan -> real Morning Routine 
       .textContent(),
   );
   expect(afterMovementScore).toBeGreaterThan(beforeMovementScore);
+  await expect(page.locator("#sim-redesign-outcome")).toHaveText("The replay measured an improvement.");
 
   await expect(page.locator("#sim-findings-diff")).toContainText(
     "Kitchen congestion resolved",

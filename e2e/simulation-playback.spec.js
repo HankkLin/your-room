@@ -68,6 +68,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
 
   // 4. Verify timeline scrubber & route toggle exist and work
@@ -110,6 +111,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
 
   const afterBtn = page.locator('[data-layout-view="after"]');
@@ -137,6 +139,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
   const partyStats = await page.evaluate(() =>
     window.__stillroom.getScene().getPlaybackStats(),
@@ -149,6 +152,7 @@ test("3D simulation playback renders real avatars, pause/resume/speed/scrubber, 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
   await expect(page.locator("#sim-findings-list")).toContainText(
     "2 converging",

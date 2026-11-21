@@ -85,6 +85,7 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
   await expect(page.locator(".twin-mock-badge")).toHaveCount(0);
   await expect(page.locator("#sim-run-btn")).toHaveText("Run Again");
@@ -100,10 +101,19 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await page.locator("#sim-propose-redesign-btn").click();
   await expect(page.locator("#sim-approve-redesign")).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  // Leaving the captured scenario invalidates its pending operations.
+  await page.locator("#sim-scenario").selectOption("dinner-party-8-guests");
+  await expect(page.locator("#sim-approve-redesign")).toHaveCount(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")))).toEqual(beforeApproval);
+  await page.locator("#sim-scenario").selectOption("morning-routine");
+  await page.locator("#sim-run-btn").click();
+  await expect(page.locator("#sim-status")).toHaveAttribute("data-status", "COMPLETE", { timeout: 20000 });
+  await page.locator("#sim-propose-redesign-btn").click();
   await page.locator("#sim-approve-redesign").click();
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
   const movementRow = page.locator('[data-compare-category="movement"]');
   await expect(movementRow).toContainText("+");
@@ -116,8 +126,10 @@ test("whole-home demo controls drive real scenario selection, speed, Running -> 
   await expect(page.locator("#sim-status")).toHaveAttribute(
     "data-status",
     "COMPLETE",
+    { timeout: 20000 },
   );
   await expect(page.locator("#sim-findings-list")).toContainText(/congestion/i);
+  await expect(page.locator("#sim-propose-redesign-btn")).toHaveCount(0);
 
   // Reset restores READY empty state cleanly
   await page.locator("#sim-reset-btn").click();

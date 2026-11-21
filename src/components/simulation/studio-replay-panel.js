@@ -178,7 +178,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems, co
     const { house, items, personas } = context;
     environment.show(house?.environment?.snapshot ?? null);
     const signature = replaySignature(context);
-    container.hidden = !house;
+    container.hidden = !house || context.inTour === false;
     if (baseline && baseline.signature !== signature) {
       clearBaseline(context, house ? "The saved household or floorplan changed. Capture a new baseline." : "");
     }

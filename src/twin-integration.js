@@ -357,8 +357,13 @@ export function recheckStudioRedesign(outcome, candidateProducts) {
 
 export function describeApprovedHouseholdReplay({ baseline, result, afterHouse, afterItems, displayPersonas, patch }) {
   const comparison = compareEvaluations(baseline.result.evaluation, result.evaluation);
-  const better = comparison.improvedCategories.length || comparison.resolvedFindings.length;
-  const worse = comparison.regressedCategories.length || comparison.introducedFindings.length;
+  const movementDeltas = ["pathFailures", "collisions", "congestionEvents"].map(
+    key => result.summary[key] - baseline.result.summary[key],
+  );
+  const better = movementDeltas.some(delta => delta < 0) || comparison.improvedCategories.length ||
+    comparison.resolvedFindings.length || comparison.improvedFindings.length;
+  const worse = movementDeltas.some(delta => delta > 0) || comparison.regressedCategories.length ||
+    comparison.introducedFindings.length || comparison.worsenedFindings.length;
   const status = better && worse ? "MIXED" : worse ? "REGRESSION" : better ? "IMPROVED" : "NO_CHANGE";
   const replayResult = {
     status, attempts: [], selectedPatch: patch, comparison, delta: comparison.delta,

@@ -190,6 +190,7 @@ const shoppingList = createShoppingList({
 });
 const studioReplay = createStudioReplayPanel($("#studio-replay-panel"), {
   getContext: () => ({
+    inTour: stage === "tour",
     house: state.importedHouse || state.house,
     items: state.items,
     personas: state.personas,
