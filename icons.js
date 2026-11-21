@@ -27,6 +27,13 @@ const shapes = {
   plant:
     '<path d="M7 15h10l-2 6H9zm5 0V8m0 4Q3 12 4 5q7 0 8 7zm0-2q0-7 8-8 0 7-8 8z"/>',
   cabinet: '<path d="M4 3h16v17H4zm0 8h16M6 20v2m12-2v2M10 7h4m-4 8h4"/>',
+  house: '<path d="M3 10.5 12 3l9 7.5M5 9v11h14V9M9 20v-6h6v6"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  toilet: '<path d="M7 4h5v7H7zM6 11h12a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5zm3 5v4h6v-4"/>',
+  sink: '<path d="M4 11h16v3a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-3zm8-7a2 2 0 0 1 2 2v5M8 18v3m8-3v3"/>',
+  refrigerator: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 13h14M8 7v3m0 5v3"/>',
+  stove: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16M8 6.5h.01M12 6.5h.01M16 6.5h.01M8 13h8v5H8z"/>',
+  ac: '<rect x="3" y="6" width="18" height="8" rx="2"/><path d="M6 11h12M7 17c1 1.5 1 2.5 0 4m5-4c1 1.5 1 2.5 0 4m5-4c1 1.5 1 2.5 0 4"/>',
   check: '<path d="m4 12 5 5L20 6"/>',
 };
 export function icon(name) {

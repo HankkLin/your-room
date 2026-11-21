@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/details.css" />
     <link rel="stylesheet" href="/journey.css" />
     <link rel="stylesheet" href="/household.css" />
+    <link rel="stylesheet" href="/studio-replay.css" />
   </head>
   <body>
     <header class="masthead">
@@ -81,9 +82,13 @@
           <p class="subtitle">5.4 × 4.2 m · Living space</p>
         </div>
         <div class="project-actions">
+          <button class="secondary" id="whole-home-btn">Whole-home demo</button>
           <button class="secondary" id="new-project">New room</button>
           <button class="secondary" id="compare-photo" hidden>
             View room photo
+          </button>
+          <button class="secondary" id="view-house-json" hidden>
+            View Parsed Geometry
           </button>
           <span class="save-state" id="save-state"></span
           ><button
@@ -251,6 +256,27 @@
           </section>
         </aside>
       </div>
+      <section class="panel studio-replay" id="studio-replay-panel" aria-labelledby="studio-replay-title" hidden>
+        <header class="studio-replay-header">
+          <h2 id="studio-replay-title">Household replay</h2>
+          <div class="studio-replay-actions">
+            <button class="secondary" id="studio-replay-capture" type="button">Capture baseline</button>
+            <button class="primary" id="studio-replay-compare" type="button" disabled>Compare current layout</button>
+            <button class="text-btn" id="studio-replay-reset" type="button" disabled>Reset baseline</button>
+          </div>
+        </header>
+        <p class="studio-replay-message" id="studio-replay-empty-household" hidden>Save a household with at least one scheduled activity to compare layouts.</p>
+        <p class="studio-replay-message" id="studio-replay-status" role="status"></p>
+        <div class="studio-replay-summary" id="studio-replay-summary" hidden>
+          <table id="studio-replay-results" aria-label="Before and after results">
+            <thead>
+              <tr><th scope="col">Metric</th><th scope="col">Before</th><th scope="col">After</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <ul id="studio-replay-findings" class="studio-replay-findings" aria-label="Blocked routes" hidden></ul>
+        </div>
+      </section>
       <section class="inventory">
         <div class="inventory-head">
           <div>

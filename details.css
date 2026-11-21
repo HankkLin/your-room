@@ -146,6 +146,8 @@ legend { padding: 0; }
 .object-tools button:hover { background:#f3f1e8; }
 .object-tools [data-action=remove]:hover { color:var(--clay-dark); background:var(--clay-wash); }
 .object-tools button svg { width:15px; height:15px; }
+.locked-pill { display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); background:#eeece4; padding:5px 9px; border-radius:999px; }
+.locked-pill svg { width:14px; height:14px; }
 .room-thumb { display:block; width:100%; height:140px; object-fit:contain; background:#eeeae1; border-radius:8px; margin-top:12px; }
 .check-field { display:flex; align-items:center; gap:8px; font-size:13px; margin:12px 0; }
 #setup-error:not(:empty) { color:var(--clay-dark); border-left:2px solid var(--clay); padding-left:8px; margin:12px 0; }

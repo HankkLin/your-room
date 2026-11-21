@@ -109,6 +109,35 @@ test("a live Shopify pick survives reload and opens a checkout link for its vari
   expect(calls).toContainEqual({ endpoint: "checkout", body: { ref } });
 });
 
+test("a live Shopify swap preserves the whole-home room and locked fixtures", async ({ page }) => {
+  await mockShopify(page);
+  await page.goto("/");
+  await page.locator("#whole-home-demo").click();
+  const fixture = page.locator('[data-item="fixture-bathroom-toilet"]');
+  await fixture.click();
+  await expect(page.locator("#objectbar").getByRole("button", { name: "Swap" })).toHaveCount(0);
+  const originalFixture = (await project(page)).items.find(({ id }) => id === "fixture-bathroom-toilet");
+  await page.locator('[data-item="home-lamp"]').click();
+  await page.getByRole("button", { name: "Swap", exact: true }).click();
+  const dialog = await searchForProduct(page);
+  await dialog.getByRole("button", { name: "Swap piece" }).click();
+  await expect(dialog).toBeHidden();
+
+  const updated = await project(page);
+  expect(updated.items).toContainEqual(originalFixture);
+  expect(updated.items.some(({ id }) => id === "home-lamp")).toBe(false);
+  expect(updated.house.objects).toContainEqual(expect.objectContaining({
+    shopify: ref,
+    roomId: "living-room",
+    dimensionsSource: "estimated",
+  }));
+
+  await page.getByRole("button", { name: "Save piece", exact: true }).click();
+  await page.locator("#shop").click();
+  await page.reload();
+  await expect(page.locator(".shop-card").filter({ hasText: lamp.title })).toBeVisible();
+});
+
 test("an unconfirmed Shopify checkout retains the merchant product link", async ({ page }) => {
   const error = "Shopify could not confirm a checkout link. Visit the merchant to continue.";
   const calls = await mockShopify(page, {
