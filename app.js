@@ -44,6 +44,8 @@ import {
   onConfirmedHouseChange,
   setConfirmedImportedHouse,
 } from "./src/spatial/floorplan-importer.js";
+import { mountDemoControls } from "./src/components/simulation/demo-controls.js";
+import { createMockSimulationAdapter } from "./demo-simulation-mock.js";
 
 export { getConfirmedImportedHouse };
 if (typeof window !== "undefined") {
@@ -118,6 +120,32 @@ let stage = "setup";
 let toastTimer;
 let scene;
 const dialog = $("#dialog");
+let simulationAdapter = null;
+const demoControls = mountDemoControls({
+  controlHost: $("#demo-controls-panel"),
+  resultsHost: $("#twin-results-section"),
+  onRunSimulation(scenarioId) {
+    simulationAdapter?.run?.(scenarioId, {
+      house: activeHouse(),
+      items: state.items,
+      personas: state.personas || [],
+    });
+  },
+  onPauseSimulation() {
+    simulationAdapter?.pause?.();
+  },
+  onResetSimulation() {
+    simulationAdapter?.reset?.();
+  },
+  onSimulationSpeedChange(multiplier) {
+    simulationAdapter?.setSpeed?.(multiplier);
+  },
+});
+simulationAdapter = createMockSimulationAdapter({
+  onStateChange(patch) {
+    demoControls.setState(patch);
+  },
+});
 const householdPage = createHouseholdPage($("#household-page"), {
   onSave(personas) {
     state = { ...state, personas };
@@ -265,6 +293,8 @@ function render() {
     '<p class="muted">Add a piece or auto-style this room to start.</p>';
   $("#notes").textContent =
     `${state.items.filter((i) => !i.owned && !isObjectLocked(i)).length} suggested · ${currency(getSpend(state.items))} estimated`;
+  demoControls.setPersonas(state.personas || []);
+  demoControls.setVisible(Boolean(house) && ["design", "tour"].includes(stage));
   scene?.update(state.items, selection, state.style, room, house);
   drawPlanPins();
 }
@@ -663,6 +693,7 @@ function markStage(next) {
   $("#design-panel").hidden = next !== "design";
   $("#tour-panel").hidden = next !== "tour";
   $(".inventory").hidden = next !== "tour";
+  demoControls.setVisible(Boolean(activeHouse()) && ["design", "tour"].includes(next));
   updateWalkControls();
 }
 function toggleExpanded(expanded) {
@@ -705,6 +736,7 @@ function navigate(next) {
 function loadWholeHomeDemo() {
   hasProject = true;
   selection = null;
+  simulationAdapter?.reset?.();
   withSyncGuard(() => clearConfirmedImportedHouse());
   commit(createWholeHomeDemoState());
   syncForm();
@@ -728,6 +760,7 @@ function beginSetup(fresh = false) {
         loadWholeHomeDemo();
         return;
       }
+      simulationAdapter?.reset?.();
       hasProject = true;
       const importedHouse = sample ? null : (next.importedHouse ?? null);
       withSyncGuard(() => {
@@ -1194,6 +1227,24 @@ $("#edit-request").onsubmit = (e) => {
 window.__stillroom = {
   getState: () => state,
   getScene: () => scene,
+  simulationUI: demoControls,
+  connectSimulationEngine(engine) {
+    simulationAdapter?.dispose?.();
+    simulationAdapter = engine;
+    demoControls.setState({
+      status: "READY",
+      currentTime: null,
+      findings: [],
+      scores: null,
+      beforeScores: null,
+      afterScores: null,
+      redesignActions: [],
+      errorMessage: null,
+      isMockData: false,
+    });
+    engine?.onStateChange?.((patch) => demoControls.setState(patch));
+    return demoControls;
+  },
 };
 syncForm();
 if (
