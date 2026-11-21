@@ -117,10 +117,16 @@ test("a real room photo produces reviewable owned furniture on mobile", async ({
   ).toBe(false);
 });
 test("photo detection failure keeps manual owned furniture usable", async ({ page }) => {
-  await page.route("**/assets/detector/model.json", (route) => route.fulfill({ status: 503, body: "Unavailable" }));
+  const modelRequest = new Promise((resolve) => page.route("**/assets/detector/model.json", resolve));
   await page.goto("/");
   await page.locator("#room-photo-upload").setInputFiles(photo);
+  const route = await modelRequest;
+  const spinner = page.locator("#detect-status.image-processing");
+  await expect(spinner).toContainText("Loading local photo model");
   await page.locator("#setup-next").click();
+  await expect(spinner).toBeVisible();
+  await route.fulfill({ status: 503, body: "Unavailable" });
+  await expect(spinner).toHaveCount(0);
   await expect(page.locator("#detect-status")).toContainText("could not finish", { timeout: 30000 });
   await page.locator("#owned-kind").selectOption("chair");
   await page.locator("#add-owned").click();

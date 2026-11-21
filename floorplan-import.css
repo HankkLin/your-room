@@ -445,6 +445,10 @@ dialog:has(.fp-json-pre) {
     grid-template-columns: 1fr;
   }
 
+  .fp-inspector:has(.image-processing) {
+    grid-row: 1;
+  }
+
   .fp-viewport-card {
     position: static;
   }

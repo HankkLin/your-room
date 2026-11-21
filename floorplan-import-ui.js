@@ -526,12 +526,16 @@ export function openFloorplanImporter({
   }
 
   function renderInspector() {
-    if (!session || session.status === "loading") {
+    if (session?.status === "unreadable") {
+      return `<section class="fp-card" role="alert"><h2>Could not load floorplan</h2><p>${esc(uiError)}</p></section>`;
+    }
+    if (!session || session.status === "reading" || session.status === "loading") {
+      const reading = session?.status === "reading";
       return (
         '<section class="fp-card" role="status">' +
         '<p class="eyebrow">Gemini 4 spatial analysis</p>' +
-        "<h2>Analyzing floorplan…</h2>" +
-        '<p class="muted" style="margin-top:8px">Extracting room polygons, walls, doors, windows, and locked fixtures.</p>' +
+        `<h2 class="image-processing">${reading ? "Loading floorplan image…" : "Analyzing floorplan…"}</h2>` +
+        (reading ? "" : '<p class="muted" style="margin-top:8px">Extracting room polygons, walls, doors, windows, and locked fixtures.</p>') +
         '<div class="fp-failed-actions">' +
         '<button type="button" class="secondary" id="fp-use-sample">Try Sample Whole-Home Floorplan</button>' +
         "</div>" +
@@ -641,7 +645,9 @@ export function openFloorplanImporter({
           `<img class="fp-stage-image" src="${esc(session.imageUrl)}" alt="Floorplan reference">` +
           renderOverlaySvg() +
           "</div>"
-        : '<p class="muted">Select a floorplan image or try the bundled sample.</p>') +
+        : session?.status === "reading"
+          ? ""
+          : '<p class="muted">Select a floorplan image or try the bundled sample.</p>') +
       "</div>" +
       '<div class="fp-viewport-foot">' +
       '<div class="fp-legend">' +
@@ -676,6 +682,9 @@ export function openFloorplanImporter({
     uiError = "";
     calPointA = null;
     calPointB = null;
+    session = { status: "reading" };
+    lastPreprocessed = null;
+    render();
     try {
       const preprocessed = await preprocessFloorplanFile(file);
       if (!active || token !== requestToken) return;
@@ -703,8 +712,8 @@ export function openFloorplanImporter({
     } catch (err) {
       if (!active || token !== requestToken) return;
       uiError = err?.message || "Could not read floorplan image.";
-      if (!session) loadSample();
-      else render();
+      session = { status: "unreadable" };
+      render();
     }
   }
 

@@ -205,21 +205,18 @@ test("uploaded floorplan without printed scale requires two-point calibration be
 test("gracefully handles Gemini API failure with sample and manual calibration recovery", async ({
   page,
 }) => {
-  await page.route("**/api/floorplan/analyze", async (route) => {
-    await route.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({
-        error: "GEMINI_API_KEY is not configured in .env.local.",
-      }),
-    });
-  });
-
+  const analysisRequest = new Promise((resolve) => page.route("**/api/floorplan/analyze", resolve));
   await page.goto("/");
-  await page
-    .locator("#floorplan-upload")
-    .setInputFiles("public/assets/sample-capture.jpg");
-
+  await page.locator("#floorplan-upload").setInputFiles("public/assets/sample-capture.jpg");
+  const route = await analysisRequest;
+  const spinner = page.locator(".image-processing");
+  await expect(spinner).toHaveText("Analyzing floorplan…");
+  await route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ error: "Analysis unavailable." }),
+  });
+  await expect(spinner).toHaveCount(0);
   await expect(page.locator("#fp-analysis-failed")).toContainText(
     "Analysis failed.",
   );

@@ -395,6 +395,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       '<label class="start-option start-option-photo"><span class="start-symbol">' +
       icon("image") +
       '</span><span><strong>Upload a room photo</strong><small>Review the furniture found in your photo.</small></span><span class="start-arrow">↗</span><input type="file" id="room-photo-upload" accept="image/*"></label>' +
+      photoStatus() +
       '<button class="text-btn sample-photo-link" id="try-sample-photo">Try a sample photo <span aria-hidden="true">→</span></button>' +
       '<label class="start-option start-option-floorplan"><span class="start-symbol">' +
       icon("cube") +
@@ -452,6 +453,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       dims() +
       "</span></div>" +
       capture +
+      photoStatus() +
       '<div class="setup-plan-preview">' +
       drawing(draft.room) +
       '</div><p class="setup-hint">' +
@@ -526,7 +528,13 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       '</div><p id="opening-error" class="setup-error" role="status"></p><div class="opening-actions"><button id="add-door" class="secondary">+ Door</button><button id="add-window" class="secondary">+ Window</button></div></fieldset></section></div>'
     );
   }
+  function photoStatus() {
+    const busy = detection === "reading" || detection === "loading";
+    const text = busy || step === 3 ? statusText() : "";
+    return `<p role="status" id="detect-status" class="${busy ? "image-processing" : ""}">${esc(text)}</p>`;
+  }
   function statusText() {
+    if (detection === "reading") return "Loading room photo…";
     if (detection === "loading")
       return message || "Looking for furniture in your photo…";
     if (detection === "failed")
@@ -634,9 +642,9 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       icon("image") +
       '</span><span><strong>Upload existing furniture photo</strong><small>Auto-detect sofa, table, chairs, bed, or plants.</small></span><span class="start-arrow">↗</span><input type="file" id="furniture-photo-upload" accept="image/*"></label>' +
       "</section>" +
-      '<section class="setup-controls"><p class="eyebrow">Step 3 · Your Furniture</p><h2>Pieces you already own</h2><p class="setup-help">Confirm detected pieces, edit dimensions in meters, or add items you are keeping.</p><p role="status" id="detect-status">' +
-      esc(statusText()) +
-      '</p><div id="setup-inventory">' +
+      '<section class="setup-controls"><p class="eyebrow">Step 3 · Your Furniture</p><h2>Pieces you already own</h2><p class="setup-help">Confirm detected pieces, edit dimensions in meters, or add items you are keeping.</p>' +
+      photoStatus() +
+      '<div id="setup-inventory">' +
       (rows || '<p class="empty-pieces">Your furniture list is empty.</p>') +
       '</div><div class="quick-add"><label class="field">Add a piece<select id="owned-kind">' +
       selectOptions("chair") +
@@ -731,9 +739,10 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
     }
     return found.size;
   }
-  async function detect(file, token) {
+  async function detect(file, token, focus = false) {
     detection = "loading";
     message = "";
+    render(focus);
     try {
       const { detectFurnishings } = await import("./detection.js");
       const list = await detectFurnishings(file, (s) => {
@@ -756,14 +765,23 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
         "Furniture detection could not finish. Add your pieces below or choose another photo.";
     }
     if (step === 3) render();
+    else $("#detect-status")?.remove();
   }
-  async function photo(file) {
+  async function photo(file, furnitureOnly = false) {
     if (!file) return;
     const token = ++photoToken;
     error = "";
+    detection = "reading";
+    render();
     try {
       const result = await readPhoto(file);
-      if (!active || token !== photoToken || !result) return;
+      if (!active || token !== photoToken) return;
+      if (!result) throw Error("Unreadable photo");
+      if (furnitureOnly) {
+        draft.photo = result.url;
+        await detect(file, token);
+        return;
+      }
       draft.additions = draft.additions.filter((i) => !i.detected);
       draft.photo = result.url;
       if (isNew) {
@@ -773,10 +791,11 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
           draft.room.floorFinish = result.floorFinish;
       }
       source = "photo";
-      stepTo(2);
-      void detect(file, token);
+      step = 2;
+      void detect(file, token, true);
     } catch {
       if (active && token === photoToken) {
+        detection = "idle";
         error = "Choose a supported image smaller than 20 MB.";
         render();
       }
@@ -896,6 +915,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
   }
   function launchFloorplanFlow(initialMode, initialFile = null) {
     ++photoToken;
+    detection = "idle";
     openFloorplanImporter({
       host,
       initialMode,
@@ -933,7 +953,10 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       return;
     }
     if (b.id === "try-sample-photo") {
-      b.disabled = true;
+      detection = "reading";
+      error = "";
+      render();
+      $("#try-sample-photo").disabled = true;
       const token = ++photoToken;
       fetch("/assets/sample-capture.jpg")
         .then(async (response) => {
@@ -946,6 +969,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
         })
         .catch(() => {
           if (active && token === photoToken) {
+            detection = "idle";
             error =
               "The sample photo could not load. Upload a room photo or build a custom room.";
             render();
@@ -963,11 +987,11 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
       return;
     }
     if (b.id === "custom-room") {
+      ++photoToken;
+      detection = "idle";
       if (source === "photo" && isNew) {
-        ++photoToken;
         draft.photo = null;
         draft.additions = draft.additions.filter((i) => !i.detected);
-        detection = "idle";
       }
       source = "custom";
       stepTo(2);
@@ -1113,21 +1137,7 @@ export function openSetup({ state, isNew, initialStep = null, onApply, onCancel,
   };
   host.onchange = (e) => {
     if (e.target.id === "room-photo-upload" || e.target.id === "furniture-photo-upload") {
-      const targetStepAfter = e.target.id === "furniture-photo-upload" ? 3 : 2;
-      const file = e.target.files[0];
-      if (targetStepAfter === 3 && file) {
-        const token = ++photoToken;
-        readPhoto(file)
-          .then((res) => {
-            if (!active || token !== photoToken || !res) return;
-            draft.photo = res.url;
-            render();
-            return detect(file, token);
-          })
-          .catch(() => {});
-      } else {
-        void photo(file);
-      }
+      void photo(e.target.files[0], e.target.id === "furniture-photo-upload");
     }
     if (e.target.id === "floorplan-upload" && e.target.files?.[0]) {
       launchFloorplanFlow("upload", e.target.files[0]);
