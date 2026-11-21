@@ -7,6 +7,8 @@ import {
 } from "./room-layout.js";
 import {
   ROOM,
+  catalog,
+  createItem,
   createOwnedItems,
   initialState,
   fitItem,
@@ -15,6 +17,7 @@ import {
 import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
 import { openFloorplanImporter } from "./floorplan-import-ui.js";
+import { toSceneObject } from "./src/contracts/scene.js";
 import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
 import { confirmImportedHouse, importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
 import { createBlockedRouteDemo } from "./src/simulation/studio-replay-demo.js";
@@ -65,6 +68,79 @@ const selectOptions = (kind) =>
   Object.entries(kinds)
     .map(([k, name]) => option(k, name, kind))
     .join("");
+function buildMercerSampleStarterItems() {
+  const byId = (id) => catalog.find((p) => p.id === id);
+  const place = (productId, overrides) => {
+    const product = byId(productId);
+    if (!product) return null;
+    const base = createItem(
+      overrides.name ? { ...product, name: overrides.name } : product,
+      overrides,
+    );
+    return toSceneObject({
+      ...base,
+      roomId: overrides.roomId,
+      type: overrides.owned ? "existing" : "shopify",
+      locked: false,
+    });
+  };
+
+  return [
+    place("stone-table", {
+      id: "kitchen-table-1",
+      roomId: "kitchen",
+      name: "Breakfast Bistro Table",
+      x: 7.25,
+      z: 1.35,
+      rotation: 0,
+    }),
+    place("linen-chair", {
+      id: "kitchen-chair-1",
+      roomId: "kitchen",
+      name: "Kitchen Café Chair",
+      x: 6.42,
+      z: 1.35,
+      rotation: 90,
+    }),
+    place("linen-sofa", {
+      id: "living-sofa-1",
+      roomId: "living-room",
+      x: 2.9,
+      z: 3.25,
+      rotation: 180,
+      owned: true,
+    }),
+    place("oat-rug", {
+      id: "living-rug-1",
+      roomId: "living-room",
+      x: 2.9,
+      z: 2.25,
+      rotation: 0,
+    }),
+    place("brass-lamp", {
+      id: "living-lamp-1",
+      roomId: "living-room",
+      x: 4.5,
+      z: 3.4,
+      rotation: 0,
+    }),
+    place("olive-tree", {
+      id: "living-plant-1",
+      roomId: "living-room",
+      x: 0.65,
+      z: 0.65,
+      rotation: 0,
+    }),
+    place("cream-bed", {
+      id: "bedroom-bed-1",
+      roomId: "bedroom",
+      x: 1.65,
+      z: 7.25,
+      rotation: 0,
+    }),
+  ].filter(Boolean);
+}
+
 function roomDefaults(value = {}) {
   const room = normalizeArchitecture(value);
   return {
@@ -625,7 +701,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       const n = mergeDetection(list || []);
       detection = "done";
       message = n
-        ? "Review the detected pieces. Their initial positions are approximate and can be adjusted in the editor."
+        ? "Review the photo-derived previews. Their dimensions and floor positions are estimated."
         : "No furniture was recognized. Add pieces below or continue with an empty room.";
     } catch {
       if (!active || photoToken !== token) return;
@@ -693,6 +769,10 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
             fitItem(
               {
                 ...item,
+                // A single view estimates the front silhouette. Keep depth at the furniture-type estimate.
+                width: Number.isFinite(hint.aspectRatio) && hint.aspectRatio > 0
+                  ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
+                  : item.width,
                 x: (clamp(hint.x, 0, 1) - 0.5) * draft.room.width,
                 z: (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth,
               },
@@ -703,6 +783,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         items.push({
           ...placed,
           color: hint?.color ?? placed.color,
+          ...(piece.detected && hint ? { photoPreview: true, dimensionsSource: "estimated" } : {}),
           name: piece.name || kinds[piece.kind],
           id: uid(),
         });
@@ -744,7 +825,13 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         render(true);
       },
       onConfirmed(confirmedHouse) {
-        finishFloorplanImport(confirmedHouse);
+        const starterItems =
+          Array.isArray(confirmedHouse.objects) && confirmedHouse.objects.length > 0
+            ? confirmedHouse.objects
+            : confirmedHouse.id === "mercer-apartment-sample"
+              ? buildMercerSampleStarterItems()
+              : [];
+        finishFloorplanImport(confirmedHouse, { items: starterItems });
       },
     });
   }

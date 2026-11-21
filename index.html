@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/details.css" />
     <link rel="stylesheet" href="/journey.css" />
     <link rel="stylesheet" href="/household.css" />
+    <link rel="stylesheet" href="/demo-controls.css" />
     <link rel="stylesheet" href="/studio-replay.css" />
   </head>
   <body>
@@ -60,6 +61,22 @@
           <ul id="household-rooms-list"></ul>
         </section>
       </div>
+      <details class="household-panel household-import" id="household-import">
+        <summary>Import from your agent</summary>
+        <p>Paste your agent’s JSON export or open its file to review the household here.</p>
+        <details class="household-import-format"><summary>Export format and example</summary>
+          <p>Ask your agent for a personas array like this example. Times are minutes after midnight. Omit a member’s ID to create one. For a flexible activity, use windowStartMinute, windowEndMinute and durationMinutes in place of startMinute and endMinute.</p>
+          <p id="household-import-options"></p>
+          <pre id="household-import-example"></pre>
+        </details>
+        <label class="field" for="household-import-json">Agent export JSON</label>
+        <textarea id="household-import-json" rows="4" spellcheck="false"></textarea>
+        <div class="household-buttons">
+          <button class="secondary" id="household-import-paste" type="button">Review pasted JSON</button>
+          <label class="field">Open JSON file<input id="household-import-file" type="file" accept=".json,application/json"></label>
+        </div>
+        <p class="household-status" id="household-import-status" role="status"></p>
+      </details>
       <section id="household-review" aria-labelledby="household-review-title" hidden>
         <header class="household-review-heading">
           <h2 id="household-review-title">Review your household</h2>
@@ -173,6 +190,7 @@
           <div class="objectbar" id="objectbar"></div>
         </section>
         <aside class="sidebar">
+          <section id="demo-controls-panel" hidden></section>
           <section class="panel" id="design-panel">
             <div class="panel-head">
               <span class="eyebrow">Design brief</span>
@@ -219,6 +237,16 @@
               <button type="submit" class="primary" id="generate">
                 <span data-icon="sparkles"></span> Auto-style room
               </button>
+              <section id="household-furnishing" hidden aria-label="Household furnishing">
+                <button id="furnishing-shopify" type="button" class="secondary">Browse Shopify alternatives</button>
+                <button type="button" class="secondary" data-propose>Preview household furnishing</button>
+                <p class="muted" role="status"></p>
+                <div data-preview hidden>
+                  <ul></ul>
+                  <button type="button" class="primary" data-approve>Approve furnishing</button>
+                  <button type="button" class="text-btn" data-discard>Discard proposal</button>
+                </div>
+              </section>
               <p class="design-summary muted" id="notes" role="status"></p>
             </form>
           </section>
@@ -258,13 +286,14 @@
       </div>
       <section class="panel studio-replay" id="studio-replay-panel" aria-labelledby="studio-replay-title" hidden>
         <header class="studio-replay-header">
-          <h2 id="studio-replay-title">Household replay</h2>
+          <h2 id="studio-replay-title">Replay your saved household</h2>
           <div class="studio-replay-actions">
             <button class="secondary" id="studio-replay-capture" type="button">Capture baseline</button>
             <button class="primary" id="studio-replay-compare" type="button" disabled>Compare current layout</button>
             <button class="text-btn" id="studio-replay-reset" type="button" disabled>Reset baseline</button>
           </div>
         </header>
+        <details class="studio-environment" id="studio-environment"></details>
         <p class="studio-replay-message" id="studio-replay-empty-household" hidden>Save a household with at least one scheduled activity to compare layouts.</p>
         <p class="studio-replay-message" id="studio-replay-status" role="status"></p>
         <div class="studio-replay-summary" id="studio-replay-summary" hidden>
@@ -275,14 +304,15 @@
             <tbody></tbody>
           </table>
           <div>
-            <ul id="studio-replay-findings" class="studio-replay-findings" aria-label="Blocked routes" hidden></ul>
+            <ul id="studio-replay-findings" class="studio-replay-findings" aria-label="Measured replay findings" hidden></ul>
             <button class="secondary" id="studio-replay-suggest" type="button" hidden>Suggest a fix</button>
           </div>
         </div>
+        <div id="studio-region-editor" hidden></div>
         <section class="studio-replay-proposal" id="studio-replay-proposal" aria-labelledby="studio-replay-proposal-title" hidden>
           <h3 id="studio-replay-proposal-title">Proposed move</h3>
           <p id="studio-replay-explanation"></p>
-          <p class="studio-replay-message">Gemini suggests this furniture may affect the route. Replay will measure the result.</p>
+          <p class="studio-replay-message">Replay measures the result using your saved household routine.</p>
           <p id="studio-replay-move"></p>
           <div class="studio-replay-actions">
             <button class="primary" id="studio-replay-approve" type="button">Approve move</button>
@@ -290,6 +320,7 @@
           </div>
         </section>
       </section>
+      <section id="twin-results-section" hidden></section>
       <section class="inventory">
         <div class="inventory-head">
           <div>

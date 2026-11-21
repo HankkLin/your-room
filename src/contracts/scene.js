@@ -117,6 +117,7 @@ export function houseFixturesAsSceneObjects(house) {
     roomId: fixture.roomId ?? null,
     position: Array.isArray(fixture.position) ? [...fixture.position] : [0, 0, 0],
     rotation: Array.isArray(fixture.rotation) ? [...fixture.rotation] : [0, 0, 0],
+    ...(fixture.widthDefaulted || !(Number(fixture.dimensions?.width) > 0) ? { widthDefaulted: true } : {}),
     dimensions: {
       width: fixture.dimensions?.width ?? 0.6,
       height: fixture.dimensions?.height ?? 0.85,
@@ -138,7 +139,9 @@ export function isObjectLocked(target) {
 
 /**
  * Check whether an operation is permitted on a scene object.
- * Fixed architectural fixtures cannot be unlocked or mutated automatically.
+ * Fixed architectural fixtures and `locked: true` objects cannot be moved,
+ * rotated, removed, or replaced.
+ *
  * @param {object | null | undefined} target
  * @param {string} operationType
  * @returns {boolean}
@@ -154,27 +157,40 @@ export function canModifyObject(target, operationType) {
 }
 
 /**
- * Normalize either a canonical FixedFixture / SceneObject (position: [x,y,z], rotation: [0,yawRad,0])
- * or a Living Blueprint flat item (x, z, rotation in degrees) into a unified renderable SceneObject.
+ * Normalize either a canonical FixedFixture / SceneObject (`position: [x,y,z]`,
+ * `rotation: [0,yawRad,0]`) or a flat Living Blueprint item (`x, z, rotation` in deg)
+ * into a unified renderable SceneObject preserving all Shopify/product metadata.
+ *
  * @param {object} item
  * @returns {object}
  */
-export function toSceneObject(item) {
+export function toSceneObject(item = {}) {
   const x = Number(item.x ?? item.position?.[0]) || 0;
   const y = Number(item.elevation ?? item.y ?? item.position?.[1]) || 0;
   const z = Number(item.z ?? item.position?.[2]) || 0;
-  const width = Math.max(0.05, Number(item.width ?? item.dimensions?.width) || 0.6);
-  const height = Math.max(0.008, Number(item.height ?? item.dimensions?.height) || 0.75);
-  const depth = Math.max(0.05, Number(item.depth ?? item.dimensions?.depth) || 0.6);
+  const suppliedWidth = Number(item.width ?? item.dimensions?.width);
+  const hasModeledWidth = Number.isFinite(suppliedWidth) && suppliedWidth > 0;
+  const width = Math.max(0.05, suppliedWidth || 0.6);
+  const height = Math.max(
+    0.008,
+    Number(item.height ?? item.dimensions?.height) || 0.75,
+  );
+  const depth = Math.max(
+    0.05,
+    Number(item.depth ?? item.dimensions?.depth) || 0.6,
+  );
 
   let deg = 0;
   let yawRad = 0;
   if (Array.isArray(item.rotation)) {
     yawRad = Number(item.rotation[1]) || 0;
     deg = (yawRad * 180) / Math.PI;
-  } else {
+  } else if (item.rotation != null && Number.isFinite(Number(item.rotation))) {
     deg = Number(item.rotation) || 0;
     yawRad = (deg * Math.PI) / 180;
+  } else if (Array.isArray(item.rotationRadians)) {
+    yawRad = Number(item.rotationRadians[1]) || 0;
+    deg = (yawRad * 180) / Math.PI;
   }
 
   const type =
@@ -184,11 +200,12 @@ export function toSceneObject(item) {
 
   return {
     ...item,
+    ...(!hasModeledWidth ? { widthDefaulted: true } : {}),
     kind,
     type,
     locked,
     owned: Boolean(item.owned || type === "fixed"),
-    price: locked || item.owned ? 0 : (Number(item.price) || 0),
+    price: locked || item.owned ? 0 : Number(item.price ?? 0),
     color: item.color || FIXTURE_COLORS[kind] || "#c5b69e",
     x,
     y,
@@ -198,6 +215,7 @@ export function toSceneObject(item) {
     height,
     depth,
     rotation: deg,
+    rotationDegrees: deg,
     position: [x, y, z],
     rotationRadians: [0, yawRad, 0],
     dimensions: { width, height, depth },

@@ -1,9 +1,14 @@
+import { validateScenePatch } from "../../redesign/validate-scene-patch.js";
+import { createRegionEditor } from "./region-editor.js";
 import {
-  buildReplaySuggestionInput, previewReplaySuggestion, requestReplaySuggestion,
+  buildRegionSuggestionInput, buildReplaySuggestionInput, previewRegionPatch, previewReplaySuggestion, requestReplaySuggestion,
 } from "../../agents/replay-suggestion.js";
 import { prepareHouseholdReplay } from "../../contracts/persona.js";
 import { FINDING_TYPES } from "../../contracts/simulation.js";
 import { captureStudioLayout, simulateStudioLayout } from "../../simulation/studio-replay.js";
+
+import { mountEnvironmentPanel } from "../../environment/environment-panel.js";
+import { formatLocalTime } from "../../environment/environment-context.js";
 
 const replayMeasures = [
   ["pathFailures", "Path failures"],
@@ -55,7 +60,13 @@ function describePosition(item, roomNames) {
   return room + " (" + item.position.map((value) => Number(value.toFixed(2))).join(", ") + " m)";
 }
 
-export function createStudioReplayPanel(container, { getContext, commitItems }) {
+function verifySpatialPatch(patch, { house, items }) {
+  const validation = validateScenePatch(captureStudioLayout(house, items), patch);
+  if (!validation.valid) throw new Error(validation.errors.map(error => error.message).join(" "));
+}
+
+export function createStudioReplayPanel(container, { getContext, commitItems, commitEnvironment, onApprovedReplay }) {
+  const environment = mountEnvironmentPanel(container.querySelector("#studio-environment"), commitEnvironment);
   const capture = container.querySelector("#studio-replay-capture");
   const compare = container.querySelector("#studio-replay-compare");
   const resetButton = container.querySelector("#studio-replay-reset");
@@ -77,6 +88,15 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
   let comparison = null;
   let pending = null;
   let proposal = null;
+  const regionEditor = createRegionEditor(container.querySelector("#studio-region-editor"), {
+    onChange() {
+      if (!pending && !proposal) return;
+      clearSuggestion();
+      announce("The redesign request changed. Preview it again.");
+      update();
+    },
+    onRequest: selection => void suggestMove(selection),
+  });
 
   function announce(message = "", isError = false) {
     status.textContent = message;
@@ -115,6 +135,16 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
 
     const roomNames = new Map(rooms.map(({ id, name }) => [id, name]));
     const messages = [blockedRoute(baseline.finding, "Baseline", roomNames)];
+    if (before.environment) {
+      const sharedTime = formatLocalTime(before.environment);
+      messages.push((after ? "Both layouts used " : "Baseline conditions used ") + before.environment.location.label + " · " + sharedTime + ".");
+    }
+    for (const [label, type] of [["Sun glare", "SUN_GLARE"], ["Privacy sightlines", "PRIVACY_SIGHTLINE"], ["Noise conflicts", "NOISE_CONFLICT"]]) {
+      const count = run => run?.evaluation?.findings.filter(finding => finding.type === type).length ?? 0;
+      if (count(before) || count(after)) {
+        messages.push(label + ": " + count(before) + (after ? " → " + count(after) : "") + ".");
+      }
+    }
     if (after) {
       messages.push(blockedRoute(firstBlocked(after), "Current layout", roomNames));
       if (baseline.finding && after.summary.pathFailures === 0) {
@@ -136,6 +166,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
 
   function clearBaseline(context, message) {
     baseline = null;
+    regionEditor.reset();
     activeRun = null;
     comparison = null;
     clearSuggestion();
@@ -145,8 +176,9 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
 
   function update(context = getContext()) {
     const { house, items, personas } = context;
+    environment.show(house?.environment?.snapshot ?? null);
     const signature = replaySignature(context);
-    container.hidden = !house;
+    container.hidden = !house || context.inTour === false;
     if (baseline && baseline.signature !== signature) {
       clearBaseline(context, house ? "The saved household or floorplan changed. Capture a new baseline." : "");
     }
@@ -172,9 +204,11 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     resetButton.disabled = !baseline;
     suggest.hidden = !baseline?.finding || baseline.items !== items;
     suggest.disabled = Boolean(pending || proposal || activeRun);
+    regionEditor.update(context, Boolean(baseline?.result && baseline.items === items), suggest.disabled);
   }
 
   function reset() {
+    environment.reset();
     clearBaseline(getContext());
     update();
   }
@@ -189,10 +223,10 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     try {
       const household = prepareHouseholdReplay(context.personas, context.rooms);
       const scene = captureStudioLayout(context.house, context.items);
-      baseline = { items: context.items, signature: replaySignature(context), household };
+      baseline = { scene, items: context.items, signature: replaySignature(context), household, environment: scene.environment?.snapshot ?? null };
       announce("Running baseline…");
       update(context);
-      const result = await simulateStudioLayout(scene, household);
+      const result = await simulateStudioLayout(scene, household, baseline.environment);
       const latest = getContext();
       update(latest);
       if (activeRun !== run) return;
@@ -211,7 +245,7 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     }
   });
 
-  async function compareCurrent(context, selectedFinding) {
+  async function compareCurrent(context, selectedFinding, patch) {
     const run = { items: context.items };
     activeRun = run;
     comparison = null;
@@ -221,13 +255,16 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     update(context);
     try {
       const scene = captureStudioLayout(context.house, context.items);
-      const result = await simulateStudioLayout(scene, baseline.household);
+      const result = await simulateStudioLayout(scene, baseline.household, baseline.environment);
       const latest = getContext();
       update(latest);
       if (activeRun === run) {
         comparison = { ...run, result, selectedFinding };
         renderResults(latest.rooms);
         announce(comparisonMessage(baseline.result, result));
+        if (patch) onApprovedReplay?.({
+          baseline, result, afterHouse: scene, afterItems: context.items, displayPersonas: context.personas, patch,
+        });
       }
     } catch (error) {
       if (activeRun === run) announce(error.message || "The replay could not be completed.", true);
@@ -243,47 +280,59 @@ export function createStudioReplayPanel(container, { getContext, commitItems }) 
     if (!compare.disabled) void compareCurrent(context);
   });
 
-  suggest.addEventListener("click", async () => {
+  async function suggestMove(selection) {
     const context = getContext();
     update(context);
-    if (suggest.hidden || suggest.disabled) return;
+    if (suggest.disabled || !baseline?.result || baseline.items !== context.items || (!selection && suggest.hidden)) return;
     const request = new AbortController();
     pending = request;
     announce("Asking Gemini for a move…");
     update(context);
     try {
-      const input = buildReplaySuggestionInput(baseline.finding, context.house, context.items);
+      const input = selection
+        ? buildRegionSuggestionInput(selection.region, selection.instruction, baseline.result.evaluation.findings, context.house, context.items)
+        : buildReplaySuggestionInput(baseline.finding, context.house, context.items);
       const suggested = await requestReplaySuggestion(input, request.signal);
       const latest = getContext();
       update(latest);
       if (pending !== request) return;
 
-      const { before, after } = previewReplaySuggestion(suggested, latest.house, latest.items);
+      verifySpatialPatch(selection ? suggested : suggested.scenePatch, latest);
+      const moves = selection ? previewRegionPatch(suggested, input, latest.house, latest.items).moves
+        : [previewReplaySuggestion(suggested, latest.house, latest.items)];
       const roomNames = new Map(latest.rooms.map(({ id, name }) => [id, name]));
-      explanation.textContent = suggested.explanation;
-      proposedMove.textContent = (before.name || before.kind) + " · " +
-        describePosition(before, roomNames) + " → " + describePosition(after, roomNames);
-      proposal = suggested;
+      explanation.textContent = selection ? suggested.reasoning : suggested.explanation;
+      container.querySelector("#studio-replay-proposal-title").textContent = selection ? "Proposed regional changes" : "Proposed move";
+      approve.textContent = selection ? "Approve redesign" : "Approve move";
+      proposedMove.textContent = moves.map(({ before, after }) =>
+        (before.name || before.kind) + " · " + describePosition(before, roomNames) + " → " + describePosition(after, roomNames)
+      ).join("\n");
+      proposal = { suggested, input };
       review.hidden = false;
-      announce("Review the proposed move before approving.");
+      announce("Review the proposed changes before approving.");
     } catch (error) {
       if (pending === request) announce(error.message || "Gemini could not suggest a move. Try again.", true);
     } finally {
       if (pending === request) pending = null;
       update();
     }
-  });
+  }
 
+  suggest.addEventListener("click", () => void suggestMove());
   approve.addEventListener("click", () => {
     const context = getContext();
     update(context);
     if (!proposal || activeRun) return;
     try {
-      const { items } = previewReplaySuggestion(proposal, context.house, context.items);
-      const finding = baseline.finding;
+      const { input, suggested } = proposal;
+      verifySpatialPatch(input.region ? suggested : suggested.scenePatch, context);
+      const { items } = input.region ? previewRegionPatch(suggested, input, context.house, context.items)
+        : previewReplaySuggestion(suggested, context.house, context.items);
+      const finding = input.region ? null : baseline.finding;
       clearSuggestion();
       commitItems(items);
-      void compareCurrent(getContext(), finding);
+      const patch = input.region ? suggested : { ...suggested.scenePatch, reasoning: suggested.explanation };
+      void compareCurrent(getContext(), finding, patch);
     } catch (error) {
       clearSuggestion();
       announce(error.message || "The proposed move could not be applied.", true);

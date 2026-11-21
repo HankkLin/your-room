@@ -147,6 +147,11 @@ test("layout, schedule and floorplan changes discard a proposed or in-flight mov
   releaseReply();
   await replyFinished;
   delayReply = false;
+  await expect(page.locator("body")).toHaveAttribute("data-stage", "design");
+  await page.locator("#tour-step").click();
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  expect((await project(page)).personas[0].schedule[1].windowEndMinute).toBe(515);
+  await expect(page.locator("#studio-replay-compare")).toBeDisabled();
   await expect(approve).toBeHidden();
   await expect(suggest).toBeHidden();
 
@@ -157,7 +162,116 @@ test("layout, schedule and floorplan changes discard a proposed or in-flight mov
   await page.locator("#try-sample-floorplan").click();
   await page.locator("#fp-confirm-import").click();
   await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await page.locator("#tour-step").click();
+  await expect(page.locator("#studio-replay-panel")).toBeVisible();
+  await expect(capture).toBeDisabled();
+  await expect(page.locator("#studio-replay-compare")).toBeDisabled();
   await expect(approve).toBeHidden();
   await expect(suggest).toBeHidden();
   expect((await project(page)).items.some(({ id }) => id === sofa.id)).toBe(false);
+});
+
+const regionalPatch = {
+  id: "clear-bedroom", reasoning: "Move the sofa away from the bedroom doorway.",
+  targetFindings: ["NO_PATH:kitchen"], operations: suggestion.scenePatch.operations,
+};
+
+async function dragArea(page, start, end) {
+  const map = page.getByRole("img", { name: "Select a redesign area on the floor plan" });
+  await map.scrollIntoViewIfNeeded();
+  const [a, b] = await map.evaluate((element, corners) => corners.map(([x, z]) => {
+    const p = new DOMPoint(x, z).matrixTransform(element.getScreenCTM());
+    return { x: p.x, y: p.y };
+  }), [start, end]);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await page.mouse.up();
+}
+
+test("drag an area, review the scoped proposal, approve once and replay the same saved routine", async ({ page }) => {
+  let payload;
+  await page.route(api, async route => {
+    payload = route.request().postDataJSON();
+    await route.fulfill({ json: regionalPatch });
+  });
+  const { capture, failures } = await openDemo(page);
+  const before = await project(page);
+  await capture.click();
+  await page.getByText("Edit a selected area", { exact: true }).click();
+  await dragArea(page, [1.9, 5.4], [4.8, 7.65]);
+  const instruction = page.getByRole("textbox", { name: "Redesign instruction" });
+  await instruction.fill("Move the sofa away from the bedroom doorway.");
+  await page.getByRole("button", { name: "Preview regional redesign" }).click();
+  const approve = page.getByRole("button", { name: "Approve redesign" });
+  await expect(approve).toBeVisible();
+  expect(payload.instruction).toEqual(await instruction.inputValue());
+  expect(payload.region[0]).toBeCloseTo(1.9, 1);
+  expect(payload.region[3]).toBeCloseTo(7.65, 1);
+  expect(payload.findings).toEqual(expect.arrayContaining([expect.objectContaining({
+    type: "NO_PATH", evidence: expect.objectContaining({ timestampSeconds: 29100 }),
+  })]));
+  expect(await project(page)).toEqual(before);
+  await approve.click();
+  await expect(failures).toHaveText(["1", "0"]);
+  await expect(page.locator("#sim-scenario")).toHaveValue("saved-routine");
+  await expect(page.locator("#sim-scorecard")).toBeVisible();
+  await expect(page.locator("#studio-replay-status")).toContainText("improved");
+  const after = await project(page);
+  expect(after.personas).toEqual(before.personas);
+  expect(after.items).toEqual(before.items.map(item => item.id === sofa.id ? { ...item, x: 3.4, z: 7 } : item));
+  await page.getByRole("button", { name: "Undo last change" }).click();
+  expect((await project(page)).items).toEqual(before.items);
+});
+
+test("room selection rejects out-of-area moves and invalidates a preview after instruction or area changes", async ({ page }) => {
+  let response = { ...regionalPatch, operations: [{ ...regionalPatch.operations[0], position: [7, 0, 7] }] };
+  await page.route(api, route => route.fulfill({ json: response }));
+  const { capture } = await openDemo(page);
+  const before = await project(page);
+  await capture.click();
+  await page.getByText("Edit a selected area", { exact: true }).click();
+  const room = page.getByRole("combobox", { name: "Room selection" });
+  await room.selectOption("bedroom");
+  const instruction = page.getByRole("textbox", { name: "Redesign instruction" });
+  await instruction.fill("Leave the doorway clear");
+  const preview = page.getByRole("button", { name: "Preview regional redesign" });
+  const approve = page.getByRole("button", { name: "Approve redesign" });
+  await preview.click();
+  await expect(page.locator("#studio-replay-status")).toContainText("outside the selected area");
+  await expect(approve).toHaveCount(0);
+  response = regionalPatch;
+  await preview.click();
+  await expect(approve).toBeVisible();
+  await instruction.fill("Make space for two people");
+  await expect(approve).toBeHidden();
+  await preview.click();
+  await expect(approve).toBeVisible();
+  await room.selectOption("kitchen");
+  await expect(approve).toBeHidden();
+  expect((await project(page)).items).toEqual(before.items);
+});
+
+test("regional replay displays measured regression and no change for an approved two-person routine", async ({ page }) => {
+  const { capture } = await openDemo(page);
+  const seeded = await project(page);
+  seeded.items = seeded.items.map(item => item.id === sofa.id ? { ...item, x: 3.4, z: 7 } : item);
+  seeded.personas.push({ ...seeded.personas[0], id: "bea", name: "Bea" });
+  await page.evaluate(state => localStorage.setItem("living-blueprint.project.v1", JSON.stringify(state)), seeded);
+  await page.reload();
+  const positions = [[1.5, 0, .6], [1.6, 0, .6]];
+  await page.route(api, route => route.fulfill({ json: { ...regionalPatch, targetFindings: [],
+    operations: [{ ...regionalPatch.operations[0], position: positions.shift() }] } }));
+  for (const [index, message] of ["more issues", "No change"].entries()) {
+    await capture.click();
+    await page.getByText("Edit a selected area", { exact: true }).click();
+    await dragArea(page, [.01, .01], [9.59, 8.59]);
+    await page.getByRole("textbox", { name: "Redesign instruction" }).fill("Reposition the sofa inside this area");
+    await page.getByRole("button", { name: "Preview regional redesign" }).click();
+    await page.getByRole("button", { name: "Approve redesign" }).click();
+    await expect(page.locator("#studio-replay-status")).toContainText(message);
+    const collisions = page.getByRole("rowheader", { name: "Collisions" }).locator("..").locator("td");
+    await expect(collisions).toHaveText(index === 0 ? ["0", "1"] : ["1", "1"]);
+    expect((await project(page)).personas).toEqual(seeded.personas);
+  }
 });

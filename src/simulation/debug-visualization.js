@@ -159,3 +159,107 @@ export function formatSimulationDebugReport(simulation) {
 
   return lines.join("\n");
 }
+
+/**
+ * Format a concise deterministic text scorecard of `evaluateHouseholdExperience`
+ * (Task 3A §25).
+ */
+export function formatHouseholdExperienceReport(evaluation) {
+  const { categories, overallScore, details } = evaluation;
+  const lines = [`HOUSEHOLD EXPERIENCE (Overall Score: ${overallScore}/100)`, ""];
+
+  // Movement
+  lines.push(`Movement`, `Score: ${categories.movement.score}`);
+  if (categories.movement.findings.length === 0) {
+    lines.push(`✓ Routes clear`);
+  } else {
+    for (const f of categories.movement.findings) {
+      if (f.type === "CONGESTION") {
+        lines.push(
+          `⚠ ${f.roomId || "room"} congestion (${f.evidence.durationSeconds}s, ${f.evidence.agentCount} agents)`,
+        );
+      } else if (f.type === "NO_PATH") {
+        lines.push(`⚠ Blocked route: ${f.fromRoomId} → ${f.toRoomId}`);
+      } else {
+        lines.push(`⚠ ${f.type}: ${f.distanceMeters}m`);
+      }
+    }
+  }
+  lines.push("");
+
+  // Privacy
+  lines.push(`Privacy`, `Score: ${categories.privacy.score}`);
+  if (categories.privacy.findings.length === 0) {
+    lines.push(`✓ Sensitive targets shielded from entry & public sightlines`);
+  } else {
+    for (const f of categories.privacy.findings) {
+      lines.push(
+        `⚠ ${f.evidence.sourceType} → ${f.evidence.targetType} direct sightline (${f.evidence.distanceMeters} m)`,
+      );
+    }
+  }
+  lines.push("");
+
+  // Noise
+  lines.push(`Noise`, `Score: ${categories.noise.score}`);
+  if (categories.noise.findings.length === 0) {
+    lines.push(`✓ No overlapping WFH noise conflicts`);
+  } else {
+    for (const f of categories.noise.findings) {
+      lines.push(
+        `⚠ ${f.evidence.sourceType.toUpperCase()} / WFH overlap: ${f.evidence.overlapMinutes} min (index ${f.evidence.estimatedLevel})`,
+      );
+    }
+  }
+  lines.push("");
+
+  // Visibility
+  lines.push(`Visibility`, `Score: ${categories.visibility.score}`);
+  if (categories.visibility.findings.length === 0) {
+    if (details?.tvEvaluations?.length > 0) {
+      lines.push(`✓ Seating has clear TV sightline`);
+    } else {
+      lines.push(`✓ No visibility or glare issues detected`);
+    }
+  } else {
+    for (const f of categories.visibility.findings) {
+      if (f.type === "SUN_GLARE") {
+        lines.push(
+          `⚠ Direct sun glare on ${f.evidence.targetType} via ${f.evidence.windowId}`,
+        );
+      } else {
+        lines.push(
+          `⚠ ${f.type}: ${f.evidence.viewerObjectId} → ${f.evidence.tvObjectId}`,
+        );
+      }
+    }
+  }
+  lines.push("");
+
+  // Safety
+  lines.push(`Safety`, `Score: ${categories.safety.score}`);
+  if (categories.safety.findings.length === 0) {
+    const maxSec = details?.evacuation?.summary?.maxEvacuationSeconds;
+    lines.push(
+      maxSec != null
+        ? `✓ All occupants evacuate cleanly (max ${maxSec} sec)`
+        : `✓ Evacuation routes clear`,
+    );
+  } else {
+    for (const f of categories.safety.findings) {
+      if (f.type === "LONG_EVACUATION_ROUTE") {
+        lines.push(
+          `⚠ ${f.roomId || f.agentId} evacuation route: ${f.evidence.estimatedSeconds} sec (${f.evidence.distanceMeters} m)`,
+        );
+      } else if (f.type === "NO_EVACUATION_PATH") {
+        lines.push(`⚠ Blocked evacuation for ${f.agentId} from ${f.roomId}`);
+      } else if (f.type === "EVACUATION_BOTTLENECK") {
+        lines.push(
+          `⚠ Exit bottleneck at ${f.evidence.exitDoorId} (${f.evidence.convergingAgentCount} occupants)`,
+        );
+      }
+    }
+  }
+
+  return lines.join("\n");
+}

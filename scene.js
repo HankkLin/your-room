@@ -4,6 +4,7 @@ import { box, createFurniture, createRoomMaterials } from './scene-furniture.js'
 import { createFurnitureAssets } from './real-furniture.js';
 import { constrainToRoom, createArchitecture, defaultRoom, isInsideRoom, normalizeArchitecture, roomOpeningPose } from './scene-architecture.js';
 import { constrainToHouse, getRoomAtPoint, isObjectLocked, isWalkablePoint, normalizeHouse } from './house-model.js';
+import { createSimulationSceneLayer } from './src/components/avatar/simulation-scene-layer.js';
 
 const initialCamera = new THREE.Vector3(7.5, 5.1, 8.65);
 const initialTarget = new THREE.Vector3(0, 0.92, -0.1);
@@ -37,7 +38,7 @@ function addLighting(scene) {
   return sun;
 }
 
-const objectSignature = (item) => JSON.stringify([item.kind, item.name, item.color, item.width, item.depth, item.height, Boolean(item.locked), Number(item.elevation) || 0]);
+const objectSignature = (item) => JSON.stringify([item.kind, item.shopify && item.modelUrl, item.name, item.color, item.width, item.depth, item.height, Boolean(item.locked), Number(item.elevation) || 0]);
 
 function selectionOutline() {
   const outline = new THREE.Group();
@@ -124,6 +125,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   const sun = addLighting(scene);
   const outline = selectionOutline();
   scene.add(outline);
+  const simLayer = createSimulationSceneLayer({ scene, invalidate });
 
   const oblique = new THREE.PerspectiveCamera(31, 1, 0.1, 90);
   oblique.position.copy(initialCamera);
@@ -164,10 +166,10 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   let pendingFrame = 0;
   let disposed = false;
   const camera = () => currentView === 'plan' ? plan : currentView === 'interior' ? eye : oblique;
-  const furnitureAssets = createFurnitureAssets((kind) => {
+  const furnitureAssets = createFurnitureAssets((assetKey) => {
     if (disposed) return;
     for (const record of objects.values()) {
-      if (record.kind === kind) record.needsAsset = true;
+      if (record.kind === assetKey || record.modelUrl === assetKey) record.needsAsset = true;
     }
     api.update(itemsInScene, selected, currentStyle, roomLayout, houseLayout);
   });
@@ -554,7 +556,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
           }
           const object = furnitureAssets.create(item) ?? createFurniture(item, materials);
           furniture.add(object);
-          record = { object, signature, kind: item.kind };
+          record = { object, signature, kind: item.kind, modelUrl: item.modelUrl };
           objects.set(item.id, record);
         }
         const y = Number(item.elevation ?? item.y) || 0;
@@ -622,6 +624,31 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
       resetCameras();
       invalidate();
     },
+    setPlaybackFrame({ snapshots = [], visibleRoutes = [], agentMeta = new Map() } = {}) {
+      simLayer.updateAvatars(snapshots, agentMeta);
+      simLayer.updateRoutes(visibleRoutes, agentMeta);
+    },
+    setPlaybackFindings(findings = [], context = {}) {
+      simLayer.setFindings(findings, {
+        house: context.house ?? houseLayout,
+        items: context.items ?? itemsInScene,
+      });
+    },
+    focusFinding(findingOrNull = null) {
+      simLayer.focusFinding(findingOrNull);
+    },
+    showPatchTransition(changes = []) {
+      simLayer.showPatchTransition(changes);
+    },
+    clearPlayback() {
+      simLayer.clear();
+    },
+    getPlaybackStats() {
+      return {
+        avatarCount: simLayer.getAvatarCount(),
+        overlayCount: simLayer.getOverlayCount(),
+      };
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -633,6 +660,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
       canvas.removeEventListener('pointerup', pointerUp, true);
       canvas.removeEventListener('pointercancel', pointerCancel, true);
       canvas.removeEventListener('lostpointercapture', pointerCancel);
+      simLayer.dispose();
       architecture.dispose();
       disposeObject(scene, [], true);
       furnitureAssets.dispose();

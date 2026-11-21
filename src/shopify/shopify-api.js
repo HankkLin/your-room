@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { createProductCandidate, productCandidateId, shopifyHttpsUrl as httpsUrl } from "../contracts/product.js";
+import { recommendProductCandidate } from "../agents/product-recommendation.js";
 
 const endpoint = "https://mcp.shop.com/";
 const protocolVersion = "2026-07-28";
@@ -8,8 +10,6 @@ const maxQueryLength = 200;
 const maxRequestBytes = 32 * 1024;
 const maxLookupRefs = 50;
 const searchLimit = 8;
-const variantPattern = /^gid:\/\/shopify\/ProductVariant\/[A-Za-z0-9_-]{1,128}$/;
-const domainPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 const totalLabels = {
   subtotal: "Subtotal",
   items_discount: "Item discounts",
@@ -32,37 +32,15 @@ function textValue(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function httpsUrl(value) {
-  if (typeof value !== "string" || !/^https:\/\//i.test(value) || /[\s\\]/.test(value)) return null;
-  try {
-    const parsed = new URL(value);
-    return parsed.hostname && !parsed.username && !parsed.password ? value : null;
-  } catch {
-    return null;
-  }
-}
-
 function validCurrency(value) {
   return typeof value === "string" && /^[A-Z]{3}$/.test(value) ? value : null;
 }
 
-function isVariantId(value) {
-  return typeof value === "string" && variantPattern.test(value);
-}
-
-function isSellerDomain(value) {
-  return typeof value === "string" && value.length <= 253 && domainPattern.test(value);
-}
-
 function readRef(value) {
-  if (!isVariantId(value?.variantId) || !isSellerDomain(value?.sellerDomain)) {
+  if (!productCandidateId(value)) {
     throw new ShopifyApiError(400, "Choose a Shopify variant and merchant from the catalog.");
   }
   return { variantId: value.variantId, sellerDomain: value.sellerDomain };
-}
-
-function refKey({ variantId, sellerDomain }) {
-  return `${variantId}|${sellerDomain.toLowerCase()}`;
 }
 
 function list(value) {
@@ -95,36 +73,6 @@ function warningsFrom(document, types = ["warning"]) {
       ...(path ? { path } : {}),
     }];
   });
-}
-
-function productImage(media) {
-  return list(media)
-    .map((item) => httpsUrl(item?.type === "image" ? item.url : item?.preview?.url))
-    .find(Boolean) ?? null;
-}
-
-function normalizeProduct(product, variant) {
-  const variantId = variant?.id;
-  const sellerDomain = variant?.seller?.domain;
-  const title = textValue(product?.title) ?? textValue(variant?.title);
-  if (!isVariantId(variantId) || !isSellerDomain(sellerDomain) || !title) return null;
-
-  const options = list(variant.options).map((option) => textValue(option?.label)).filter(Boolean).join(" / ");
-  const variantTitle = textValue(variant.title);
-  const currency = validCurrency(variant.price?.currency);
-  const amount = variant.price?.amount;
-  return {
-    variantId,
-    sellerDomain,
-    title,
-    variantTitle: options || (variantTitle && variantTitle !== title ? variantTitle : null),
-    merchant: textValue(variant.seller.name),
-    priceMinor: currency && Number.isSafeInteger(amount) && amount >= 0 ? amount : null,
-    currency,
-    available: typeof variant.availability?.available === "boolean" ? variant.availability.available : null,
-    imageUrl: productImage(variant.media) ?? productImage(product.media),
-    productUrl: httpsUrl(variant.url),
-  };
 }
 
 function retrySeconds(value) {
@@ -223,18 +171,23 @@ function productsFrom(document) {
   return document.products;
 }
 
-async function searchProducts(call, { query: rawQuery }) {
+async function searchProducts(call, { query: rawQuery, modelsOnly }) {
   const query = textValue(rawQuery);
   if (!query || query.length > maxQueryLength) {
     throw new ShopifyApiError(400, `Enter a product search of 1 to ${maxQueryLength} characters.`);
   }
   const document = await call("search_catalog", {
-    catalog: { query, context, pagination: { limit: searchLimit } },
+    catalog: { query, context, pagination: { limit: searchLimit },
+      ...(modelsOnly === true ? { filters: { media: [{ type: "model_3d" }] } } : {}) },
   });
   const uniqueProducts = new Map();
   for (const item of productsFrom(document)) {
-    const product = normalizeProduct(item, item?.variants?.[0]);
-    if (product && !uniqueProducts.has(refKey(product))) uniqueProducts.set(refKey(product), product);
+    for (const variant of list(item?.variants)) {
+      const product = createProductCandidate(item, variant);
+      if (product && !uniqueProducts.has(product.id)) uniqueProducts.set(product.id, product);
+      if (uniqueProducts.size >= maxLookupRefs) break;
+    }
+    if (uniqueProducts.size >= maxLookupRefs) break;
   }
   return { products: [...uniqueProducts.values()], warnings: warningsFrom(document) };
 }
@@ -246,11 +199,11 @@ async function findVariant(call, ref) {
   const { product } = document;
   if (!Array.isArray(product?.variants)) throw catalogFailure();
 
-  const key = refKey(ref);
+  const key = productCandidateId(ref);
   const warnings = warningsFrom(document);
   for (const variant of product.variants) {
-    const candidate = normalizeProduct(product, variant);
-    if (candidate && refKey(candidate) === key) return { product: candidate, warnings };
+    const candidate = createProductCandidate(product, variant);
+    if (candidate?.id === key) return { product: candidate, warnings };
   }
   throw new ShopifyApiError(404, "Shopify could not find this exact variant from the selected merchant.", { warnings });
 }
@@ -260,7 +213,7 @@ async function lookupProducts(call, { refs: rawRefs }) {
     throw new ShopifyApiError(400, `Choose between 1 and ${maxLookupRefs} Shopify variants to refresh.`);
   }
   const refs = rawRefs.map(readRef);
-  const requested = new Set(refs.map(refKey));
+  const requested = new Set(refs.map(productCandidateId));
   const ids = [...new Set(refs.map(({ variantId }) => variantId))];
   const document = await call("lookup_catalog", {
     catalog: { ids, context, filters: { available: false } },
@@ -268,10 +221,10 @@ async function lookupProducts(call, { refs: rawRefs }) {
   const matches = new Map();
   for (const product of productsFrom(document)) {
     for (const variant of list(product?.variants)) {
-      const candidate = normalizeProduct(product, variant);
+      const candidate = createProductCandidate(product, variant);
       const exact = list(variant?.inputs).some((input) => input?.id === candidate?.variantId && input?.match === "exact");
       if (!candidate || !exact) continue;
-      const key = refKey(candidate);
+      const key = candidate.id;
       if (requested.has(key)) matches.set(key, candidate);
     }
   }
@@ -279,27 +232,77 @@ async function lookupProducts(call, { refs: rawRefs }) {
   return { products, warnings: warningsFrom(document) };
 }
 
-async function startCheckout(call, ref) {
-  const { product, warnings } = await findVariant(call, ref);
-  if (product.available !== true) {
-    throw new ShopifyApiError(409, "Shopify could not confirm that this variant is in stock.", { warnings });
+function readCheckoutLines({ ref, lines }) {
+  // Older callers submit a single reference with an implicit quantity of one.
+  if (lines === undefined) return [{ ref: readRef(ref), quantity: 1 }];
+  if (!Array.isArray(lines) || !lines.length || lines.length > maxLookupRefs) {
+    throw new ShopifyApiError(400, `Choose between 1 and ${maxLookupRefs} variants per merchant checkout.`);
   }
+  const seen = new Set();
+  let merchant;
+  return lines.map((line) => {
+    const reference = readRef(line?.ref);
+    const domain = reference.sellerDomain.toLowerCase();
+    if ((merchant && domain !== merchant) || seen.has(reference.variantId)) {
+      throw new ShopifyApiError(400, "Group each merchant’s variants and combine repeated quantities.");
+    }
+    const { quantity, priceMinor, currency } = line;
+    if (!Number.isSafeInteger(quantity) || quantity < 1 ||
+        !Number.isSafeInteger(priceMinor) || priceMinor < 0 || !validCurrency(currency)) {
+      throw new ShopifyApiError(400, "Each variant needs a positive quantity and a confirmed price.");
+    }
+    seen.add(reference.variantId);
+    merchant = domain;
+    return { ref: reference, quantity, priceMinor, currency };
+  });
+}
+
+async function startCheckout(call, input) {
+  const lines = readCheckoutLines(input);
+  const quotes = await Promise.all(lines.map(({ ref }) => findVariant(call, ref)));
+  const warnings = quotes.flatMap((quote) => quote.warnings);
+  const products = quotes.map((quote) => quote.product);
+  for (const [index, product] of products.entries()) {
+    const label = [product.title, product.variantTitle].filter(Boolean).join(" · ");
+    const details = { warnings, products };
+    if (product.available !== true) {
+      throw new ShopifyApiError(409, `Shopify could not confirm that ${label} is in stock.`, details);
+    }
+    if (product.priceMinor === null || !product.currency) {
+      throw new ShopifyApiError(409, `The merchant has not confirmed the price of ${label}.`, details);
+    }
+    const expected = lines[index];
+    if (expected.currency && (expected.currency !== product.currency || expected.priceMinor !== product.priceMinor)) {
+      throw new ShopifyApiError(409, `The price of ${label} changed. Review the updated price and start checkout again.`, details);
+    }
+  }
+  const expectedLines = new Map(lines.map((line, index) => [line.ref.variantId, { ...line, product: products[index] }]));
   const document = await call("create_checkout", {
-    shop: product.sellerDomain,
+    shop: products[0].sellerDomain,
     checkout: {
-      line_items: [{ item: { id: product.variantId }, quantity: 1 }],
+      line_items: lines.map(({ ref, quantity }) => ({ item: { id: ref.variantId }, quantity })),
       context: { address_country: context.address_country },
     },
     meta: { "idempotency-key": randomUUID() },
   });
   const continueUrl = httpsUrl(document.continue_url);
   const currency = validCurrency(document.currency);
-  const line = Array.isArray(document.line_items) && document.line_items.length === 1 ? document.line_items[0] : null;
-  if (!continueUrl || !currency || line?.item?.id !== product.variantId || line.quantity !== 1 ||
+  if (!continueUrl || !currency || !Array.isArray(document.line_items) ||
       !["incomplete", "requires_escalation", "ready_for_complete"].includes(document.status) ||
       !Array.isArray(document.totals)) {
     throw checkoutFailure();
   }
+  for (const line of document.line_items) {
+    const id = line?.item?.id;
+    const expected = expectedLines.get(id);
+    if (!expected || expected.quantity !== line.quantity) throw checkoutFailure();
+    if (expected.currency && (expected.currency !== currency ||
+        (line.item.price !== undefined && line.item.price !== expected.priceMinor))) {
+      warnings.push({ text: `The merchant changed the price or currency for ${expected.product.title} while creating checkout. Review the merchant totals before continuing.` });
+    }
+    expectedLines.delete(id);
+  }
+  if (expectedLines.size) throw checkoutFailure();
   const totals = document.totals.map((total) => {
     const label = textValue(total?.display_text) ?? (Object.hasOwn(totalLabels, total?.type) ? totalLabels[total.type] : null);
     if (!label || !Number.isSafeInteger(total.amount)) throw checkoutFailure();
@@ -341,12 +344,22 @@ function respond(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_000 } = {}) {
+export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_000, generateRecommendation } = {}) {
   const routes = new Map([
     [`${apiPrefix}search`, searchProducts],
+    [`${apiPrefix}recommend`, async (call, input) => {
+      const { mode, instruction, kind, objectId } = input;
+      if (mode === "replace" && (!textValue(objectId) || objectId.length > 160)) throw new ShopifyApiError(400, "Select the piece to replace.");
+      if (!["add", "replace"].includes(mode) || !textValue(instruction) || instruction.length > maxQueryLength ||
+          !textValue(kind) || kind.length > 40) throw new ShopifyApiError(400, "Choose furniture and enter a short design instruction.");
+      const catalog = await lookupProducts(call, input);
+      const choice = await recommendProductCandidate({ mode, instruction, kind, candidates: catalog.products }, generateRecommendation);
+      const operation = mode === "replace" ? { type: mode, objectId, productId: choice } : { type: mode, productId: choice };
+      return { ...catalog, scenePatch: { operations: [operation] } };
+    }],
     [`${apiPrefix}variant`, (call, { ref }) => findVariant(call, readRef(ref))],
     [`${apiPrefix}lookup`, lookupProducts],
-    [`${apiPrefix}checkout`, (call, { ref }) => startCheckout(call, readRef(ref))],
+    [`${apiPrefix}checkout`, startCheckout],
   ]);
 
   return async (request, response, next) => {
@@ -371,8 +384,8 @@ export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_0
       const result = await route(call, body);
       respond(response, 200, result);
     } catch (error) {
-      if (error instanceof ShopifyApiError) {
-        if (error.details.retryAfter) response.setHeader("Retry-After", String(error.details.retryAfter));
+      if (error instanceof ShopifyApiError || error.name === "ProductRecommendationError") {
+        if (error.details?.retryAfter) response.setHeader("Retry-After", String(error.details.retryAfter));
         return respond(response, error.status, { error: error.message, ...error.details });
       }
       respond(response, 500, { error: "The Shopify service could not complete the request." });

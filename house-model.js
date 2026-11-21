@@ -419,6 +419,7 @@ export function normalizeHouse(input) {
         ? fix.rotation
         : sceneObj.rotationRadians,
       dimensions: sceneObj.dimensions,
+      ...(sceneObj.widthDefaulted ? { widthDefaulted: true } : {}),
       locked: true,
     };
   });

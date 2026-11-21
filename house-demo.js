@@ -1,5 +1,6 @@
 import { catalog, createItem, getSpend } from "./model.js";
 import { HOUSE_UNITS, normalizeHouse, toSceneObject } from "./house-model.js";
+import { createWholeHomeDemoPersonas } from "./src/simulation/demo-household.js";
 
 function catalogProduct(id) {
   const found = catalog.find((product) => product.id === id);
@@ -461,6 +462,22 @@ export function createWholeHomeDemoHouse() {
         z: 3.45,
         rotation: 0,
       }),
+      movablePiece("stone-table", {
+        id: "kitchen-table-1",
+        roomId: "kitchen",
+        name: "Breakfast Bistro Table",
+        x: 2.95,
+        z: 2.45,
+        rotation: 90,
+      }),
+      movablePiece("linen-chair", {
+        id: "kitchen-chair-1",
+        roomId: "kitchen",
+        name: "Kitchen Café Chair",
+        x: 3.55,
+        z: 0.98,
+        rotation: 0,
+      }),
     ],
   });
 }
@@ -484,7 +501,7 @@ export function createWholeHomeDemoState() {
     },
     house,
     importedHouse: null,
-    personas: [],
+    personas: createWholeHomeDemoPersonas(house),
     items,
     spent: getSpend(items),
     savedProducts: [],
