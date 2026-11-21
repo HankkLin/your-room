@@ -17,7 +17,7 @@ const lamp = {
 };
 const checkoutUrl = "https://fixture-shop.myshopify.com/checkouts/example";
 const project = (page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 
 async function mockShopify(page, handlers = {}) {
   const calls = [];

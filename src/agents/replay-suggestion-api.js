@@ -42,7 +42,7 @@ export function createReplaySuggestionApiMiddleware(generate) {
     }
     const protocol = request.socket.encrypted ? "https://" : "http://";
     if (request.headers.origin && request.headers.origin !== protocol + request.headers.host) {
-      return respond(response, 403, { error: "Open Stillroom directly to suggest a move." });
+      return respond(response, 403, { error: "Open Living Blueprint directly to suggest a move." });
     }
     if (!/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] || "")) {
       return respond(response, 415, { error: "Send the replay finding as JSON." });
@@ -81,7 +81,7 @@ export function createReplaySuggestionApiMiddleware(generate) {
     } catch (error) {
       return respond(response, 502, { error: error.message });
     }
-    response.setHeader("X-Stillroom-Gemini-Model", result.model);
+    response.setHeader("X-Living-Blueprint-Gemini-Model", result.model);
     return respond(response, 200, proposal);
   };
 }

@@ -1,6 +1,6 @@
-# Stillroom
+# Living Blueprint
 
-Stillroom turns a room photo or a custom floor plan into an editable, shoppable 3D layout. It runs locally in the browser with Three.js and a local COCO-SSD furniture detector.
+Living Blueprint turns a room photo or a custom floor plan into an editable, shoppable 3D layout. It runs locally in the browser with Three.js and a local COCO-SSD furniture detector.
 
 ## Run
 

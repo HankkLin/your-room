@@ -8,7 +8,7 @@ const suggestion = {
   scenePatch: { operations: [{ type: "move", objectId: sofa.id, position: [3.4, 0, 7] }] },
 };
 const project = (page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem("stillroom.project.v1")));
+  page.evaluate(() => JSON.parse(localStorage.getItem("living-blueprint.project.v1")));
 
 async function openDemo(page) {
   await page.goto("/");

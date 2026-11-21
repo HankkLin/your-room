@@ -2,7 +2,7 @@
 
 ## 1. Purpose of This Repository
 
-This repository is a two-person hackathon project for the Gemini 4 NYC Hackathon.
+Living Blueprint is a two-person project for the Gemini 4 NYC Hackathon.
 
 The product goal is to build a **Household Digital Twin**:
 

@@ -117,7 +117,7 @@ test("replay endpoint sends only the bounded route context to Gemini and validat
   const response = await callMiddleware(generate, { ...input, household: ["private"], address: "private" });
   assert.equal(calls, 2);
   assert.equal(response.statusCode, 200);
-  assert.equal(response.headers["X-Stillroom-Gemini-Model"], "gemini-4-neon");
+  assert.equal(response.headers["X-Living-Blueprint-Gemini-Model"], "gemini-4-neon");
   assert.equal(response.headers["Cache-Control"], "no-store");
   assert.deepEqual(response.body, proposal());
   assert.deepEqual(input.objects.find(({ id }) => id === sofa.id).relocationHint, [3.4, 0, 7]);

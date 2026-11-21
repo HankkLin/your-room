@@ -1,4 +1,5 @@
 import { HOUSE_UNITS } from "../contracts/scene.js";
+import { resolveStorageKey } from "../lib/browser-storage.js";
 import { validateHouseGeometry } from "../lib/validators/house-validator.js";
 import {
   ALLOWED_FLOORPLAN_MIME_TYPES,
@@ -25,7 +26,7 @@ import {
   createSampleFloorplanCandidate,
 } from "./sample-floorplan.js";
 
-export const IMPORTED_HOUSE_STORAGE_KEY = "stillroom.importedHouse.v1";
+export const IMPORTED_HOUSE_STORAGE_KEY = resolveStorageKey("importedHouse.v1");
 
 let confirmedImportedHouse = null;
 const confirmedListeners = new Set();
@@ -68,7 +69,7 @@ function notifyConfirmedHouse(house) {
   }
   if (typeof window !== "undefined" && typeof CustomEvent === "function") {
     window.dispatchEvent(
-      new CustomEvent("stillroom:house-imported", {
+      new CustomEvent("living-blueprint:house-imported", {
         detail: { house: house ? structuredClone(house) : null },
       }),
     );

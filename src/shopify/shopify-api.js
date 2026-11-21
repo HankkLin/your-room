@@ -172,7 +172,7 @@ async function callShopTool(fetchImpl, name, args, signal) {
           arguments: args,
           _meta: {
             "io.modelcontextprotocol/protocolVersion": protocolVersion,
-            "io.modelcontextprotocol/clientInfo": { name: "stillroom-studio", version: "0.1.0" },
+            "io.modelcontextprotocol/clientInfo": { name: "living-blueprint", version: "0.1.0" },
             "io.modelcontextprotocol/clientCapabilities": {},
           },
         },
@@ -358,7 +358,7 @@ export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_0
     }
     const origin = `${request.socket.encrypted ? "https" : "http"}://${request.headers.host}`;
     if (request.headers.origin && request.headers.origin !== origin) {
-      return respond(response, 403, { error: "Open Stillroom directly to use the Shopify catalog." });
+      return respond(response, 403, { error: "Open Living Blueprint directly to use the Shopify catalog." });
     }
     if (!/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] || "")) {
       return respond(response, 415, { error: "Send the Shopify request as JSON." });

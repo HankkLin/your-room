@@ -874,7 +874,7 @@ export function normalizeHouseGeometry(rawCandidate = {}, options = {}) {
 }
 
 /**
- * Project the primary habitable room of a validated House JSON into Stillroom's
+ * Project the primary habitable room of a validated House JSON into Living Blueprint's
  * existing single-room `state.room` structure so existing single-room views stay
  * functional before `feat/whole-home-scene` merges.
  *

@@ -448,7 +448,7 @@ export function normalizeHouse(input) {
 }
 
 /**
- * Project a confirmed House's fixed architectural fixtures into Stillroom's items array
+ * Project a confirmed House's fixed architectural fixtures into Living Blueprint's items array
  * without duplicating fixtures or discarding movable furniture.
  */
 export function mergeHouseFixturesIntoItems(house, existingItems = []) {
@@ -498,7 +498,7 @@ export function syncHouseObjects(house, items = []) {
 }
 
 /**
- * Backward-compatibility adapter: wraps a single Stillroom room into a valid 1-room House.
+ * Backward-compatibility adapter: wraps a single Living Blueprint room into a valid 1-room House.
  */
 export function roomToHouse(
   room = ROOM,

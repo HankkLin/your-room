@@ -155,7 +155,7 @@ export function canModifyObject(target, operationType) {
 
 /**
  * Normalize either a canonical FixedFixture / SceneObject (position: [x,y,z], rotation: [0,yawRad,0])
- * or a Stillroom flat item (x, z, rotation in degrees) into a unified renderable SceneObject.
+ * or a Living Blueprint flat item (x, z, rotation in degrees) into a unified renderable SceneObject.
  * @param {object} item
  * @returns {object}
  */
