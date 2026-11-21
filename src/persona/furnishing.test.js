@@ -69,6 +69,10 @@ test("unavailable, unaffordable, unplaceable and unauthorized changes fail befor
   assert.throws(() => previewFurnishing(noStock, proposal({ ...add, candidateId: live.variantId + "|" + live.sellerDomain })), /unknown/);
   const expensive = prepareFurnishing({ ...options, budget: 10 });
   assert.throws(() => previewFurnishing(expensive, proposal()), /budget/);
+  const itemBudget = prepareFurnishing({ ...options, styleBrief: { styles: [], colors: [], materials: [], priorities: [],
+    budget: { amount: 12000, currency: "USD" }, roomIntents: { "room-1": [{ kind: "desk", query: "oak desk", maxPriceMinor: 29998 }] } },
+    liveCandidates: [live] });
+  assert.throws(() => previewFurnishing(itemBudget, proposal({ ...add, candidateId: live.variantId + "|" + live.sellerDomain })), /item budget/);
   const cramped = prepareFurnishing({ ...options, project: { ...project, room: { ...ROOM, width: 0.5, depth: 0.5 } } });
   assert.throws(() => previewFurnishing(cramped, proposal()), /no valid placement/);
   for (const edit of [{ type: "remove" }, { type: "move" }, { priceMinor: 1 }, { position: [1, 0, 2] }, { roomId: "other" }]) {

@@ -1,4 +1,6 @@
 import { productAssetFields } from "../shopify/product-assets.js";
+import { productDestination, shopifyHttpsUrl, variantBuyDestination } from "../shopify/destinations.js";
+export { shopifyHttpsUrl };
 
 // Shopify returns money in minor currency units. Scene dimensions are always in meters.
 const variantPattern = /^gid:\/\/shopify\/ProductVariant\/[A-Za-z0-9_-]{1,128}$/;
@@ -11,19 +13,9 @@ export function productCandidateId(ref) {
   return ref.variantId + "|" + ref.sellerDomain.toLowerCase();
 }
 
-export function shopifyHttpsUrl(value) {
-  if (typeof value !== "string" || !/^https:\/\//i.test(value) || /[\\\s\u0000-\u001f\u007f]/.test(value)) return null;
-  try {
-    const parsed = new URL(value);
-    return parsed.hostname && !parsed.username && !parsed.password ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function productImage(media) {
-  if (!Array.isArray(media)) return null;
-  return media.map((item) => shopifyHttpsUrl(item?.type === "image" ? item.url : item?.preview?.url)).find(Boolean) ?? null;
+function productImages(media) {
+  if (!Array.isArray(media)) return [];
+  return media.map((item) => shopifyHttpsUrl(item?.type === "image" ? item.url : item?.preview?.url)).filter(Boolean);
 }
 
 function deliveryEstimate(variant) {
@@ -57,14 +49,21 @@ export function createProductCandidate(product, variant) {
   const currency = typeof variant.price?.currency === "string" && /^[A-Z]{3}$/.test(variant.price.currency) ? variant.price.currency : null;
   const amount = variant.price?.amount;
   const assets = productAssetFields(product, variant);
+  const storefrontUrl = shopifyHttpsUrl(variant.seller.url);
+  const seller = { ...ref, storefrontUrl };
+  const priceMinor = currency && Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
+  const available = typeof variant.availability?.available === "boolean" ? variant.availability.available : null;
+  const imageUrls = [...new Set([...productImages(variant.media), ...productImages(product.media)])];
   return {
     id, productId: textValue(variant.seller_product_id) ?? textValue(product.id),
     ...ref, title, variantTitle: options.join(" / ") || (variantTitle !== title ? variantTitle : null),
-    merchant: textValue(variant.seller.name),
-    priceMinor: currency && Number.isSafeInteger(amount) && amount >= 0 ? amount : null,
-    currency, available: typeof variant.availability?.available === "boolean" ? variant.availability.available : null,
-    productUrl: shopifyHttpsUrl(variant.url), imageUrl: productImage(variant.media) ?? productImage(product.media),
-    deliveryEstimate: deliveryEstimate(variant), dimensions: null, dimensionsSource: null, ...assets,
+    merchant: textValue(variant.seller.name), merchantId: textValue(variant.seller.id), storefrontUrl,
+    priceMinor, currency, available, availableForSale: available,
+    price: priceMinor === null ? null : priceMinor / 10 ** new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits,
+    productUrl: productDestination(variant.url, seller), checkoutUrl: variantBuyDestination(variant.checkout_url, seller),
+    imageUrls, imageUrl: imageUrls[0] ?? null, source: "shopify",
+    deliveryEstimate: deliveryEstimate(variant), dimensions: null, dimensionsSource: null,
+    dimensionSource: assets.dimensionsSource ?? null, modelUrl: null, ...assets,
   };
 }
 

@@ -261,7 +261,7 @@ async function openSavedMerchants(page, handlers = {}) {
   await page.locator("#shop").click();
   // Existing projects may have several placed rows with the same variant and no saved price.
   const rows = [lamp, lamp, shade, rug].map((p, i) => ({
-    id: `saved-${i}`, name: p.title, shopify: lineFor(p).ref,
+    id: `saved-${i}`, name: p.title, shopify: lineFor(p).ref, url: "https://unrelated.example/old-saved-product",
   }));
   await page.evaluate(rows => {
     const key = "living-blueprint.project.v1";
@@ -368,6 +368,7 @@ test("a merchant lookup outage on reload leaves the other merchant ready", async
       : { json: { products: [rug] } },
   });
   await expect(page.getByText(/Catalog temporarily unavailable/)).toBeVisible();
+  await expect(a.locator("a[href*='unrelated.example']")).toHaveCount(0);
   await expect(a.getByRole("button", { name: "Start checkout" })).toBeDisabled();
   await all.click();
   await expect(b.getByRole("link", { name: "Continue to Shopify checkout" })).toHaveAttribute("href", rugCheckout);
@@ -465,6 +466,7 @@ test("a previously saved catalog layout offers Shopify checkout separately from 
   const variantId = "gid://shopify/ProductVariant/41588406419527";
   const shopify = { sellerDomain, variantId };
   const product = { ...shopify, title: "Form Coffee Table", merchant: "Sundays", variantTitle: "American Walnut",
+    storefrontUrl: "https://www.sundays-company.com",
     productUrl: "https://www.sundays-company.com/products/form-coffee-table-walnut?variant=41588406419527",
     available: true, currency: "USD", priceMinor: 67500 };
   const continueUrl = "https://shop.app/checkouts/review-fixture";

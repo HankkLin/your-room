@@ -47,6 +47,7 @@ import { createCandidateSession } from "./src/shopify/candidate-session.js";
 import { catalogCheckoutRow } from "./src/shopify/catalog-checkout.js";
 import { createCandidatePlacement, refreshPatchCandidates, savedProductsForPatch, savedShopifyRow } from "./src/shopify/scene-candidate.js";
 import { mountShopifyPicker } from "./src/components/catalog/shopify-picker.js";
+import { mountDesignSearch } from "./src/components/catalog/design-search.js";
 import { createShoppingList } from "./src/components/catalog/shopping-list.js";
 import { dimensionLabel } from "./src/shopify/product-assets.js";
 import { formatShopifyMoney } from "./src/components/catalog/shopify-ui.js";
@@ -142,6 +143,10 @@ let clearCatalog;
 let quoteRefresh;
 const dialog = $("#dialog");
 const candidateSession = createCandidateSession();
+function currentRedesignCandidates() {
+  return getCandidateProducts({ candidateSnapshot: candidateSession.read(), sceneItems: state.items,
+    getQuote: ref => shopifyQuotes.get(ref) });
+}
 const shopifyQuotes = createShopifyQuotes(() => {
   if (stage === "shop") shoppingList.render();
   if (stage === "tour") render();
@@ -150,7 +155,7 @@ const furnishingPanel = $("#household-furnishing");
 const resetFurnishing = mountFurnishingPanel(furnishingPanel, {
   getContext: () => prepareFurnishing({
     project: state, style: draftStyle, brief: $("#brief").value.trim(), budget: $("#budget").valueAsNumber,
-    reference, liveCandidates: furnishingCandidatesFromSession(candidateSession.read()), getQuote: (ref) => shopifyQuotes.get(ref),
+    reference, styleBrief: designSearch.getBrief(), liveCandidates: furnishingCandidatesFromSession(candidateSession.read()), getQuote: (ref) => shopifyQuotes.get(ref),
   }),
   refreshRetained: (signal) => shopifyQuotes.refresh(
     state.items.filter((item) => !item.owned && item.shopify).map((item) => item.shopify), { signal },
@@ -177,7 +182,17 @@ $("#furnishing-shopify").onclick = () => {
   });
   $("#modal-body input").focus();
 };
-$("#style-form").addEventListener("input", resetFurnishing);
+let editedDesignBudget = false;
+const designSearch = mountDesignSearch($("#design-discovery"), {
+  session: candidateSession, onChange: resetFurnishing,
+  getContext: () => ({ prompt: $("#brief").value.trim(), rooms: listPersonaRooms(state),
+    budgetOverride: editedDesignBudget ? $("#budget").valueAsNumber : undefined, budget: $("#budget").valueAsNumber,
+    existingPieces: state.items }),
+});
+$("#style-form").addEventListener("input", event => {
+  if (event.target.id === "budget") editedDesignBudget = true;
+  designSearch.reset();
+});
 const shoppingList = createShoppingList({
   root: $("#saved-products"),
   intro: $("#shop-intro"),
@@ -401,7 +416,7 @@ async function handleProposeRedesign(scenarioId) {
   try {
     const outcome = await executeStudioRedesign({
       scenarioId, baseline, items: state.items,
-      candidateProducts: getCandidateProducts({ candidateSnapshot: candidateSession.read() }),
+      candidateProducts: currentRedesignCandidates(),
     });
     if (pendingTwinReview !== review || !isCurrentRun(baseline)) return;
     if (!outcome.accepted || !outcome.afterItems || !outcome.afterHouse) {
@@ -752,6 +767,7 @@ function commit(next) {
   render();
 }
 function syncForm() {
+  editedDesignBudget = false;
   draftStyle = state.style;
   pickedStyle = false;
   reference = state.reference || null;
@@ -760,7 +776,7 @@ function syncForm() {
   renderDraft();
 }
 function renderDraft() {
-  resetFurnishing();
+  designSearch.reset();
   $("#styles").innerHTML = Object.entries(palettes)
     .map(
       ([label, colors]) =>
@@ -1322,6 +1338,8 @@ function updateWalkControls() {
       : "Select furniture in the room to move, rotate, replace, or save it.";
 }
 function markStage(next) {
+  if (next === "design") designSearch.enter();
+  else if (stage === "design") designSearch.leave();
   if (next !== stage) cancelTwinReview();
   $("#studio-replay-panel").hidden = next !== "tour" || !(state.importedHouse || state.house);
   resetFurnishing();
@@ -1389,6 +1407,7 @@ function navigate(next, { householdDraft } = {}) {
   window.scrollTo(0, 0);
 }
 function loadWholeHomeDemo() {
+  candidateSession.clear();
   studioReplay.reset();
   cancelTwinReview();
   hasProject = true;
@@ -1435,6 +1454,7 @@ function beginSetup(fresh = false) {
       const importedHouse = sample ? null : (next.importedHouse ?? null);
       const changedHouse = importedHouse !== (state.importedHouse ?? null);
       const newProject = fresh || changedHouse;
+      if (newProject || sample) candidateSession.clear();
       if (!importedHouse && newProject) clearConfirmedImportedHouse();
       const items = importedHouse
         ? mergeHouseFixturesIntoItems(importedHouse, next.items || [])
@@ -1931,7 +1951,7 @@ window.__livingBlueprint = {
   captureStudioLayout: (house = activeHouse(), items = state.items) =>
     captureStudioLayout(house, items),
   runStudioReplay,
-  getCandidateProducts: () => getCandidateProducts({ candidateSnapshot: candidateSession.read() }),
+  getCandidateProducts: currentRedesignCandidates,
   proposeRedesign: (scenarioId = demoControls.getState().scenarioId) =>
     handleProposeRedesign(scenarioId),
   connectSimulationPlayback(payload = {}) {

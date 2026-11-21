@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { createProductCandidate, productCandidateId, shopifyHttpsUrl as httpsUrl } from "../contracts/product.js";
 import { recommendProductCandidate } from "../agents/product-recommendation.js";
+import { checkoutDestination } from "./destinations.js";
+import { probeDestination, verifyRedirectChain, verifyResponseDestinations } from "./verify-destinations.js";
 
 const endpoint = "https://mcp.shop.com/";
 const protocolVersion = "2026-07-28";
@@ -134,6 +136,10 @@ async function callShopTool(fetchImpl, name, args, signal) {
     if (jsonrpc !== "2.0" || id !== 1 || error || !result) throw failure();
 
     const document = result.structuredContent;
+    const responseShop = result._meta?.["com.shopify/shop"];
+    if (creatingCheckout && typeof responseShop === "string" && responseShop.toLowerCase() !== args.shop.toLowerCase()) {
+      throw checkoutFailure();
+    }
     if (result.isError || document?.ucp?.status === "error") {
       const info = result._meta?.["com.shopify/error"];
       const codes = list(document?.messages).filter((message) => message?.type === "error")
@@ -171,19 +177,26 @@ function productsFrom(document) {
   return document.products;
 }
 
-async function searchProducts(call, { query: rawQuery, modelsOnly }) {
+async function searchProducts(call, { query: rawQuery, modelsOnly, maxPriceMinor }) {
   const query = textValue(rawQuery);
   if (!query || query.length > maxQueryLength) {
     throw new ShopifyApiError(400, `Enter a product search of 1 to ${maxQueryLength} characters.`);
   }
+  if (maxPriceMinor != null && (!Number.isSafeInteger(maxPriceMinor) || maxPriceMinor < 0)) {
+    throw new ShopifyApiError(400, "Enter a valid product budget.");
+  }
+  const filters = { ...(modelsOnly === true ? { media: [{ type: "model_3d" }] } : {}),
+    ...(maxPriceMinor != null ? { price: { max: maxPriceMinor } } : {}) };
   const document = await call("search_catalog", {
     catalog: { query, context, pagination: { limit: searchLimit },
-      ...(modelsOnly === true ? { filters: { media: [{ type: "model_3d" }] } } : {}) },
+      ...(Object.keys(filters).length ? { filters } : {}) },
   });
   const uniqueProducts = new Map();
   for (const item of productsFrom(document)) {
     for (const variant of list(item?.variants)) {
       const product = createProductCandidate(item, variant);
+      if (maxPriceMinor != null && (product?.currency !== context.currency ||
+          !Number.isSafeInteger(product.priceMinor) || product.priceMinor > maxPriceMinor)) continue;
       if (product && !uniqueProducts.has(product.id)) uniqueProducts.set(product.id, product);
       if (uniqueProducts.size >= maxLookupRefs) break;
     }
@@ -257,21 +270,13 @@ function readCheckoutLines({ ref, lines }) {
   });
 }
 
-function checkoutDestination(raw, products) {
-  const url = httpsUrl(raw);
-  if (!url) return null;
-  const { hostname, pathname, port } = new URL(url);
-  if (port) return null;
-  const checkoutPath = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:checkouts?(?:\/|$)|cart\/c\/)/i.test(pathname);
-  if (hostname === "shop.app" || hostname === "pay.shopify.com" || hostname === "checkout.shopify.com") {
-    return checkoutPath || pathname.startsWith("/pay/") ? url : null;
-  }
-  const merchantHost = products.some(product => hostname === product.sellerDomain.toLowerCase() ||
-    (product.productUrl && hostname.replace(/^www\./, "") === new URL(product.productUrl).hostname.replace(/^www\./, "")));
-  return merchantHost && checkoutPath ? url : null;
+function matchesCheckoutSeller(seller, product) {
+  if (seller?.domain != null && (typeof seller.domain !== "string" ||
+      seller.domain.toLowerCase() !== product.sellerDomain.toLowerCase())) return false;
+  return seller?.id == null || product.merchantId == null || seller.id === product.merchantId;
 }
 
-async function startCheckout(call, input) {
+async function startCheckout(call, input, probe, signal) {
   const lines = readCheckoutLines(input);
   const quotes = await Promise.all(lines.map(({ ref }) => findVariant(call, ref)));
   const warnings = quotes.flatMap((quote) => quote.warnings);
@@ -286,6 +291,7 @@ async function startCheckout(call, input) {
       throw new ShopifyApiError(409, `The merchant has not confirmed the price of ${label}.`, details);
     }
     const expected = lines[index];
+    if (product.currency !== products[0].currency) throw new ShopifyApiError(409, "These variants use different checkout currencies.", details);
     if (expected.currency && (expected.currency !== product.currency || expected.priceMinor !== product.priceMinor)) {
       throw new ShopifyApiError(409, `The price of ${label} changed. Review the updated price and start checkout again.`, details);
     }
@@ -299,9 +305,9 @@ async function startCheckout(call, input) {
     },
     meta: { "idempotency-key": randomUUID() },
   });
-  const continueUrl = checkoutDestination(document.continue_url, products);
+  const continueUrl = checkoutDestination(document.continue_url, products[0]);
   const currency = validCurrency(document.currency);
-  if (!continueUrl || !currency || !Array.isArray(document.line_items) ||
+  if (!continueUrl || !currency || !matchesCheckoutSeller(document.seller, products[0]) || !Array.isArray(document.line_items) ||
       !["incomplete", "requires_escalation", "ready_for_complete"].includes(document.status) ||
       !Array.isArray(document.totals)) {
     throw checkoutFailure();
@@ -309,7 +315,7 @@ async function startCheckout(call, input) {
   for (const line of document.line_items) {
     const id = line?.item?.id;
     const expected = expectedLines.get(id);
-    if (!expected || expected.quantity !== line.quantity) throw checkoutFailure();
+    if (!expected || expected.quantity !== line.quantity || !matchesCheckoutSeller(line.item.seller, expected.product)) throw checkoutFailure();
     if (expected.currency && (expected.currency !== currency ||
         (line.item.price !== undefined && line.item.price !== expected.priceMinor))) {
       warnings.push({ text: `The merchant changed the price or currency for ${expected.product.title} while creating checkout. Review the merchant totals before continuing.` });
@@ -322,13 +328,16 @@ async function startCheckout(call, input) {
     if (!label || !Number.isSafeInteger(total.amount)) throw checkoutFailure();
     return { label, amountMinor: total.amount };
   });
-  return {
+  if (!await verifyRedirectChain(continueUrl, url => checkoutDestination(url, products[0]), probe, signal)) {
+    throw new ShopifyApiError(502, "Shopify created the checkout, but its destination could not be verified. If available, use the verified merchant product link.", { uncertain: true });
+  }
+  return verifyResponseDestinations({
     continueUrl,
     currency,
     totals,
     links: linksFrom(document.links),
     warnings: [...warnings, ...warningsFrom(document, ["warning", "error", "info"])],
-  };
+  }, probe, signal, products);
 }
 
 async function readBody(request) {
@@ -358,7 +367,7 @@ function respond(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_000, generateRecommendation } = {}) {
+export function createShopifyApiMiddleware({ fetchImpl = fetch, probe = probeDestination, timeoutMs = 12_000, generateRecommendation } = {}) {
   const routes = new Map([
     [`${apiPrefix}search`, searchProducts],
     [`${apiPrefix}recommend`, async (call, input) => {
@@ -373,7 +382,7 @@ export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_0
     }],
     [`${apiPrefix}variant`, (call, { ref }) => findVariant(call, readRef(ref))],
     [`${apiPrefix}lookup`, lookupProducts],
-    [`${apiPrefix}checkout`, startCheckout],
+    [`${apiPrefix}checkout`, (call, input, signal) => startCheckout(call, input, probe, signal)],
   ]);
 
   return async (request, response, next) => {
@@ -395,12 +404,15 @@ export function createShopifyApiMiddleware({ fetchImpl = fetch, timeoutMs = 12_0
       const body = await readBody(request);
       const signal = AbortSignal.timeout(timeoutMs);
       const call = (name, args) => callShopTool(fetchImpl, name, args, signal);
-      const result = await route(call, body);
+      const result = await route(call, body, signal);
+      if (route !== routes.get(apiPrefix + "checkout")) await verifyResponseDestinations(result, probe, signal);
       respond(response, 200, result);
     } catch (error) {
       if (error instanceof ShopifyApiError || error.name === "ProductRecommendationError") {
         if (error.details?.retryAfter) response.setHeader("Retry-After", String(error.details.retryAfter));
-        return respond(response, error.status, { error: error.message, ...error.details });
+        const details = { error: error.message, ...error.details };
+        await verifyResponseDestinations(details, probe, AbortSignal.timeout(4000));
+        return respond(response, error.status, details);
       }
       respond(response, 500, { error: "The Shopify service could not complete the request." });
     }

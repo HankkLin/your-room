@@ -1,5 +1,7 @@
 import { productCandidateId } from "../../contracts/product.js";
 import { shopifyRequest } from "../../shopify/shopify-client.js";
+import { buildCheckoutPlan } from "../../shopify/checkout-plan.js";
+import { productDestination, checkoutDestination, merchantInfoDestination } from "../../shopify/destinations.js";
 import { formatShopifyMoney, renderShopifyWarnings, shopifyHttpsUrl } from "./shopify-ui.js";
 
 function element(tag, className, text) {
@@ -36,7 +38,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       messages.append(element("p", "muted", loading ? "Refreshing Shopify prices and availability…" : error));
     if (warnings?.length) {
       const notice = element("div");
-      renderShopifyWarnings(notice, warnings);
+      renderShopifyWarnings(notice, warnings, (current?.savedProducts ?? []).map(row => quotes.get(row.shopify)));
       messages.append(notice);
     }
   }
@@ -48,7 +50,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     if (attempt.error) panel.append(element("p", "muted", attempt.error));
     if (attempt.warnings?.length) {
       const warnings = element("div");
-      renderShopifyWarnings(warnings, attempt.warnings);
+      renderShopifyWarnings(warnings, attempt.warnings, [attempt.seller]);
       panel.append(warnings);
     }
     if (attempt.totals?.length) {
@@ -60,7 +62,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       if (summary.childElementCount) panel.append(summary);
     }
     for (const { label, url } of attempt.links ?? []) {
-      const href = shopifyHttpsUrl(url);
+      const href = merchantInfoDestination(url, attempt.seller);
       if (href) panel.append(externalLink(href, label, "text-btn"));
     }
     if (attempt.continueUrl)
@@ -84,7 +86,8 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
         ? formatUsd(numericPrice)
         : null;
     const photoUrl = shopifyHttpsUrl((live ? product?.imageUrl : product?.photo) ?? row.photo);
-    const productUrl = shopifyHttpsUrl((live ? product?.productUrl : product?.url) ?? row.url);
+    const productUrl = live && productCandidateId(product) === productCandidateId(row.shopify)
+      ? productDestination(product?.productUrl, product) : null;
     const card = element("article", "shop-card");
     const photo = element("div", "shop-photo");
     if (photoUrl) {
@@ -98,6 +101,8 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     const body = element("div", "shop-card-body");
     body.append(element("span", "merchant", merchant), element("h2", null, title));
     if (variant && variant !== "Default Title") body.append(element("p", "variant", variant));
+    if (row.roomLabel) body.append(element("p", "shop-card-meta", row.roomLabel));
+    if (row.suggestedReason) body.append(element("p", "shop-why-suggested", row.suggestedReason));
     if (price) body.append(element("strong", null, price));
     if (live && !price && !refreshing) body.append(element("p", "variant", "Price unconfirmed"));
     if (live && row.savedPrice && price &&
@@ -127,6 +132,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     }
     if (productUrl)
       footer.append(externalLink(productUrl, `View product at ${merchant} ↗`, "text-btn"));
+    else if (!refreshing) footer.append(element("span", "muted", "Product link unverified"));
     const remove = element("button", "text-btn", "Remove");
     remove.type = "button";
     remove.dataset.unsave = row.id;
@@ -134,26 +140,6 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     body.append(footer);
     card.append(photo, body);
     return card;
-  }
-
-  function checkoutGroup(entries) {
-    const variants = new Map();
-    let ready = true;
-    for (const { row, product } of entries) {
-      if (excluded.has(row.id)) continue;
-      const { variantId } = row.shopify;
-      const quantity = row.quantity ?? 1;
-      let line = variants.get(variantId);
-      if (!line) {
-        line = { ref: row.shopify, quantity: 0, priceMinor: product?.priceMinor, currency: product?.currency };
-        variants.set(variantId, line);
-      }
-      line.quantity += quantity;
-      if (product?.available !== true || !formatShopifyMoney(line.priceMinor, line.currency) ||
-          !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isSafeInteger(line.quantity)) ready = false;
-    }
-    const lines = [...variants.values()];
-    return { entries, lines, signature: JSON.stringify(lines), ready: ready && lines.length > 0 };
   }
 
   function canStart(domain, group) {
@@ -173,6 +159,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     start.dataset.checkout = domain;
     start.disabled = !canStart(domain, group);
     section.append(start);
+    if (group.reason && !refreshing) section.append(element("p", "muted", group.reason));
     const attempt = checkoutAttempts.get(domain);
     if (attempt) section.append(renderCheckout(attempt));
     return section;
@@ -204,7 +191,13 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       if (!byMerchant.has(domain)) byMerchant.set(domain, []);
       byMerchant.get(domain).push(entry);
     }
-    groups = new Map([...byMerchant].map(([domain, entries]) => [domain, checkoutGroup(entries)]));
+    const selectedRows = saved.map(({ row }) => row).filter(row => !excluded.has(row.id));
+    const plan = buildCheckoutPlan({ selectedRows, quotes });
+    const selected = new Map(plan.groups.map(group => [group.sellerDomain, group]));
+    groups = new Map([...byMerchant].map(([domain, entries]) => {
+      const group = selected.get(domain) ?? { lines: [], ready: false };
+      return [domain, { ...group, entries, signature: JSON.stringify(group.lines) }];
+    }));
     for (const [domain, attempt] of checkoutAttempts) {
       const group = groups.get(domain);
       if (!group || (!attempt.error && (attempt.signature !== group.signature || !group.ready))) clearAttempt(domain);
@@ -243,9 +236,10 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
     try {
       const result = await shopifyRequest("checkout", { lines }, { signal: controller.signal });
       if (controller.signal.aborted) return;
-      const continueUrl = shopifyHttpsUrl(result.continueUrl);
+      const seller = quotes.get(lines[0].ref);
+      const continueUrl = checkoutDestination(result.continueUrl, seller);
       checkoutAttempts.set(domain, continueUrl
-        ? { ...result, continueUrl, signature }
+        ? { ...result, continueUrl, signature, seller }
         : { error: "The merchant did not provide a checkout link.", warnings: result.warnings, uncertain: true, signature });
     } catch (error) {
       if (controller.signal.aborted) return;

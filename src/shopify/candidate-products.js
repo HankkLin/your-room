@@ -1,5 +1,6 @@
 import { catalog } from "../../model.js";
 import { toRedesignCandidate } from "./scene-candidate.js";
+import { productCandidateId } from "../contracts/product.js";
 import { extractVariantIdFromProductUrl } from "../contracts/product.js";
 export { extractVariantIdFromProductUrl };
 
@@ -19,9 +20,11 @@ export { extractVariantIdFromProductUrl };
  *
  * @param {object} [options]
  * @param {object} [options.candidateSnapshot] Current catalog results, kept separate from placed pieces.
+ * @param {Array<object>} [options.sceneItems] Existing pieces whose current quotes may also be used.
+ * @param {Function} [options.getQuote] Reads a current exact variant from the existing Shopify quote cache.
  * @returns {Array<object>}
  */
-export function getCandidateProducts({ candidateSnapshot } = {}) {
+export function getCandidateProducts({ candidateSnapshot, sceneItems = [], getQuote = () => null } = {}) {
   const candidates = catalog.map((entry) => {
     const variantId =
       entry.variantId || extractVariantIdFromProductUrl(entry.url) || null;
@@ -54,8 +57,21 @@ export function getCandidateProducts({ candidateSnapshot } = {}) {
     };
   });
 
-  if (!candidateSnapshot || !(candidateSnapshot.expiresAt > Date.now()) || !Array.isArray(candidateSnapshot.products)) return candidates;
-  const live = candidateSnapshot.products.map(product => toRedesignCandidate(product, candidateSnapshot.kind)).filter(Boolean);
+  const live = new Map();
+  if (candidateSnapshot?.expiresAt > Date.now() && Array.isArray(candidateSnapshot.products)) {
+    for (const row of candidateSnapshot.products) {
+      const candidate = toRedesignCandidate(row, row.kind ?? candidateSnapshot.kind);
+      if (candidate) live.set(candidate.id, candidate);
+    }
+  }
+  for (const item of sceneItems) {
+    const key = productCandidateId(item.shopify);
+    if (!key || live.has(key)) continue;
+    const quote = getQuote(item.shopify);
+    if (productCandidateId(quote) !== key) continue;
+    const candidate = toRedesignCandidate(quote, item.kind);
+    if (candidate) live.set(key, candidate);
+  }
   // The Gemini prompt takes a bounded prefix, so put requested live alternatives first.
-  return [...live, ...candidates];
+  return [...live.values(), ...candidates];
 }
