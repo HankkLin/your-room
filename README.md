@@ -6,7 +6,7 @@ Stillroom turns a room photo or a custom floor plan into an editable, shoppable 
 
 Use Node.js 22.12 or newer. Run `npm ci` and `npm run dev`, then open the local address printed by Vite.
 
-For live household generation, copy `.env.example` to `.env.local` and set `GEMINI_API_KEY`. Restart Vite after editing the file. The server checks the models available to the key and selects one suited to structured household generation, preferring Gemini 4 Hydrogen. The sample household works without a key. To test the built app with the local API, run `npm run build` and `npm exec -- vite preview --host 127.0.0.1`.
+For live household generation and replay suggestions, copy `.env.example` to `.env.local` and set `GEMINI_API_KEY`. Restart Vite after editing the file. The server checks the models available to the key and selects one for structured output, preferring Gemini 4 Hydrogen. The sample household and manual replays work without a key. To test the built app with the local API, run `npm run build` and `npm exec -- vite preview --host 127.0.0.1`.
 
 Live Shopify search and checkout use the Vite server in dev and preview. They need internet access to Shop MCP and work without a Shopify API key or buyer sign-in.
 
@@ -32,13 +32,15 @@ To try a live lookup in Studio, open **Add furniture** or **Swap**, choose **Sho
 
 ### Studio replay
 
-Confirm an imported floor plan and save a Household with scheduled activities. In Design or Explore room, choose **Capture baseline**. Move, rotate, or remove furniture in the studio, then choose **Compare current layout**. The panel reports measured path failures, collisions, and congestion for both layouts. A baseline lasts for the current tab session. Saving a different routine or replacing the floor plan requires a new baseline.
+From Room setup, choose **Try blocked-route replay demo** → **Save and continue** → **Explore room** → **Capture baseline**. The five-room Mercer Street Apartment sample starts with a sofa near the Bedroom doorway and an editable morning routine. The baseline records one blocked Bedroom-to-Kitchen trip at 08:05. Choose **Suggest a fix**, review the proposed move, and choose **Approve move**. In the demo, moving the sofa farther into the Bedroom reduces the measured path failures from one to zero. **Undo last change** restores the original furniture position.
 
-Both runs use the same approved activities, resolved times, and canonical room IDs. Each layout captures the actual world-space furniture currently in the studio, with the imported walls, doors, and locked fixtures. Room settings preserve the confirmed whole-home geometry. A confirmed replacement floor plan starts a new household.
+For manual comparison, capture a baseline, move, rotate, or remove furniture, then choose **Compare current layout**. Both runs use the same resolved snapshot of the approved activities and canonical room IDs. The panel reports path failures, collisions, and congestion. A baseline lasts for the current tab session. Saving a different routine or replacing the floorplan requires a new baseline.
+
+The Vite development and preview API at `POST /api/replay/suggest-fix` sends a measured finding and nearby geometry to Gemini. The response contains an explanation and a `scenePatch` with one move in `[x, y, z]` meters. The app checks locks and whole-home placement before showing the preview, then checks them again before saving the move. The new replay measures whether the trip improved.
 
 ## Verification
 
-Run `npm test` for model, floor-plan, simulation, contract, and API tests, `npm run test:e2e` for browser flows, and `npm run build` for the production bundle. Run `node --test life-simulation.test.js` to verify the simulator and replay in isolation. The browser replay test uses the imported sample home and the real simulator. It removes a movable sofa and verifies that the saved Bedroom-to-Kitchen trip changes from blocked to passable. The automated tests run without Gemini credentials. Browser tests use Chrome or the installed Chromium channel selected by `PLAYWRIGHT_CHANNEL`.
+Run `npm test` for model, floorplan, simulation, contract, and API tests, `npm run test:e2e` for browser flows, and `npm run build` for the production bundle. The browser replay tests use the normal demo setup, mock the Gemini endpoint, and run the real simulator. They verify the Bedroom-to-Kitchen improvement, approval and undo, locked fixtures, and invalidation when the layout or routine changes. The automated tests run without Gemini credentials. Browser tests use Chrome or the installed Chromium channel selected by `PLAYWRIGHT_CHANNEL`.
 
 [Asset credits](public/assets/CREDITS.md)
 

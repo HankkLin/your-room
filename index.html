@@ -268,14 +268,27 @@
         <p class="studio-replay-message" id="studio-replay-empty-household" hidden>Save a household with at least one scheduled activity to compare layouts.</p>
         <p class="studio-replay-message" id="studio-replay-status" role="status"></p>
         <div class="studio-replay-summary" id="studio-replay-summary" hidden>
-          <table id="studio-replay-results" aria-label="Before and after results">
+          <table id="studio-replay-results" aria-label="Household replay results">
             <thead>
               <tr><th scope="col">Metric</th><th scope="col">Before</th><th scope="col">After</th></tr>
             </thead>
             <tbody></tbody>
           </table>
-          <ul id="studio-replay-findings" class="studio-replay-findings" aria-label="Blocked routes" hidden></ul>
+          <div>
+            <ul id="studio-replay-findings" class="studio-replay-findings" aria-label="Blocked routes" hidden></ul>
+            <button class="secondary" id="studio-replay-suggest" type="button" hidden>Suggest a fix</button>
+          </div>
         </div>
+        <section class="studio-replay-proposal" id="studio-replay-proposal" aria-labelledby="studio-replay-proposal-title" hidden>
+          <h3 id="studio-replay-proposal-title">Proposed move</h3>
+          <p id="studio-replay-explanation"></p>
+          <p class="studio-replay-message">Gemini suggests this furniture may affect the route. Replay will measure the result.</p>
+          <p id="studio-replay-move"></p>
+          <div class="studio-replay-actions">
+            <button class="primary" id="studio-replay-approve" type="button">Approve move</button>
+            <button class="text-btn" id="studio-replay-dismiss" type="button">Dismiss proposal</button>
+          </div>
+        </section>
       </section>
       <section class="inventory">
         <div class="inventory-head">

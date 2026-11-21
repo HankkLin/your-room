@@ -16,6 +16,8 @@ import { createWholeHomeDemoState } from "./house-demo.js";
 import { icon } from "./icons.js";
 import { openFloorplanImporter } from "./floorplan-import-ui.js";
 import { houseToPrimaryStudioRoom } from "./src/spatial/floorplan-geometry.js";
+import { confirmImportedHouse, importSampleFloorplan } from "./src/spatial/floorplan-importer.js";
+import { createBlockedRouteDemo } from "./src/simulation/studio-replay-demo.js";
 
 const finishes = { oak: "#d0b493", walnut: "#9a7459", stone: "#c3c1b8" };
 const paints = {
@@ -321,6 +323,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       icon("cube") +
       '</span><span><strong>Import a whole-home floorplan</strong><small>Extract multi-room walls, doors, windows, and locked fixtures.</small></span><span class="start-arrow">↗</span><input type="file" id="floorplan-upload" accept="image/png,image/jpeg,image/webp"></label>' +
       '<button class="text-btn sample-photo-link" id="try-sample-floorplan">Try sample whole-home floorplan <span aria-hidden="true">→</span></button>' +
+      '<button class="text-btn sample-photo-link" id="try-replay-demo">Try blocked-route replay demo <span aria-hidden="true">→</span></button>' +
       '<button class="start-option" id="custom-room"><span class="start-symbol">' +
       icon("room") +
       '</span><span><strong>Build a custom room</strong><small>Set the shape, dimensions, and finishes.</small></span><span class="start-arrow">→</span></button>' +
@@ -719,6 +722,17 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       false,
     );
   }
+  function finishFloorplanImport(confirmedHouse, { items = [], householdDraft } = {}) {
+    leave({
+      ...state,
+      roomName: confirmedHouse.name || "Imported Home",
+      room: roomDefaults(houseToPrimaryStudioRoom(confirmedHouse)),
+      roomPhoto: null,
+      importedHouse: confirmedHouse,
+      items,
+      spent: 0,
+    }, false, { householdDraft });
+  }
   function launchFloorplanFlow(initialMode, initialFile = null) {
     ++photoToken;
     openFloorplanImporter({
@@ -730,18 +744,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         render(true);
       },
       onConfirmed(confirmedHouse) {
-        leave(
-          {
-            ...state,
-            roomName: confirmedHouse.name || "Imported Home",
-            room: roomDefaults(houseToPrimaryStudioRoom(confirmedHouse)),
-            roomPhoto: null,
-            importedHouse: confirmedHouse,
-            items: [],
-            spent: 0,
-          },
-          false,
-        );
+        finishFloorplanImport(confirmedHouse);
       },
     });
   }
@@ -756,6 +759,10 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
     }
     if (b.id === "try-sample-floorplan") {
       launchFloorplanFlow("sample");
+      return;
+    }
+    if (b.id === "try-replay-demo") {
+      finishFloorplanImport(confirmImportedHouse(importSampleFloorplan()), createBlockedRouteDemo());
       return;
     }
     if (b.id === "try-sample-photo") {

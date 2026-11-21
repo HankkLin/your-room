@@ -142,6 +142,7 @@ const studioReplay = createStudioReplayPanel($("#studio-replay-panel"), {
     personas: state.personas,
     rooms: listPersonaRooms(state),
   }),
+  commitItems: (items) => commit({ ...state, items }),
 });
 const householdPage = createHouseholdPage($("#household-page"), {
   onSave(personas) {
@@ -770,12 +771,12 @@ window.addEventListener("keydown", (event) => {
   )
     toggleExpanded(false);
 });
-function navigate(next) {
+function navigate(next, { householdDraft } = {}) {
   markStage(next);
   state = { ...state, flowVersion: 2, screen: next };
   if (next === "shop") shoppingList.render(state);
   else if (next === "household") {
-    householdPage.open({ personas: state.personas, rooms: listPersonaRooms(state) });
+    householdPage.open({ personas: householdDraft ?? state.personas, rooms: listPersonaRooms(state) });
   } else {
     enterEditor();
     render();
@@ -809,7 +810,7 @@ function beginSetup(fresh = false) {
     isNew: fresh,
     onCancel: hasProject ? () => navigate(previous) : null,
     readPhoto,
-    onApply(next, { demo: sample = false, wholeHome = false } = {}) {
+    onApply(next, { demo: sample = false, wholeHome = false, householdDraft } = {}) {
       if (wholeHome) {
         loadWholeHomeDemo();
         return;
@@ -837,7 +838,7 @@ function beginSetup(fresh = false) {
       selection = null;
       syncForm();
       const nextStage = sample ? "tour" : newProject ? "household" : "design";
-      navigate(nextStage);
+      navigate(nextStage, { householdDraft });
       if (scene) {
         if (importedHouse) {
           changeView($("#view-3d").disabled ? "plan" : "3d");
