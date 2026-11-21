@@ -235,3 +235,89 @@ test("a Shopify pick that becomes unavailable stays visible and removable", asyn
   await page.reload();
   await expect(card).toHaveCount(0);
 });
+
+// Observe Three's real scene graph through its existing devtools hook.
+async function observeFurniture(page) {
+  await page.addInitScript(() => {
+    globalThis.__THREE_DEVTOOLS__ = new EventTarget();
+    globalThis.__THREE_DEVTOOLS__.addEventListener("observe", ({ detail }) => {
+      if (detail.isScene && !globalThis.studioTestScene) globalThis.studioTestScene = detail;
+    });
+  });
+}
+
+async function renderedFurniture(page, id) {
+  return page.evaluate((id) => {
+    let furniture;
+    globalThis.studioTestScene?.traverse((node) => {
+      if (node.userData.itemId === id) furniture = node;
+    });
+    if (!furniture) return null;
+    furniture.updateWorldMatrix(true, true);
+    const bounds = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    const materials = [];
+    furniture.traverse((mesh) => {
+      if (!mesh.isMesh) return;
+      materials.push(...[mesh.material].flat().map((material) => material.name));
+      mesh.geometry.computeBoundingBox();
+      const box = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+      for (const [i, axis] of ["x", "y", "z"].entries()) {
+        bounds[i] = Math.min(bounds[i], box.min[axis]);
+        bounds[i + 3] = Math.max(bounds[i + 3], box.max[axis]);
+      }
+    });
+    return { modelUrl: furniture.userData.modelUrl ?? null, bounds, materials };
+  }, id);
+}
+
+test("merchant geometry loads at scene scale, survives reload and falls back after a failed load", async ({ page }) => {
+  await observeFurniture(page);
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const modelUrl = "https://cdn.shopify.com/3d/models/fixture.glb";
+  const piece = { ...lamp, modelUrl, modelScope: "variant", dimensionsSource: "merchant",
+    dimensions: { width: 0.42, height: 0.85, depth: 0.40 } };
+  const calls = await mockShopify(page, {
+    search: () => ({ json: { products: [piece], warnings: [] } }),
+    variant: () => ({ json: { product: piece, warnings: [] } }),
+    lookup: () => ({ json: { products: [piece], warnings: [] } }),
+  });
+  await page.route(modelUrl, (route) => route.fulfill({
+    path: "public/assets/SheenChair.glb", contentType: "model/gltf-binary", headers: { "Access-Control-Allow-Origin": "*" },
+  }));
+  await loadDemo(page);
+  await page.getByRole("button", { name: "Swap", exact: true }).click();
+  const dialog = await searchForProduct(page);
+  await dialog.getByRole("button", { name: "Swap piece" }).click();
+  await expect(dialog).toBeHidden();
+  const item = (await project(page)).items.find((item) => item.shopify);
+  expect(item).toMatchObject({ shopify: ref, modelUrl, width: 0.42, height: 0.85, depth: 0.40 });
+  await expect(page.locator("#inventory")).toContainText("Merchant dimensions");
+  const checkMesh = async () => {
+    await expect.poll(async () => (await renderedFurniture(page, item.id))?.modelUrl).toBe(modelUrl);
+    const { bounds, materials } = await renderedFurniture(page, item.id);
+    expect(materials.length).toBeGreaterThan(0);
+    expect(bounds[1]).toBeCloseTo(0, 2);
+    for (const [i, axis] of ["width", "height", "depth"].entries()) {
+      expect(bounds[i + 3] - bounds[i]).toBeGreaterThan(0.01);
+      expect(bounds[i + 3] - bounds[i]).toBeLessThanOrEqual(item[axis] + 0.02);
+    }
+  };
+  await checkMesh();
+  await page.reload();
+  await checkMesh();
+  expect((await project(page)).items.find((i) => i.id === item.id)).toEqual(item);
+  expect(calls).toContainEqual({ endpoint: "variant", body: { ref } });
+
+  await page.unroute(modelUrl);
+  await page.route(modelUrl, (route) => route.fulfill({ status: 404, headers: { "Access-Control-Allow-Origin": "*" } }));
+  const failed = page.waitForResponse((reply) => reply.url() === modelUrl && reply.status() === 404);
+  await page.reload();
+  await failed;
+  await expect.poll(async () => (await renderedFurniture(page, item.id))?.materials.length).toBeGreaterThan(0);
+  expect((await renderedFurniture(page, item.id)).modelUrl).toBeNull();
+  await page.locator(`[data-item="${item.id}"]`).click();
+  await page.getByRole("button", { name: "Rotate", exact: true }).click();
+  expect((await project(page)).items.find((i) => i.id === item.id).rotation).toBe((item.rotation + 90) % 360);
+  expect(errors).toEqual([]);
+});

@@ -625,7 +625,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
       const n = mergeDetection(list || []);
       detection = "done";
       message = n
-        ? "Review the detected pieces. Their initial positions are approximate and can be adjusted in the editor."
+        ? "Review the photo-derived previews. Their dimensions and floor positions are estimated."
         : "No furniture was recognized. Add pieces below or continue with an empty room.";
     } catch {
       if (!active || photoToken !== token) return;
@@ -693,6 +693,10 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
             fitItem(
               {
                 ...item,
+                // A single view estimates the front silhouette. Keep depth at the furniture-type estimate.
+                width: Number.isFinite(hint.aspectRatio) && hint.aspectRatio > 0
+                  ? clamp(item.height * hint.aspectRatio, item.width * 0.75, item.width * 1.25)
+                  : item.width,
                 x: (clamp(hint.x, 0, 1) - 0.5) * draft.room.width,
                 z: (clamp(hint.y, 0, 1) - 0.5) * draft.room.depth,
               },
@@ -703,6 +707,7 @@ export function openSetup({ state, isNew, onApply, onCancel, readPhoto }) {
         items.push({
           ...placed,
           color: hint?.color ?? placed.color,
+          ...(piece.detected && hint ? { photoPreview: true, dimensionsSource: "estimated" } : {}),
           name: piece.name || kinds[piece.kind],
           id: uid(),
         });

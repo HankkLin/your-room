@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { productAssetFields } from "./product-assets.js";
 
 const endpoint = "https://mcp.shop.com/";
 const protocolVersion = "2026-07-28";
@@ -124,6 +125,7 @@ function normalizeProduct(product, variant) {
     available: typeof variant.availability?.available === "boolean" ? variant.availability.available : null,
     imageUrl: productImage(variant.media) ?? productImage(product.media),
     productUrl: httpsUrl(variant.url),
+    ...productAssetFields(product, variant),
   };
 }
 
@@ -223,13 +225,14 @@ function productsFrom(document) {
   return document.products;
 }
 
-async function searchProducts(call, { query: rawQuery }) {
+async function searchProducts(call, { query: rawQuery, modelsOnly }) {
   const query = textValue(rawQuery);
   if (!query || query.length > maxQueryLength) {
     throw new ShopifyApiError(400, `Enter a product search of 1 to ${maxQueryLength} characters.`);
   }
   const document = await call("search_catalog", {
-    catalog: { query, context, pagination: { limit: searchLimit } },
+    catalog: { query, context, pagination: { limit: searchLimit },
+      ...(modelsOnly === true ? { filters: { media: [{ type: "model_3d" }] } } : {}) },
   });
   const uniqueProducts = new Map();
   for (const item of productsFrom(document)) {
