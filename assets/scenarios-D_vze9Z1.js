@@ -1,0 +1,1 @@
+export{n as sampleProposal}from"./scenarios-Bl44tzOC.js";

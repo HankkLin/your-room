@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="1020" viewBox="0 0 1120 1020">
+  <defs>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e5e2d7" stroke-width="0.7"/>
+    </pattern>
+    <pattern id="tile" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#d8d4c8" stroke-width="0.9"/>
+    </pattern>
+  </defs>
+
+  <!-- Sheet background -->
+  <rect width="1120" height="1020" fill="#faf8f2"/>
+  <rect x="24" y="24" width="1072" height="972" fill="url(#grid)" stroke="#cdc8ba" stroke-width="1.5"/>
+
+  <!-- Room fills -->
+  <!-- Living Room: [80,80] -> [660,500] (5.8m x 4.2m) -->
+  <rect x="80" y="80" width="580" height="420" fill="#f4efe4"/>
+  <!-- Kitchen: [660,80] -> [1040,500] (3.8m x 4.2m) -->
+  <rect x="660" y="80" width="380" height="420" fill="url(#tile)"/>
+  <!-- Hallway: [80,500] -> [760,620] (6.8m x 1.2m) -->
+  <rect x="80" y="500" width="680" height="120" fill="#efe9dc"/>
+  <!-- Bedroom: [80,620] -> [760,940] (6.8m x 3.2m) -->
+  <rect x="80" y="620" width="680" height="320" fill="#f2ede2"/>
+  <!-- Bathroom: [760,500] -> [1040,940] (2.8m x 4.4m) -->
+  <rect x="760" y="500" width="280" height="440" fill="url(#tile)"/>
+
+  <!-- Fixed Fixtures -->
+  <!-- Kitchen Counter + Sink + Stove -->
+  <rect x="975" y="140" width="65" height="280" fill="#e2dacb" stroke="#625d52" stroke-width="2"/>
+  <rect x="790" y="80" width="250" height="62" fill="#e2dacb" stroke="#625d52" stroke-width="2"/>
+  <!-- Kitchen Sink [850, 111] -->
+  <rect x="815" y="92" width="76" height="42" rx="4" fill="#f7f6f2" stroke="#5a564c" stroke-width="1.8"/>
+  <circle cx="853" cy="113" r="4" fill="#5a564c"/>
+  <!-- Stove [1007, 210] -->
+  <rect x="980" y="172" width="56" height="76" fill="#ece8de" stroke="#45423a" stroke-width="2"/>
+  <circle cx="996" cy="194" r="9" fill="none" stroke="#45423a" stroke-width="1.6"/>
+  <circle cx="1020" cy="194" r="9" fill="none" stroke="#45423a" stroke-width="1.6"/>
+  <circle cx="996" cy="226" r="9" fill="none" stroke="#45423a" stroke-width="1.6"/>
+  <circle cx="1020" cy="226" r="9" fill="none" stroke="#45423a" stroke-width="1.6"/>
+
+  <!-- Bedroom Built-in Closet [727, 780] -->
+  <rect x="695" y="670" width="65" height="220" fill="#e7dfd0" stroke="#625d52" stroke-width="2" stroke-dasharray="6 3"/>
+  <line x1="727" y1="670" x2="727" y2="890" stroke="#8a8273" stroke-width="1.2"/>
+
+  <!-- Bathroom Toilet [995, 595] -->
+  <rect x="1012" y="572" width="24" height="46" rx="3" fill="#fffdf9" stroke="#5a564c" stroke-width="1.8"/>
+  <ellipse cx="990" cy="595" rx="22" ry="17" fill="#fffdf9" stroke="#5a564c" stroke-width="1.8"/>
+  <!-- Bathroom Sink Vanity [1005, 720] -->
+  <rect x="982" y="675" width="56" height="90" fill="#e5ded0" stroke="#5a564c" stroke-width="1.8"/>
+  <ellipse cx="1008" cy="720" rx="16" ry="22" fill="#fffdf9" stroke="#5a564c" stroke-width="1.6"/>
+  <!-- Bathtub [900, 896] -->
+  <rect x="815" y="856" width="170" height="80" fill="#ebe7dd" stroke="#5a564c" stroke-width="2"/>
+  <rect x="827" y="867" width="146" height="58" rx="18" fill="#fffdf9" stroke="#5a564c" stroke-width="1.6"/>
+
+  <!-- Exterior Walls -->
+  <rect x="80" y="80" width="960" height="860" fill="none" stroke="#2c2e28" stroke-width="12"/>
+
+  <!-- Interior Walls -->
+  <!-- Living / Kitchen wall x=660, y=80..500 -->
+  <line x1="660" y1="80" x2="660" y2="500" stroke="#2c2e28" stroke-width="8"/>
+  <!-- North / Hallway wall y=500, x=80..1040 -->
+  <line x1="80" y1="500" x2="1040" y2="500" stroke="#2c2e28" stroke-width="8"/>
+  <!-- Hallway / Bedroom wall y=620, x=80..760 -->
+  <line x1="80" y1="620" x2="760" y2="620" stroke="#2c2e28" stroke-width="8"/>
+  <!-- Hallway+Bedroom / Bathroom wall x=760, y=500..940 -->
+  <line x1="760" y1="500" x2="760" y2="940" stroke="#2c2e28" stroke-width="8"/>
+
+  <!-- Windows (double-line architectural glazing breaks) -->
+  <!-- Living North Window: center [370, 80], width 220 -->
+  <line x1="260" y1="80" x2="480" y2="80" stroke="#faf8f2" stroke-width="14"/>
+  <line x1="260" y1="76" x2="480" y2="76" stroke="#4f7782" stroke-width="2.5"/>
+  <line x1="260" y1="84" x2="480" y2="84" stroke="#4f7782" stroke-width="2.5"/>
+
+  <!-- Living West Window: center [80, 280], width 160 -->
+  <line x1="80" y1="200" x2="80" y2="360" stroke="#faf8f2" stroke-width="14"/>
+  <line x1="76" y1="200" x2="76" y2="360" stroke="#4f7782" stroke-width="2.5"/>
+  <line x1="84" y1="200" x2="84" y2="360" stroke="#4f7782" stroke-width="2.5"/>
+
+  <!-- Kitchen North Window: center [725, 80], width 90 -->
+  <line x1="680" y1="80" x2="770" y2="80" stroke="#faf8f2" stroke-width="14"/>
+  <line x1="680" y1="76" x2="770" y2="76" stroke="#4f7782" stroke-width="2.5"/>
+  <line x1="680" y1="84" x2="770" y2="84" stroke="#4f7782" stroke-width="2.5"/>
+
+  <!-- Bedroom South Window: center [420, 940], width 200 -->
+  <line x1="320" y1="940" x2="520" y2="940" stroke="#faf8f2" stroke-width="14"/>
+  <line x1="320" y1="936" x2="520" y2="936" stroke="#4f7782" stroke-width="2.5"/>
+  <line x1="320" y1="944" x2="520" y2="944" stroke="#4f7782" stroke-width="2.5"/>
+
+  <!-- Doors (wall gap + swing arc) -->
+  <!-- 1. Entry Exterior Door: [80, 560], width 92 -->
+  <line x1="80" y1="514" x2="80" y2="606" stroke="#efe9dc" stroke-width="14"/>
+  <path d="M 80 514 H 172 A 92 92 0 0 1 80 606" fill="none" stroke="#8b4d36" stroke-width="2"/>
+
+  <!-- 2. Hallway <-> Living Room Door: [320, 500], width 90 -->
+  <line x1="275" y1="500" x2="365" y2="500" stroke="#f4efe4" stroke-width="12"/>
+  <path d="M 275 500 V 410 A 90 90 0 0 1 365 500" fill="none" stroke="#6c5a49" stroke-width="1.8"/>
+
+  <!-- 3. Living Room <-> Kitchen Cased Opening/Door: [660, 310], width 110 -->
+  <line x1="660" y1="255" x2="660" y2="365" stroke="#faf8f2" stroke-width="12"/>
+  <path d="M 660 255 H 770 A 110 110 0 0 1 660 365" fill="none" stroke="#6c5a49" stroke-width="1.8"/>
+
+  <!-- 4. Hallway <-> Kitchen Door: [710, 500], width 82 -->
+  <line x1="669" y1="500" x2="751" y2="500" stroke="#faf8f2" stroke-width="12"/>
+  <path d="M 669 500 V 418 A 82 82 0 0 1 751 500" fill="none" stroke="#6c5a49" stroke-width="1.8"/>
+
+  <!-- 5. Hallway <-> Bedroom Door: [400, 620], width 86 -->
+  <line x1="357" y1="620" x2="443" y2="620" stroke="#f2ede2" stroke-width="12"/>
+  <path d="M 357 620 V 706 A 86 86 0 0 0 443 620" fill="none" stroke="#6c5a49" stroke-width="1.8"/>
+
+  <!-- 6. Hallway <-> Bathroom Door: [760, 560], width 76 -->
+  <line x1="760" y1="522" x2="760" y2="598" stroke="#faf8f2" stroke-width="12"/>
+  <path d="M 760 522 H 836 A 76 76 0 0 1 760 598" fill="none" stroke="#6c5a49" stroke-width="1.8"/>
+
+  <!-- Printed Dimension Lines -->
+  <g stroke="#55584f" stroke-width="1.2" fill="#3a3d35" font-family="Segoe UI, Arial, sans-serif" font-size="14" text-anchor="middle">
+    <!-- Living Room North Wall: 80..660 = 580px = 5.80 m -->
+    <line x1="80" y1="50" x2="660" y2="50"/>
+    <line x1="80" y1="42" x2="80" y2="58"/>
+    <line x1="660" y1="42" x2="660" y2="58"/>
+    <text x="370" y="42" font-weight="600">5.80 m (19' 0")</text>
+
+    <!-- Kitchen North Wall: 660..1040 = 380px = 3.80 m -->
+    <line x1="660" y1="50" x2="1040" y2="50"/>
+    <line x1="1040" y1="42" x2="1040" y2="58"/>
+    <text x="850" y="42" font-weight="600">3.80 m (12' 6")</text>
+
+    <!-- West Exterior Total Depth: 80..940 = 860px = 8.60 m -->
+    <line x1="48" y1="80" x2="48" y2="940"/>
+    <line x1="40" y1="80" x2="56" y2="80"/>
+    <line x1="40" y1="940" x2="56" y2="940"/>
+    <text transform="translate(36 510) rotate(-90)" font-weight="600">8.60 m (28' 3")</text>
+  </g>
+
+  <!-- Room Labels -->
+  <g fill="#2b2e27" font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">
+    <text x="370" y="280" font-size="20" font-weight="700" letter-spacing="0.06em">LIVING ROOM</text>
+    <text x="370" y="304" font-size="13" fill="#63665c">19' 0" × 13' 9" · 5.8 × 4.2 m</text>
+
+    <text x="830" y="295" font-size="19" font-weight="700" letter-spacing="0.06em">KITCHEN</text>
+    <text x="830" y="318" font-size="13" fill="#63665c">12' 6" × 13' 9" · 3.8 × 4.2 m</text>
+
+    <text x="450" y="566" font-size="15" font-weight="700" letter-spacing="0.08em">HALLWAY</text>
+
+    <text x="380" y="775" font-size="20" font-weight="700" letter-spacing="0.06em">BEDROOM</text>
+    <text x="380" y="799" font-size="13" fill="#63665c">22' 4" × 10' 6" · 6.8 × 3.2 m</text>
+
+    <text x="895" y="775" font-size="17" font-weight="700" letter-spacing="0.06em">BATHROOM</text>
+    <text x="895" y="797" font-size="12" fill="#63665c">9' 2" × 14' 5"</text>
+
+    <text x="727" y="785" transform="rotate(-90 727 785)" font-size="11" fill="#5e5a50" font-weight="600">CLOSET</text>
+  </g>
+
+  <!-- Title Block -->
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#4f5249" font-size="12">
+    <text x="80" y="980" font-weight="700">MERCER STREET APARTMENT — WHOLE-HOME SAMPLE FLOORPLAN</text>
+    <text x="1040" y="980" text-anchor="end">SCALE: 100 PX = 1.00 M</text>
+  </g>
+</svg>
