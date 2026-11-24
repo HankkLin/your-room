@@ -227,7 +227,11 @@ export const catalog = [
     height: 0.53,
     style: "Earthy eclectic",
   },
-].map((preview) => ({ ...preview, ...offers[preview.id] }));
+].map((preview) => ({ ...preview, ...offers[preview.id], ...(import.meta.env?.MODE === "portfolio" && { photo: null, modelUrl: null }) }));
+if (import.meta.env?.MODE === "portfolio") catalog.unshift({
+  id: "sample-elm-stool", kind: "table", name: "Mini Elm Wood Stool", store: "Olive Ateliers",
+  price: 35, width: 0.36, depth: 0.32, height: 0.42, color: "#986743", style: "Warm minimal",
+});
 
 export const kindWords = {
   sofa: "sofas?|couch(?:es)?|sectionals?",

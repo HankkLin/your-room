@@ -463,7 +463,7 @@ export function openSetup({ state, isNew, initialStep = null, onFurnitureDraft, 
       esc(error) +
       '</p></section><section class="setup-sample"><div class="sample-preview">' +
       drawing(roomDefaults()) +
-      '<img src="/assets/sample-room.jpg" alt="Sample living room with a sofa and lounge chair" class="sample-room-photo"></div>' +
+      `<img src="${import.meta.env?.BASE_URL ?? "/"}assets/sample-room.jpg" alt="Sample living room with a sofa and lounge chair" class="sample-room-photo"></div>` +
       '<div class="sample-caption"><div><p class="eyebrow">Sample project</p><h2>Brooklyn living room</h2></div><button id="explore-demo" class="secondary">Explore demo <span aria-hidden="true">→</span></button></div></section></div>'
     );
   }

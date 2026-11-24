@@ -464,6 +464,7 @@ export async function executeStudioRedesign({
   state,
   baseline = null,
   candidateProducts = getCandidateProducts({ sceneItems: items }),
+  patchGenerator,
   maxAttempts = 3,
   useFallbackOnFailure = true,
 }) {
@@ -483,6 +484,7 @@ export async function executeStudioRedesign({
     candidateProducts,
     maxAttempts,
     useFallbackOnFailure,
+    patchGenerator,
   });
 
   return describeStudioOutcome(replayResult, { beforeItems, beforeHouse, household, displayPersonas, scenario, environment, candidateProducts });

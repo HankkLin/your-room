@@ -118,7 +118,7 @@ export function createShoppingList({ root, intro, total, catalog, quotes, format
       ? productDestination(product?.productUrl, product) : null;
     const card = element("article", "shop-card");
     const photo = element("div", "shop-photo");
-    if (photoUrl) {
+    if (photoUrl && import.meta.env?.MODE !== "portfolio") {
       const image = element("img");
       image.src = photoUrl;
       image.alt = title;

@@ -98,7 +98,7 @@ function disposeObject(group, preserve = [], disposeTextures = false) {
   for (const texture of textures) texture.dispose();
 }
 
-export function createScene(container, { onSelect = () => {}, onMove = () => {}, onPose = () => {} } = {}) {
+export function createScene(container, { onSelect = () => {}, onMove = () => {}, onPose = () => {}, cameraOnly = false } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   renderer.shadowMap.enabled = true;
@@ -523,7 +523,7 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
   function pointerDown(event) {
     if (event.button !== 0 || drag || lookDrag) return;
     cast(event);
-    const object = furnitureAtPointer();
+    const object = cameraOnly ? null : furnitureAtPointer();
     if (!object && currentView !== 'interior') return;
     event.stopImmediatePropagation();
     canvas.setPointerCapture(event.pointerId);
@@ -712,6 +712,14 @@ export function createScene(container, { onSelect = () => {}, onMove = () => {},
     goToSpot,
     walk,
     projectScreenToFloor,
+    projectFloorToScreen(x, z) {
+      const bounds = canvas.getBoundingClientRect();
+      const view = camera();
+      view.updateMatrixWorld();
+      const projected = new THREE.Vector3(x, 0, z).project(view);
+      return [bounds.left + (1 + projected.x) * bounds.width / 2,
+        bounds.top + (1 - projected.y) * bounds.height / 2];
+    },
     setDragPreview,
     getPose: currentPose,
     setEyePose(x, z, yaw = 0) {

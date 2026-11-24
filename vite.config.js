@@ -9,6 +9,10 @@ import { createShopifyApiMiddleware } from "./src/shopify/shopify-api.js";
 import { createFloorplanApiMiddleware } from "./src/spatial/floorplan-vite-middleware.js";
 
 export default defineConfig(({ command, mode }) => {
+  if (mode === "portfolio") return {
+    base: "/your-room/",
+    build: { outDir: "dist/portfolio", emptyOutDir: true },
+  };
   if (command !== "serve") return {};
 
   const env = loadEnv(mode, process.cwd(), "");

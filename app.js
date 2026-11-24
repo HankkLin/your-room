@@ -116,7 +116,7 @@ const demo = initialState();
 let state = demo;
 let hasProject = false;
 try {
-  const saved = JSON.parse(localStorage.getItem(storageKey));
+  const saved = import.meta.env.MODE === "portfolio" ? null : JSON.parse(localStorage.getItem(storageKey));
   if (
     saved &&
     Array.isArray(saved.items) &&
@@ -448,6 +448,7 @@ async function handleProposeRedesign(scenarioId) {
   try {
     const outcome = await executeStudioRedesign({
       scenarioId, baseline, items: state.items,
+      ...(import.meta.env.MODE === "portfolio" && { patchGenerator: (await import("./portfolio/scenarios.js")).sampleProposal }),
       candidateProducts: currentRedesignCandidates(),
     });
     if (pendingTwinReview !== review || !isCurrentRun(baseline)) return;
@@ -1691,13 +1692,14 @@ window.addEventListener("pointermove", (e) => {
   }
 
   const house = activeHouse();
-  const validObj = resolveDropPlacementNearPoint(
+  let validObj = resolveDropPlacementNearPoint(
     activeRailDrag.basePreviewObj,
     floorPt[0],
     floorPt[1],
     house,
     state.items,
   );
+  if (import.meta.env.MODE === "portfolio" && validObj?.roomId !== "living-room") validObj = null;
   activeRailDrag.validPlacement = validObj;
 
   if (validObj) {
@@ -1724,7 +1726,7 @@ function finishRailPointer(e, canceled = false) {
     suppressNextRailClick = false;
   }, 80);
 
-  if (!dragState.overScene || !dragState.dropPoint) return;
+  if (!dragState.validPlacement || !dragState.dropPoint) return;
   addLibraryCandidateToRoom(dragState.candidateKey, dragState.dropPoint);
   $("#scene")?.focus({ preventScroll: true });
 }
@@ -1982,7 +1984,7 @@ $("#reset-camera").onclick = () => {
 function enterEditor() {
   if (scene) return;
   if (activeHouse()) view = "3d";
-  const handlers = { onSelect: select, onMove: move, onPose: drawPose };
+  const handlers = { onSelect: select, onMove: move, onPose: drawPose, cameraOnly: import.meta.env.MODE === "portfolio" };
   try {
     scene = createScene($("#scene"), handlers);
     scene.setView("interior");
@@ -2568,6 +2570,7 @@ function saveRoomAndOpenShop() {
 }
 $("#tray-review-products").onclick = saveRoomAndOpenShop;
 async function refreshShopifyQuotes() {
+  if (import.meta.env.MODE === "portfolio") return;
   quoteRefresh?.abort();
   const shopping = stage === "shop";
   const rows = shopping ? state.savedProducts ?? [] : state.items;
@@ -2860,3 +2863,27 @@ if (hasProject && state.flowVersion === 4 && state.blueprintStep === "3") {
   const stressStep = state.flowVersion === 2 ? "7" : "6";
   navigate(state.screen, { bpStep: state.screen === "tour" && state.blueprintStep === stressStep ? "6" : null });
 } else beginSetup(true);
+if (import.meta.env.MODE === "portfolio") {
+  const { mountGuide } = await import("./portfolio/guide.js");
+  mountGuide({
+    studio: window.__livingBlueprint,
+    setView: changeView,
+    stopWalking: clearPressedWalkKeys,
+    dataset: () => activePlaybackDataset,
+    restoreMorning(run) {
+      if (!run) {
+        run = runTwinScenario("morning-routine", { house: activeHouse(), items: state.items, state });
+        run.sourceItems = state.items;
+        run.routineSignature = routineSignature();
+      }
+      demoControls.selectScenario("morning-routine");
+      activePlaybackDataset = run;
+      demoControls.setState({ status: "COMPLETE", findings: run.findings, scores: run.scores, canRedesign: true });
+      return run;
+    },
+    previewProposal() {
+      const outcome = pendingTwinReview?.outcome;
+      if (outcome) scene?.showPatchTransition?.(outcome.patchChanges);
+    },
+  });
+}

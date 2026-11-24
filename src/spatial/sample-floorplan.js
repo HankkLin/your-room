@@ -1,4 +1,4 @@
-export const SAMPLE_FLOORPLAN_ASSET_URL = "/assets/sample-floorplan.svg";
+export const SAMPLE_FLOORPLAN_ASSET_URL = `${import.meta.env?.BASE_URL ?? "/"}assets/sample-floorplan.svg`;
 
 /**
  * Deterministic whole-home floorplan extraction candidate matching

@@ -1,5 +1,6 @@
 // Move existing saves to the new project name on first use.
 export function resolveStorageKey(suffix) {
+  if (import.meta.env?.MODE === "portfolio") return `living-blueprint.portfolio.${suffix}`;
   const key = `living-blueprint.${suffix}`;
   const previousKey = `stillroom.${suffix}`;
   if (typeof window === "undefined") return key;

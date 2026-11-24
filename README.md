@@ -10,6 +10,10 @@ For live household generation and replay suggestions, copy `.env.example` to `.e
 
 Live Shopify search and checkout use the Vite server in dev and preview. They need internet access to Shop MCP and work without a Shopify API key or buyer sign-in.
 
+## Guided portfolio preview
+
+For the guided portfolio preview, run `npm run build:portfolio` and `npm run preview:portfolio`, then open [the local tour](http://127.0.0.1:4186/your-room/). This static build uses the studio’s original screens, a guided spotlight, bundled product and redesign examples, and the browser simulation. Run `npm run test:portfolio` after building to exercise the complete tour with desktop, touch, and keyboard controls.
+
 ## The five steps
 
 1. **Room setup** — Upload a room photo, build a custom room, or import a whole-home floor plan. Try the sample floor plan for a repeatable import with no API key. Review and confirm the imported geometry before continuing to Household.

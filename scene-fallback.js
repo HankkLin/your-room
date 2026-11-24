@@ -373,6 +373,11 @@ export function createPlanScene(host, { onSelect, onMove }) {
       return [pt.x, pt.z];
     },
     setDragPreview() {},
+    projectFloorToScreen(x, z) {
+      const rect = canvas.getBoundingClientRect();
+      return [rect.left + width / 2 + (x - (house?.bounds.centerX ?? 0)) * scale,
+        rect.top + height / 2 + (z - (house?.bounds.centerZ ?? 0)) * scale];
+    },
     setLivePlaybackFindings() {},
     setPlaybackFrame({ snapshots = [], visibleRoutes = [], agentMeta = new Map() } = {}) {
       playbackSnapshots = [...snapshots];
